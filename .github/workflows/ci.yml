@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Install native build and smoke dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            build-essential cmake pkg-config python3 shellcheck xvfb xauth \
+            libgl1-mesa-dev libegl1-mesa-dev libgl1-mesa-dri \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
+            libxfixes-dev libxi-dev libxss-dev libxtst-dev libxkbcommon-dev
+      - name: Cache Cargo dependencies and native build
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/
+          key: ${{ runner.os }}-${{ runner.arch }}-native-${{ hashFiles('rust-toolchain.toml', 'Cargo.toml', 'Cargo.lock', 'third_party/**') }}
+      - name: Select repository toolchain
+        run: rustup show active-toolchain
+      - name: Check shell scripts
+        run: shellcheck scripts/*.sh tests/shell/*.sh
+      - name: Test SDK setup scripts
+        run: tests/shell/emsdk_test.sh
+      - name: Check formatting
+        run: cargo fmt --check
+      - name: Check Rust lints
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Run unit tests
+        run: cargo test --locked
+      - name: Run native smoke
+        run: scripts/smoke-native.sh
+
+  web:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Install web build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            build-essential cmake pkg-config python3 curl ca-certificates git
+      - name: Ensure a smoke browser is available
+        run: |
+          if ! command -v google-chrome >/dev/null 2>&1 && ! command -v chromium >/dev/null 2>&1; then
+            curl --fail --location --retry 3 \
+              --output "$RUNNER_TEMP/google-chrome.deb" \
+              https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+            sudo apt-get install --yes "$RUNNER_TEMP/google-chrome.deb"
+          fi
+      - name: Cache Cargo dependencies and web build
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/
+          key: ${{ runner.os }}-${{ runner.arch }}-web-${{ hashFiles('rust-toolchain.toml', 'Cargo.toml', 'Cargo.lock', '.emsdk-version', '.cargo/config.toml', 'third_party/**') }}
+      - name: Cache pinned SDK
+        uses: actions/cache@v6
+        with:
+          path: .tools/emsdk
+          key: ${{ runner.os }}-${{ runner.arch }}-emsdk-${{ hashFiles('.emsdk-version') }}
+      - name: Select repository toolchain
+        run: rustup show active-toolchain
+      - name: Set up pinned SDK
+        run: scripts/setup-emsdk.sh
+      - name: Build web app
+        run: scripts/build-web.sh
+      - name: Run web smoke
+        run: scripts/smoke-web.sh
