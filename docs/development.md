@@ -10,6 +10,8 @@
 cargo run
 ```
 
+네이티브 앱은 `cargo run`으로 실행한다. `target/debug/rusty-nails`를 직접 실행하면 시스템 `libSDL3`에 연결될 수 있다.
+
 SDL3 창과 OpenGL 3.3 core 컨텍스트에서 `Hello World`를 그린다. 창 닫기나 SDL
 종료 이벤트를 받으면 루프를 끝내고 GL 컨텍스트가 current인 상태에서 renderer,
 platform 순서로 종료를 시도한다. 무인자 실행에는 프레임 수 제한이 없다.
@@ -62,6 +64,8 @@ tests/shell/emsdk_test.sh
 셸 테스트는 네트워크 없는 가짜 emsdk Git 저장소로 동시 설치, 중단 복구, worktree와
 공백 경로, 버전 교체 및 명령 인자 보존을 검사한다. 실제 SDK 설치나 웹 렌더링
 검사를 대신하지는 않는다. 웹 검사는 [웹 스모크](web.md#웹-스모크)에서 이어 간다.
+
+회귀 검사를 바꿀 때는 [실패하는 변이로 약속을 확인하는 교훈](lessons/verify-promises-with-mutations.md)을 따른다.
 
 ## 스모크 출력 계약
 
