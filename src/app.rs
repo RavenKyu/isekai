@@ -38,8 +38,16 @@ impl App {
         let sdl = sdl3::init()?;
         let video = sdl.video()?;
         let attr = video.gl_attr();
-        attr.set_context_profile(GLProfile::Core);
-        attr.set_context_version(3, 3);
+        #[cfg(not(target_os = "emscripten"))]
+        {
+            attr.set_context_profile(GLProfile::Core);
+            attr.set_context_version(3, 3);
+        }
+        #[cfg(target_os = "emscripten")]
+        {
+            attr.set_context_profile(GLProfile::GLES);
+            attr.set_context_version(3, 0);
+        }
         attr.set_double_buffer(true);
         let window = video
             .window("rusty-nails", 1280, 720)
@@ -48,7 +56,7 @@ impl App {
             .build()?;
         let gl_context = window.gl_create_context()?;
         window.gl_make_current(&gl_context)?;
-        // SAFETY: SDL has made this live GL 3.3 context current on this thread.
+        // SAFETY: SDL has made this live GL context current on this thread.
         // The function table is used only while App owns that context and window.
         let gl = Rc::new(unsafe {
             glow::Context::from_loader_function(|name| {
@@ -183,6 +191,8 @@ impl App {
             .count())
     }
 
+    // The web driver deliberately retains App until the page is destroyed.
+    #[cfg_attr(target_os = "emscripten", allow(dead_code))]
     pub fn shutdown(mut self: Box<Self>) -> AppResult<()> {
         self.window.gl_make_current(&self.gl_context)?;
         // Always attempt both shutdowns, in renderer/platform order.
