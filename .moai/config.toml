@@ -1,0 +1,5 @@
+# moai — issue tracker settings for this repository
+prefix = "rn"
+statuses = "todo,in_progress,review,done"
+# How a person is shown: full (`Name (email)`) · name · email
+naming = "full"

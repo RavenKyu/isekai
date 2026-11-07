@@ -1,0 +1,22 @@
+{"ts":"2026-11-07T19:00:53Z","id":"rn-gl6h","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.1.0"}
+{"ts":"2026-11-07T19:00:55Z","id":"rn-35g9","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.1.0 개발환경 구축"}
+{"ts":"2026-11-07T19:00:55Z","id":"rn-35g9.6b9","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"기준 커밋과 Rust 프로젝트 뼈대"}
+{"ts":"2026-11-07T19:00:55Z","id":"rn-35g9.ic7","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"네이티브 Hello World 창"}
+{"ts":"2026-11-07T19:00:55Z","id":"rn-35g9.vvc","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"emsdk 고정 설치 스크립트"}
+{"ts":"2026-11-07T19:00:55Z","id":"rn-35g9.60y","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"emscripten 웹 빌드 판정 스파이크"}
+{"ts":"2026-11-07T19:00:55Z","id":"rn-35g9.jx4","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"네이티브 스모크 테스트"}
+{"ts":"2026-11-07T19:00:55Z","id":"rn-35g9.7lw","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"웹 Hello World와 로컬 서버"}
+{"ts":"2026-11-07T19:00:55Z","id":"rn-35g9.xsh","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"GitHub Actions CI"}
+{"ts":"2026-11-07T19:00:55Z","id":"rn-35g9.a37","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"개발 문서"}
+{"ts":"2026-11-07T19:01:05Z","id":"rn-35g9","kind":"note","by":"Raven","by_email":"hong18s@gmail.com","text":"model: anthropic/claude-opus-5-5 (high — plan: interview and detailed plan)"}
+{"ts":"2026-11-07T19:02:11Z","id":"rn-35g9.60y","kind":"note","by":"Raven","by_email":"hong18s@gmail.com","text":"Due-priority: p2 → p1 (2 days left, due 2026-11-10 from rn-gl6h)"}
+{"ts":"2026-11-07T19:02:11Z","id":"rn-35g9.6b9","kind":"note","by":"Raven","by_email":"hong18s@gmail.com","text":"Due-priority: p2 → p1 (2 days left, due 2026-11-10 from rn-gl6h)"}
+{"ts":"2026-11-07T19:02:11Z","id":"rn-35g9.7lw","kind":"note","by":"Raven","by_email":"hong18s@gmail.com","text":"Due-priority: p2 → p1 (2 days left, due 2026-11-10 from rn-gl6h)"}
+{"ts":"2026-11-07T19:02:11Z","id":"rn-35g9.a37","kind":"note","by":"Raven","by_email":"hong18s@gmail.com","text":"Due-priority: p2 → p1 (2 days left, due 2026-11-10 from rn-gl6h)"}
+{"ts":"2026-11-07T19:02:11Z","id":"rn-35g9.ic7","kind":"note","by":"Raven","by_email":"hong18s@gmail.com","text":"Due-priority: p2 → p1 (2 days left, due 2026-11-10 from rn-gl6h)"}
+{"ts":"2026-11-07T19:02:11Z","id":"rn-35g9.jx4","kind":"note","by":"Raven","by_email":"hong18s@gmail.com","text":"Due-priority: p2 → p1 (2 days left, due 2026-11-10 from rn-gl6h)"}
+{"ts":"2026-11-07T19:02:11Z","id":"rn-35g9.vvc","kind":"note","by":"Raven","by_email":"hong18s@gmail.com","text":"Due-priority: p2 → p1 (2 days left, due 2026-11-10 from rn-gl6h)"}
+{"ts":"2026-11-07T19:02:11Z","id":"rn-35g9.xsh","kind":"note","by":"Raven","by_email":"hong18s@gmail.com","text":"Due-priority: p2 → p1 (2 days left, due 2026-11-10 from rn-gl6h)"}
+{"ts":"2026-11-07T19:05:07Z","id":"rn-35g9","kind":"note","by":"Raven","by_email":"hong18s@gmail.com","text":"Sent: codex pane %3 (member rn-35g9.6b9 only)"}
+{"ts":"2026-11-07T19:05:31Z","id":"rn-35g9.6b9","kind":"status","by":"Raven","by_email":"hong18s@gmail.com","from":"todo","to":"in_progress"}
+{"ts":"2026-11-07T19:05:48Z","id":"rn-35g9.6b9","kind":"note","by":"Raven","by_email":"hong18s@gmail.com","text":"- 목표: main의 최초 기준 커밋과 이후 두 레인의 공통 Cargo 뼈대를 확립한다.\n- 결정: 멤버 본문의 예외대로 root에서는 .gitignore 정리와 기준 커밋만 수행한다. 이후 제품 파일은 /home/raven/Works/rusty-nails/.worktrees/rn-35g9에서만 작성한다.\n- 추적 목록: .gitattributes, .gitignore, .moai/, .serena/.gitignore, .serena/project.yml, .claude/moai-plugin/, .agents/, .codex/hooks.json. memory와 기계별 설정은 제외한다.\n- 작업 순서: 추적 목록 검사 → main 기준 커밋 → milestone/rn-gl6h 및 worktree-rn-35g9 생성 → 고정된 Cargo.toml/rust-toolchain.toml와 빈 main 작성 → cargo check 및 잠금 파일 생성 → 작업 커밋 → 새 clone 검증 → review 이동과 Lane-ready 노트.\n- 검증: 금지 파일 추적 부재, 기준 커밋의 main 위치, 두 worktree 생성, Rust 1.99.1, sdl3 0.20 단일 의존성, 새 clone의 cargo check, 생성물 ignore, clean 작업 트리.\n- 범위 밖: 나머지 일곱 멤버, 창/렌더링/웹/패치/CI/문서, 에픽 리뷰와 병합. 이들은 이번 배정에서 시작하지 않는다."}

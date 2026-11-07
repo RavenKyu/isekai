@@ -1,0 +1,12 @@
+# moai
+.moai/lock
+.moai/*.tmp.*
+/.worktrees/
+/.claude/worktrees/
+**/images/.lock
+
+# Build output, local tools and session data
+/target/
+/.tools/
+/memory/
+/.claude/settings.local.json
