@@ -1,0 +1,296 @@
+use super::*;
+
+#[cfg(feature = "sdlgpu3-renderer")]
+use sdl3::gpu::{Device, PresentMode, SampleCount, SwapchainComposition, TextureFormat};
+
+/// Enable native IME UI for SDL3 (recommended on IME-heavy platforms).
+///
+/// This should be called before creating any SDL3 windows so that the
+/// underlying backend can display the OS IME UI correctly.
+pub fn enable_native_ime_ui() {
+    // Best-effort: ignore return value; missing hints are not fatal.
+    let _ = sdl3::hint::set("SDL_HINT_IME_SHOW_UI", "1");
+}
+
+/// Initialize the Dear ImGui SDL3 + OpenGL3 backends.
+///
+/// This assumes that:
+/// - a `dear_imgui_rs::Context` already exists;
+/// - `window` has an active OpenGL context (`gl_context`);
+/// - the same context will be current when rendering.
+///
+/// `glsl_version` should be a GLSL version string such as `"#version 150"`.
+///
+/// Requires the `opengl3-renderer` feature.
+#[cfg(feature = "opengl3-renderer")]
+pub(crate) fn init_for_opengl(
+    imgui: &mut Context,
+    window: &Window,
+    gl_context: &GLContext,
+    glsl_version: &str,
+) -> Result<(), Sdl3BackendError> {
+    let glsl = CString::new(glsl_version).map_err(|_| Sdl3BackendError::InvalidGlslVersion)?;
+
+    let sdl_window = window.raw();
+    let sdl_gl = unsafe { gl_context.raw() };
+
+    with_context(imgui, "init_for_opengl()", || {
+        unsafe {
+            if !ffi::ImGui_ImplSDL3_InitForOpenGL_Rust(sdl_window, sdl_gl as *mut c_void) {
+                return Err(Sdl3BackendError::PlatformInitFailed {
+                    entry_point: "ImGui_ImplSDL3_InitForOpenGL",
+                });
+            }
+        }
+        init_opengl3_impl(glsl.as_ptr())
+    })
+}
+
+/// Initialize the Dear ImGui SDL3 + OpenGL3 backends using the default GLSL version.
+///
+/// This matches the upstream behavior of passing `nullptr` for `glsl_version`.
+///
+/// Requires the `opengl3-renderer` feature.
+#[cfg(feature = "opengl3-renderer")]
+pub(crate) fn init_for_opengl_default(
+    imgui: &mut Context,
+    window: &Window,
+    gl_context: &GLContext,
+) -> Result<(), Sdl3BackendError> {
+    let sdl_window = window.raw();
+    let sdl_gl = unsafe { gl_context.raw() };
+
+    with_context(imgui, "init_for_opengl_default()", || {
+        unsafe {
+            if !ffi::ImGui_ImplSDL3_InitForOpenGL_Rust(sdl_window, sdl_gl as *mut c_void) {
+                return Err(Sdl3BackendError::PlatformInitFailed {
+                    entry_point: "ImGui_ImplSDL3_InitForOpenGL",
+                });
+            }
+        }
+        init_opengl3_impl(std::ptr::null())
+    })
+}
+
+/// Initialize only the Dear ImGui SDL3 *platform* backend for an OpenGL context.
+///
+/// This is useful when you want to use a Rust renderer (e.g. `dear-imgui-glow`)
+/// instead of the official C++ OpenGL3 renderer. It:
+/// - configures the SDL3 platform backend (including multi-viewport support when the active SDL
+///   video driver provides global mouse state and capture);
+/// - does **not** initialize `imgui_impl_opengl3`.
+///
+/// This assumes that:
+/// - a `dear_imgui_rs::Context` already exists;
+/// - `window` has an active OpenGL context (`gl_context`);
+/// - the same context will be current when rendering.
+pub(crate) fn init_platform_for_opengl(
+    imgui: &mut Context,
+    window: &Window,
+    gl_context: &GLContext,
+) -> Result<(), Sdl3BackendError> {
+    let sdl_window = window.raw();
+    let sdl_gl = unsafe { gl_context.raw() };
+
+    with_context(imgui, "init_platform_for_opengl()", || {
+        unsafe {
+            if !ffi::ImGui_ImplSDL3_InitForOpenGL_Rust(sdl_window, sdl_gl as *mut c_void) {
+                return Err(Sdl3BackendError::PlatformInitFailed {
+                    entry_point: "ImGui_ImplSDL3_InitForOpenGL",
+                });
+            }
+        }
+        Ok(())
+    })
+}
+
+/// Initialize the Dear ImGui SDL3 platform backend only.
+///
+/// This is useful when using a non-OpenGL renderer (e.g. WGPU) and only
+/// want SDL3 to drive the platform layer.
+///
+/// This assumes that:
+/// - a `dear_imgui_rs::Context` already exists;
+/// - `window` is a valid SDL3 window handle.
+pub(crate) fn init_for_other(imgui: &mut Context, window: &Window) -> Result<(), Sdl3BackendError> {
+    let sdl_window = window.raw();
+
+    with_context(imgui, "init_for_other()", || {
+        unsafe {
+            if !ffi::ImGui_ImplSDL3_InitForOther_Rust(sdl_window) {
+                return Err(Sdl3BackendError::PlatformInitFailed {
+                    entry_point: "ImGui_ImplSDL3_InitForOther",
+                });
+            }
+        }
+        Ok(())
+    })
+}
+
+/// Initialize the Dear ImGui SDL3 platform backend for Vulkan renderers.
+///
+/// This is equivalent to `ImGui_ImplSDL3_InitForVulkan` and is required for
+/// Vulkan multi-viewport support (sets Vulkan window flags for secondary viewports).
+pub(crate) fn init_for_vulkan(
+    imgui: &mut Context,
+    window: &Window,
+) -> Result<(), Sdl3BackendError> {
+    let sdl_window = window.raw();
+    with_context(imgui, "init_for_vulkan()", || {
+        unsafe {
+            if !ffi::ImGui_ImplSDL3_InitForVulkan_Rust(sdl_window) {
+                return Err(Sdl3BackendError::PlatformInitFailed {
+                    entry_point: "ImGui_ImplSDL3_InitForVulkan",
+                });
+            }
+        }
+        Ok(())
+    })
+}
+
+/// Initialize the Dear ImGui SDL3 platform backend for Direct3D (Windows only).
+#[cfg(target_os = "windows")]
+pub(crate) fn init_for_d3d(imgui: &mut Context, window: &Window) -> Result<(), Sdl3BackendError> {
+    let sdl_window = window.raw();
+    with_context(imgui, "init_for_d3d()", || {
+        unsafe {
+            if !ffi::ImGui_ImplSDL3_InitForD3D_Rust(sdl_window) {
+                return Err(Sdl3BackendError::PlatformInitFailed {
+                    entry_point: "ImGui_ImplSDL3_InitForD3D",
+                });
+            }
+        }
+        Ok(())
+    })
+}
+
+/// Initialize the Dear ImGui SDL3 platform backend for Metal renderers.
+pub(crate) fn init_for_metal(imgui: &mut Context, window: &Window) -> Result<(), Sdl3BackendError> {
+    let sdl_window = window.raw();
+    with_context(imgui, "init_for_metal()", || {
+        unsafe {
+            if !ffi::ImGui_ImplSDL3_InitForMetal_Rust(sdl_window) {
+                return Err(Sdl3BackendError::PlatformInitFailed {
+                    entry_point: "ImGui_ImplSDL3_InitForMetal",
+                });
+            }
+        }
+        Ok(())
+    })
+}
+
+/// Initialize the Dear ImGui SDL3 platform backend for SDL_Renderer-based renderers.
+///
+/// # Safety
+///
+/// The caller must provide a valid `SDL_Renderer` pointer associated with `window`.
+pub(crate) unsafe fn init_for_sdl_renderer(
+    imgui: &mut Context,
+    window: &Window,
+    renderer: *mut sdl3_sys::render::SDL_Renderer,
+) -> Result<(), Sdl3BackendError> {
+    let sdl_window = window.raw();
+    with_context(imgui, "init_for_sdl_renderer()", || {
+        unsafe {
+            if !ffi::ImGui_ImplSDL3_InitForSDLRenderer_Rust(sdl_window, renderer) {
+                return Err(Sdl3BackendError::PlatformInitFailed {
+                    entry_point: "ImGui_ImplSDL3_InitForSDLRenderer",
+                });
+            }
+        }
+        Ok(())
+    })
+}
+
+/// Initialize the Dear ImGui SDL3 platform backend for SDL GPU (SDL_gpu3) renderers.
+pub(crate) fn init_for_sdl_gpu(
+    imgui: &mut Context,
+    window: &Window,
+) -> Result<(), Sdl3BackendError> {
+    with_context(imgui, "init_for_sdl_gpu()", || {
+        init_for_sdl_gpu_impl(window.raw())
+    })
+}
+
+fn init_for_sdl_gpu_impl(
+    sdl_window: *mut sdl3_sys::video::SDL_Window,
+) -> Result<(), Sdl3BackendError> {
+    unsafe {
+        if !ffi::ImGui_ImplSDL3_InitForSDLGPU_Rust(sdl_window) {
+            return Err(Sdl3BackendError::PlatformInitFailed {
+                entry_point: "ImGui_ImplSDL3_InitForSDLGPU",
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Initialization parameters for the official SDLGPU3 renderer backend.
+#[cfg(feature = "sdlgpu3-renderer")]
+#[derive(Clone, Copy)]
+pub struct SdlGpu3InitInfo<'a> {
+    pub device: &'a Device,
+    pub color_target_format: TextureFormat,
+    pub msaa_samples: SampleCount,
+    pub swapchain_composition: SwapchainComposition,
+    pub present_mode: PresentMode,
+}
+
+#[cfg(feature = "sdlgpu3-renderer")]
+impl<'a> SdlGpu3InitInfo<'a> {
+    /// Build a default configuration from the swapchain format of `window`.
+    pub fn from_window(device: &'a Device, window: &Window) -> Self {
+        Self {
+            device,
+            color_target_format: device.get_swapchain_texture_format(window),
+            msaa_samples: SampleCount::NoMultiSampling,
+            swapchain_composition: SwapchainComposition::Sdr,
+            present_mode: PresentMode::Vsync,
+        }
+    }
+}
+
+/// Initialize the Dear ImGui SDL3 + SDLGPU3 backend with explicit renderer settings.
+#[cfg(feature = "sdlgpu3-renderer")]
+pub(crate) fn init_for_sdlgpu3(
+    imgui: &mut Context,
+    window: &Window,
+    info: SdlGpu3InitInfo<'_>,
+) -> Result<(), Sdl3BackendError> {
+    with_context(imgui, "init_for_sdlgpu3()", || {
+        init_for_sdl_gpu_impl(window.raw())?;
+        init_sdlgpu3_impl(info)
+    })
+}
+
+/// Initialize the Dear ImGui SDL3 + SDLRenderer3 backend.
+///
+/// This assumes that:
+/// - a `dear_imgui_rs::Context` already exists;
+/// - `window` is the window associated with `canvas`;
+/// - the canvas outlives its owning `SdlRenderer3Backend`.
+///
+/// Requires the `sdlrenderer3-renderer` feature.
+#[cfg(feature = "sdlrenderer3-renderer")]
+pub(crate) fn init_for_canvas(
+    imgui: &mut Context,
+    canvas: &WindowCanvas,
+) -> Result<(), Sdl3BackendError> {
+    let sdl_window = canvas.window().raw();
+    let sdl_renderer = canvas.raw();
+
+    with_context(imgui, "init_for_canvas()", || {
+        unsafe {
+            if !ffi::ImGui_ImplSDL3_InitForSDLRenderer_Rust(sdl_window, sdl_renderer) {
+                return Err(Sdl3BackendError::PlatformInitFailed {
+                    entry_point: "ImGui_ImplSDL3_InitForSDLRenderer",
+                });
+            }
+            if !ffi::dear_imgui_sdl3_backend_sdlrenderer3_init(sdl_renderer) {
+                ffi::ImGui_ImplSDL3_Shutdown_Rust();
+                return Err(Sdl3BackendError::SdlRenderer3InitFailed);
+            }
+        }
+        Ok(())
+    })
+}
