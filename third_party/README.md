@@ -35,26 +35,30 @@ vendor commit, reapply only an approved patch, and repeat native, target-contrac
 Emscripten build, and browser screenshot checks. A successful build alone does
 not prove the ABI works.
 
-## Reproducing the investigation
+## Running the current app
 
 ```sh
 scripts/setup-emsdk.sh
 cargo check --locked
 cargo test --locked
-scripts/with-emsdk.sh cargo build --locked --example web_spike --target wasm32-unknown-emscripten
-mkdir -p target/web
-cp web/index.html target/web/
-cp target/wasm32-unknown-emscripten/debug/examples/web_spike.{js,wasm} target/web/
-python3 -m http.server 18769 --bind 127.0.0.1 --directory target/web
+scripts/build-web.sh
+scripts/smoke-web.sh
+scripts/serve-web.sh
 ```
 
-Open `http://127.0.0.1:18769/index.html`. The screenshot investigation used Chrome
-headless, SwiftShader, 1280x720, and a 20000 ms virtual-time budget. The served
-directory contains only staged web artifacts. The spike example owns its state
-on the heap and uses `emscripten_set_main_loop_arg`; it is replaced during app
-integration. All link flags live in `.cargo/config.toml`; assertions are enabled
-for this debug investigation and LTO is not enabled. The HTML maps requested
-WASM names to the staged `web_spike.wasm` explicitly.
+Open `http://127.0.0.1:8080/` while the server is running. The build script stages
+`index.html`, `rusty-nails.js`, and `rusty-nails.wasm` under `target/web/`; the
+server exposes only that directory on `127.0.0.1`. The HTML explicitly maps
+requested WASM names to the staged file. See [web development](../docs/web.md)
+for `PORT`, `CHROME`, release builds, and browser smoke evidence.
+
+The integrated app owns its state on the heap and uses
+`emscripten_set_main_loop_arg`. All link flags live in `.cargo/config.toml`;
+`-sASSERTIONS=1` applies to both debug and release builds, and LTO is not enabled.
+The old `web_spike` example was removed during integration. Reproducing that
+historical investigation requires a separate checkout of commit `97293f7`,
+which still contains the example and its matching HTML; its example commands
+are not commands for the current checkout.
 
 The published build-support unit tests require files outside their archive from
 the upstream monorepo. A bare invocation fails at `include_str!`. For the
