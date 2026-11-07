@@ -212,7 +212,7 @@ fn binding_spec_hash_is_stable_and_covers_target_policy() {
 
     assert_eq!(native.deterministic_hash(), native.deterministic_hash());
     assert_eq!(native.deterministic_hash(), "fnv1a64:3d7b05c3764194ec");
-    assert_eq!(non_windows.deterministic_hash(), "fnv1a64:6c40e31dc302e556");
+    assert_eq!(non_windows.deterministic_hash(), "fnv1a64:c8c41d87aacca474");
     assert_ne!(
         native.deterministic_hash(),
         non_windows.deterministic_hash()
@@ -511,11 +511,9 @@ fn wasm_target_requires_the_explicit_provider_feature() {
     assert!(is_supported_wasm_target(CORE_WASM_TARGET));
     assert!(validate_wasm_feature_contract(CORE_WASM_TARGET, false).is_err());
     assert!(validate_wasm_feature_contract(CORE_WASM_TARGET, true).is_ok());
-    for unsupported in [
-        "wasm32-wasip1",
-        "wasm32-wasip2",
-        "wasm32-unknown-emscripten",
-    ] {
+    assert!(validate_wasm_feature_contract("wasm32-unknown-emscripten", false).is_ok());
+    assert!(validate_wasm_feature_contract("wasm32-unknown-emscripten", true).is_ok());
+    for unsupported in ["wasm32-wasip1", "wasm32-wasip2"] {
         assert!(!is_supported_wasm_target(unsupported));
         assert!(validate_wasm_feature_contract(unsupported, false).is_err());
         assert!(validate_wasm_feature_contract(unsupported, true).is_err());

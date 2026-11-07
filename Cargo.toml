@@ -10,3 +10,11 @@ dear-imgui-sdl3 = "=0.22.0"
 dear-imgui-glow = "=0.22.0"
 glow = "0.18"
 sdl3 = { version = "0.20", features = ["build-from-source"] }
+
+[patch.crates-io]
+dear-imgui-build-support = { path = "third_party/dear-imgui-build-support" }
+dear-imgui-sdl3 = { path = "third_party/dear-imgui-sdl3" }
+
+[[example]]
+name = "web_spike"
+path = "examples/web_spike.rs"

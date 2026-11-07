@@ -44,7 +44,9 @@ pub fn validate_wasm_feature_contract(
     target_triple: &str,
     wasm_feature_enabled: bool,
 ) -> Result<(), String> {
-    if is_supported_wasm_target(target_triple) {
+    if target_triple == "wasm32-unknown-emscripten" {
+        Ok(())
+    } else if is_supported_wasm_target(target_triple) {
         if wasm_feature_enabled {
             Ok(())
         } else {

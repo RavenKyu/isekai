@@ -86,3 +86,6 @@ version = "0.20"
 
 [target.'cfg(target_os = "android")'.dependencies.sdl3]
 version = "0.20"
+
+[target.'cfg(target_os = "emscripten")'.dependencies.sdl3]
+version = "0.20"

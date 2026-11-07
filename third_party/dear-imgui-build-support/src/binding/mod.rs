@@ -263,6 +263,15 @@ const WINDOWS64_TARGETS: &[NativeAbiTarget] = &[
 
 const NON_WINDOWS_TARGETS: &[NativeAbiTarget] = &[
     native_target(
+        "wasm32-unknown-emscripten",
+        "wasm32-unknown-emscripten",
+        "emscripten",
+        "",
+        "",
+        "wasm32",
+        "32",
+    ),
+    native_target(
         "x86_64-unknown-linux-gnu",
         "x86_64-unknown-linux-gnu",
         "linux",
