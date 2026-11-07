@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+script_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 checkout=$(cd -- "$script_dir/.." && pwd -P)
 output="$checkout/target/web"
 if [[ ! -f "$output/index.html" ]]; then
@@ -16,4 +16,5 @@ if [[ "$port" != 0 ]]; then
     printf 'App URL: http://127.0.0.1:%s/\n' "$port"
 fi
 # PORT=0 lets the OS allocate a free port atomically; Python prints the actual port.
-exec python3 -u -m http.server --bind 127.0.0.1 --directory "$output" "$port"
+# -I keeps the caller's directory off sys.path: this runs from any directory.
+exec python3 -I -u -m http.server --bind 127.0.0.1 --directory "$output" "$port"

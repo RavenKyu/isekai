@@ -9,7 +9,7 @@
 | 항목 | 현재 값과 정본 | 이유 |
 | --- | --- | --- |
 | Rust | `rust-toolchain.toml`의 channel `1.99.1`, target `wasm32-unknown-emscripten`, rustfmt·clippy | dear-imgui 0.22 계열의 MSRV는 1.95다. Cargo.toml의 rust-version은 최소 버전이며 실행 툴체인은 별도로 고정한다. |
-| emsdk | `.emsdk-version`의 `6.0.13` | Rust의 Emscripten 링크 방식과 SDL3 포트를 실제 빌드·실행으로 검증한 조합이다. 설치·CI에서 이 파일을 읽고 중복 pin을 만들지 않는다. |
+| emsdk | `.emsdk-version`의 `6.0.13` | Rust의 Emscripten 링크 방식과 `sdl3-sys`의 SDL3 소스 빌드를 실제 빌드·실행으로 검증한 조합이다. Emscripten의 SDL3 포트는 쓰지 않는다. 설치·CI에서 이 파일을 읽고 중복 pin을 만들지 않는다. |
 | dear-imgui-rs/sdl3/glow | `Cargo.toml`에서 각각 `=0.22.0` | core·platform·renderer를 같은 계열로 맞춘다. |
 | sdl3 | `Cargo.toml`의 `0.20`, `Cargo.lock`의 `0.20.0` | dear-imgui-sdl3가 요구하는 0.20과 맞춰 Window·Event 타입이 갈라지지 않게 한다. |
 | sdl3-sys | `Cargo.lock`의 `0.7.3+SDL-3.4.20` | SDL3의 소스 빌드와 FFI 버전을 잠근다. 첫 빌드는 시스템 SDL 대신 이 소스를 컴파일한다. |

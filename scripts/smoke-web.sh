@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+script_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 checkout=$(cd -- "$script_dir/.." && pwd -P)
 fail() { printf 'rn-smoke: fail %s\n' "$*" >&2; exit 1; }
 for tool in python3 timeout mktemp; do
@@ -34,6 +34,8 @@ cleanup() {
         kill "$server_pid" 2>/dev/null || true
         wait "$server_pid" 2>/dev/null || true
     fi
+    # About 40MB of Chrome state per run, and none of it is evidence.
+    rm -rf -- "$scratch/chrome-profile" || true
 }
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+script_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 # shellcheck source=scripts/emsdk-common.sh
 source "$script_dir/emsdk-common.sh"
 rn_emsdk_init

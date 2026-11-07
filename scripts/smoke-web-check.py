@@ -10,13 +10,15 @@ import urllib.request
 
 def ready(log_path):
     deadline = time.monotonic() + 5
+    # Loopback readiness must not depend on the caller's http_proxy.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     while time.monotonic() < deadline:
         text = pathlib.Path(log_path).read_text()
         match = re.search(r'Serving HTTP on 127\.0\.0\.1 port (\d+)', text)
         if match:
             url = f'http://127.0.0.1:{match[1]}/'
             try:
-                with urllib.request.urlopen(url, timeout=0.5) as response:
+                with opener.open(url, timeout=0.5) as response:
                     if response.status == 200:
                         print(url)
                         return

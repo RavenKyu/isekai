@@ -116,6 +116,6 @@ stderr에 출력되는 `evidence:` 경로는 `target/smoke-web.<임의값>/`다.
 | 주소 사용 중 | 앞의 서버를 종료하거나 `PORT=0`으로 새 빈 포트를 배정한다. |
 | `missing browser`·`CHROME not executable` | headless를 지원하는 Chrome/Chromium을 준비하고 실제 경로를 지정한다. |
 | `lit=0`, 페이지·콘솔 오류 | evidence의 DOM·스크린샷·console.json·server.log를 확인한다. 렌더링 오류나 404를 무시하고 성공 처리하지 않는다. |
-| DevTools timeout | 결과 줄이 없는지, 앱이 초기화·RAF·렌더 중 멈췄는지 증거 로그를 본다. CLI `--dump-dom`만으로 완료 시점을 추정하지 않는다. |
+| `missing smoke result`·DevTools timeout | 결과 줄이 없는지, 앱이 초기화·RAF·렌더 중 멈췄는지 증거 로그를 본다. 페이지가 응답하지 않아 DevTools도 멈추면 DOM과 스크린샷은 남지 않고 `chrome.log`와 `server.log`만 남는다. CLI `--dump-dom`만으로 완료 시점을 추정하지 않는다. |
 
 Decided in: rn-35g9

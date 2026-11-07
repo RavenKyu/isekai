@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 settings_before=$(sha256sum "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile" 2>/dev/null || true)
-source_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
+source_root=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
 scratch=$(mktemp -d)
 trap 'rm -rf -- "$scratch"' EXIT
 fixture="$scratch/primary checkout"
@@ -18,6 +18,8 @@ git -C "$fixture" -c user.name=Test -c user.email=test@example.invalid commit -q
 cat >"$fake_repo/emsdk" <<'FAKE_SDK'
 #!/usr/bin/env bash
 set -euo pipefail
+# Exactly <command> <version>: `activate --permanent` would edit shell start files.
+(( $# == 2 )) || exit 2
 case "$1" in
     install)
         printf 'install %s\n' "$2" >>"$RN_TEST_EVENTS"
@@ -28,7 +30,7 @@ case "$1" in
         fi
         sleep 0.3
         mkdir -p upstream/emscripten
-        printf '#!/usr/bin/env bash\nprintf "emcc (fixture) %s\\n"\n' "$2" >upstream/emscripten/emcc
+        printf '#!/usr/bin/env bash\nprintf "emcc (fixture) %s\\n"\n' "${RN_TEST_COMPILER_VERSION:-$2}" >upstream/emscripten/emcc
         chmod +x upstream/emscripten/emcc
         rm install.partial
         ;;
@@ -40,6 +42,7 @@ case "$1" in
 esac
 FAKE_SDK
 cat >"$fake_repo/emsdk_env.sh" <<'FAKE_ENV'
+[[ -n ${EMSDK_QUIET:-} ]] || echo 'Setting up EMSDK environment'
 export PATH="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/upstream/emscripten:$PATH"
 FAKE_ENV
 chmod +x "$fake_repo/emsdk"
@@ -88,6 +91,8 @@ wait "$second_pid"
 # shellcheck disable=SC2016
 [[ $("$with" printf '<%s>\n' 'two words' 'literal $()') == $'<two words>\n<literal $()>' ]]
 expect_fail "$with"
+# An exported CDPATH must not redirect or pollute a script's own location.
+(cd -- "$lane" && CDPATH=. scripts/with-emsdk.sh true)
 "$setup" >"$scratch/repeated.log" 2>&1
 [[ $(installs) == 1 ]]
 
@@ -129,6 +134,16 @@ wait "$setup_pid"
 printf '#!/usr/bin/env bash\nprintf "emcc (wrong) 0.0.0\\n"\n' >"$install_dir/upstream/emscripten/emcc"
 expect_fail "$fixture/scripts/with-emsdk.sh" true
 expect_fail "$fixture/scripts/setup-emsdk.sh"
+
+# A PATH compiler reporting the pinned version cannot stand in for the SDK's own.
+printf '#!/usr/bin/env bash\nprintf "emcc (path) 6.0.13\\n"\n' >"$scratch/fake-bin/emcc"
+rm "$install_dir/upstream/emscripten/emcc"
+expect_fail "$fixture/scripts/with-emsdk.sh" true
+
+# A fresh install that fails verification must not be marked complete.
+rm "$install_dir/.rn-installed"
+expect_fail env RN_TEST_COMPILER_VERSION=0.0.0 "$fixture/scripts/setup-emsdk.sh"
+[[ ! -f "$install_dir/.rn-installed" ]]
 [[ -z $(git -C "$fixture" status --short) ]]
 [[ "$settings_before" == "$(sha256sum "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile" 2>/dev/null || true)" ]]
-printf 'emsdk shell tests: ok (locking, worktrees, spaces, interruption, version, argv)\n'
+printf 'emsdk shell tests: ok (locking, worktrees, spaces, interruption, version, argv, location)\n'

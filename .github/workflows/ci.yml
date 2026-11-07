@@ -44,9 +44,9 @@ jobs:
       - name: Check formatting
         run: cargo fmt --check
       - name: Check Rust lints
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --locked --all-targets -- -D warnings
       - name: Run unit tests
-        run: cargo test
+        run: cargo test --locked
       - name: Run native smoke
         run: scripts/smoke-native.sh
 

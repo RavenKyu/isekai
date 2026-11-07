@@ -24,7 +24,9 @@ def main(browser, url, directory):
         (directory / 'browser.pid').write_text(str(child.pid))
         buffer = b''
         counter = 0
-        deadline = time.monotonic() + 40
+        # Polling stops early so a stalled page can still leave its evidence.
+        deadline = time.monotonic() + 45
+        poll_deadline = deadline - 5
         errors = []
 
         def receive():
@@ -73,7 +75,8 @@ def main(browser, url, directory):
             call('Page.navigate', {'url': url}, session)
             # CLI --dump-dom can run before RAF callbacks, even when its later
             # screenshot shows completed frames. Wait for the actual app report.
-            while time.monotonic() < deadline:
+            line = ''
+            while time.monotonic() < poll_deadline:
                 result = call('Runtime.evaluate', {
                     'expression': "document.getElementById('rn-log')?.textContent || ''",
                     'returnByValue': True,

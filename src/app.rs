@@ -56,6 +56,11 @@ impl App {
             .build()?;
         let gl_context = window.gl_create_context()?;
         window.gl_make_current(&gl_context)?;
+        // SDL leaves the interval at 0, and on Wayland swaps wait only when asked,
+        // so the native loop would otherwise spin. RAF paces the web loop, and SDL
+        // would need a main loop there. Without vsync support the app still draws.
+        #[cfg(not(target_os = "emscripten"))]
+        let _ = video.gl_set_swap_interval(sdl3::video::SwapInterval::VSync);
         // SAFETY: SDL has made this live GL context current on this thread.
         // The function table is used only while App owns that context and window.
         let gl = Rc::new(unsafe {

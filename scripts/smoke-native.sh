@@ -16,7 +16,12 @@ cd -- "$script_dir/.."
 unset WAYLAND_DISPLAY
 export SDL_VIDEODRIVER=x11 LIBGL_ALWAYS_SOFTWARE=1
 # Reserve two seconds for forced cleanup within the 60-second total budget.
-if timeout --kill-after=2s 58s xvfb-run -a cargo test --locked --test smoke_native -- --ignored; then
+# Each shutdown event needs its own process: SDL's platform session is global.
+if timeout --kill-after=2s 58s xvfb-run -a sh -c '
+    cargo test --locked --test smoke_native -- --ignored &&
+    cargo test --locked --bin rusty-nails -- --ignored &&
+    RN_TEST_CLOSE=1 cargo test --locked --bin rusty-nails -- --ignored
+'; then
     exit 0
 else
     status=$?

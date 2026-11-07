@@ -32,7 +32,7 @@ GL 컨텍스트가 없으면 실패하며, 그 상태를 검사 생략이나 성
 | `src/ui.rs` | 두 플랫폼이 함께 쓰는 `Hello World` UI. |
 | `src/smoke.rs` | `--smoke-frames` 인자 해석, 마지막 프레임 판정, 성공·실패 한 줄 생성. |
 | `tests/smoke_native.rs` | 실제 앱 subprocess를 실행해 렌더링, 인자 오류, 디스플레이 실패, 일반 실행 지속을 검사. |
-| `scripts/smoke-native.sh` | 독립 Xvfb와 software GL, 최대 60초 제한으로 위 통합 검사를 실행. |
+| `scripts/smoke-native.sh` | 독립 Xvfb와 software GL, 최대 60초 제한으로 위 통합 검사와 종료 이벤트 테스트를 실행. |
 
 `App::new`는 `Box<App>`을 돌려준다. 필드 선언 순서로 renderer·platform·ImGui가
 GL 컨텍스트와 창보다 먼저 해제되며 SDL은 그 뒤까지 살아 있다. 네이티브 드라이버는
@@ -44,7 +44,7 @@ GL 컨텍스트와 창보다 먼저 해제되며 SDL은 그 뒤까지 살아 있
 ```sh
 cargo check --locked
 cargo fmt --check
-cargo clippy --all-targets -- -D warnings
+cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked
 scripts/smoke-native.sh
 shellcheck scripts/*.sh tests/shell/*.sh
@@ -53,7 +53,8 @@ tests/shell/emsdk_test.sh
 
 `cargo test --locked`는 CPU에서 UI 텍스트의 정점 증가와 스모크 인자·판정을 검사한다.
 화면이 필요한 종료 이벤트 테스트와 네이티브 통합 스모크는 기본적으로 ignore되어
-있다. `scripts/smoke-native.sh`가 후자를 별도로 실행하므로 반드시 이어서 돌린다.
+있다. `scripts/smoke-native.sh`가 둘 다 실행하므로 반드시 이어서 돌린다. 종료 이벤트
+테스트는 SDL 종료 이벤트와 창 닫기를 프로세스를 나눠 각각 검사한다.
 이 스크립트는 X11·software GL을 강제하고 새 Xvfb를 사용해 기존 데스크톱 세션에
 붙지 않는다. 58초 TERM 제한과 2초 강제 정리 여유를 두어 전체 상한은 60초다.
 첫 빌드가 이 제한에 걸리지 않게 먼저 일반 빌드·테스트를 끝낸다.
