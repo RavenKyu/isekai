@@ -42,8 +42,6 @@ dependencies = [
 [[package]]
 name = "dear-imgui-build-support"
 version = "0.22.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d2683d46e026a93eceeb815ca0f5709b21e089bd99029adc2e52eb1029c5ecb"
 dependencies = [
  "cc",
  "pkg-config",
@@ -78,8 +76,6 @@ dependencies = [
 [[package]]
 name = "dear-imgui-sdl3"
 version = "0.22.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d1758298b1c988e37f90d65da4fcbdfba63ec91f380278daa33512c893f1d7e1"
 dependencies = [
  "cc",
  "dear-imgui-build-support",

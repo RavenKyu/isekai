@@ -1,0 +1,46 @@
+[package]
+name = "dear-imgui-build-support"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+categories.workspace = true
+keywords.workspace = true
+description = "Build helpers for dear-imgui-sys family: compose archive names, prebuilt download/extract, manifest helpers"
+
+[lib]
+name = "build_support"
+path = "src/lib.rs"
+
+[dependencies]
+cc = { workspace = true }
+ureq = { version = "3.5", default-features = false, features = ["rustls"], optional = true }
+flate2 = { workspace = true, optional = true }
+tar = { workspace = true, optional = true }
+pkg-config = { workspace = true, optional = true }
+vcpkg = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+
+[features]
+default = []
+# Pure-data binding generation and native artifact identity contracts.
+binding-spec = ["dep:serde", "dep:serde_json"]
+# Enable HTTP(S) download support for build scripts.
+download = ["dep:ureq", "archive"]
+# Enable `.tar.gz` extraction support.
+archive = ["dep:flate2", "dep:tar"]
+# Enable pkg-config-backed native dependency discovery.
+pkg-config = ["dep:pkg-config"]
+# Enable vcpkg-backed native dependency discovery.
+vcpkg = ["dep:vcpkg"]
+# Enable native dependency discovery helpers for build scripts.
+native-deps = ["pkg-config", "vcpkg"]
+
+[dev-dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+tempfile = { workspace = true }
