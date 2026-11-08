@@ -17,6 +17,7 @@ pub struct Dev {
     renderer: GlowRenderer,
     platform: Sdl3PlatformBackend,
     imgui: Context,
+    tools: crate::ui::DevTools,
 }
 
 impl Dev {
@@ -43,6 +44,7 @@ impl Dev {
             renderer,
             platform,
             imgui,
+            tools: crate::ui::DevTools::default(),
         })
     }
 
@@ -53,7 +55,7 @@ impl Dev {
 
     pub fn begin_frame(&mut self) -> AppResult<()> {
         self.platform.new_frame(&mut self.imgui)?;
-        crate::ui::hello_world(self.imgui.frame());
+        self.tools.draw(self.imgui.frame());
         Ok(())
     }
 
