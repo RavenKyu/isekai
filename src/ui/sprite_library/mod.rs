@@ -31,7 +31,6 @@ pub struct OpenSheet {
     pub dirty: bool,
     pub selection: Selection,
 }
-#[allow(dead_code)] // Memory replacement is the lane B extraction integration API.
 pub enum Action {
     Load(PathBuf),
     Reload,

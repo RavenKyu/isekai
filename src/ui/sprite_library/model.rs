@@ -127,6 +127,10 @@ pub fn list_assets(root: &Path) -> Result<Vec<PathBuf>, String> {
         }
         Ok(())
     }
+    // A checkout without local assets (assets/splites is ignored) lists nothing.
+    if matches!(root.symlink_metadata(), Err(e) if e.kind() == std::io::ErrorKind::NotFound) {
+        return Ok(Vec::new());
+    }
     let mut files = Vec::new();
     visit(root, &mut files).map_err(|e| format!("assets {}: {e}", root.display()))?;
     files.sort();
@@ -247,6 +251,10 @@ mod tests {
         std::fs::write(root.join(".hidden.png"), b"").unwrap();
         std::os::unix::fs::symlink(root.join("sub"), root.join("loop")).unwrap();
         assert_eq!(list_assets(&root).unwrap(), vec![root.join("sub/a.PNG")]);
+        assert_eq!(
+            list_assets(&root.join("missing")).unwrap(),
+            Vec::<PathBuf>::new()
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
 }

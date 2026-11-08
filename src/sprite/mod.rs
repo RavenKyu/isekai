@@ -1,4 +1,4 @@
-// Public CPU APIs are shared by the editor and runtime added in later members.
+// Shared by the dev editor, the runtime and tests; each build uses only part of it.
 #![allow(dead_code, unused_imports)]
 pub mod grid;
 pub use grid::Grid;

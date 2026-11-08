@@ -77,6 +77,14 @@ fn save_memory(sheet: &mut OpenSheet, path: &Path, checkout: &Path) -> Result<St
         return Err("only memory images need Save image as".into());
     }
     let output = extract::ensure_output_dir(path, checkout).map_err(|e| e.to_string())?;
+    // Save would then replace this sidecar with the crop's empty metadata.
+    let sidecar = store::sidecar_for(&output);
+    if sidecar.try_exists().map_err(|e| e.to_string())? {
+        return Err(format!(
+            "sidecar {} exists; choose another image path",
+            sidecar.display()
+        ));
+    }
     let name = output
         .file_name()
         .and_then(|s| s.to_str())
@@ -272,5 +280,18 @@ mod tests {
             sheet.image
         );
         assert!(!store::sidecar_for(&output).exists());
+        // An existing sidecar holds someone's metadata: refuse before writing the PNG.
+        std::fs::write(store::sidecar_for(&output), b"kept").unwrap();
+        let png = std::fs::read(&output).unwrap();
+        let mut other = super::super::extract::tests::memory_sheet();
+        other.image.set_pixel(0, 0, [1, 2, 3, 255]);
+        assert!(
+            save_memory(&mut other, &output, &temp.0)
+                .unwrap_err()
+                .contains("exists")
+        );
+        assert!(matches!(other.source, SheetSource::Memory { .. }));
+        assert_eq!(std::fs::read(&output).unwrap(), png);
+        assert_eq!(std::fs::read(store::sidecar_for(&output)).unwrap(), b"kept");
     }
 }

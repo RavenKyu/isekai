@@ -1,5 +1,5 @@
 // CPU-only images and analysis. No platform, renderer, or filesystem dependency.
-// TODO(rn-fcuz): remove the module allowance when editor/runtime callers cover the APIs.
+// Non-dev and web builds use only part of this module; the analysis serves the dev editor.
 #![allow(dead_code, unused_imports)]
 use std::io::Cursor;
 

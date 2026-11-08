@@ -29,6 +29,24 @@ impl TileDraft {
         Ok(())
     }
 }
+/// The format keeps only tiles with metadata: a cleared tile leaves the list.
+pub fn put_tile(tiles: &mut Vec<TileMeta>, tile: TileMeta) {
+    let index = tiles
+        .iter()
+        .position(|t| (t.col, t.row) == (tile.col, tile.row));
+    let empty = tile.name.is_none()
+        && tile.tags.is_empty()
+        && tile.props.is_empty()
+        && tile.animation.is_none();
+    match (index, empty) {
+        (Some(i), true) => {
+            tiles.remove(i);
+        }
+        (Some(i), false) => tiles[i] = tile,
+        (None, false) => tiles.push(tile),
+        (None, true) => {}
+    }
+}
 pub fn mode_combo(ui: &Ui, label: &str, mode: &mut Mode) -> bool {
     let mut current = match mode {
         Mode::Loop => 0,
@@ -154,11 +172,7 @@ impl SpriteLibrary {
         }
         if changed {
             let mut candidate = sheet.meta.clone();
-            if let Some(i) = index {
-                candidate.tiles[i] = tile;
-            } else {
-                candidate.tiles.push(tile);
-            }
+            put_tile(&mut candidate.tiles, tile);
             match candidate.validate_bounds(sheet.image.width, sheet.image.height) {
                 Ok(()) => {
                     sheet.meta = candidate;
@@ -168,5 +182,31 @@ impl SpriteLibrary {
                 Err(errors) => self.status = errors.join("; "),
             }
         }
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn cleared_tile_metadata_leaves_the_sparse_list() {
+        let blank = TileMeta {
+            col: 1,
+            row: 2,
+            name: None,
+            tags: vec![],
+            props: Default::default(),
+            animation: None,
+        };
+        let mut tiles = Vec::new();
+        put_tile(&mut tiles, blank.clone());
+        assert!(tiles.is_empty());
+        let named = TileMeta {
+            name: Some("torch".into()),
+            ..blank.clone()
+        };
+        put_tile(&mut tiles, named.clone());
+        assert_eq!(tiles, vec![named]);
+        put_tile(&mut tiles, blank);
+        assert!(tiles.is_empty());
     }
 }

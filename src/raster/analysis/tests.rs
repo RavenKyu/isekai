@@ -407,23 +407,25 @@ fn local_assets_report() {
         println!("rn: skipped local assets (set RN_LOCAL_ASSETS=1)");
         return;
     }
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap();
+    // The ignored assets live in the primary checkout; a worktree is <root>/.worktrees/<name>.
+    let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let root = match manifest.parent() {
+        Some(parent) if parent.ends_with(".worktrees") => parent.parent().unwrap(),
+        _ => manifest,
+    };
     let mut paths = vec![
         std::path::PathBuf::from("/home/raven/Works/splites/splite-cave-01.png"),
         std::path::PathBuf::from("/home/raven/Works/splites/splite-cave-02.png"),
     ];
     let cave = root.join("assets/splites/cave");
-    if let Ok(entries) = std::fs::read_dir(cave) {
-        paths.extend(
+    match std::fs::read_dir(&cave) {
+        Ok(entries) => paths.extend(
             entries
                 .flatten()
                 .map(|e| e.path())
                 .filter(|p| p.extension().is_some_and(|e| e == "png")),
-        );
+        ),
+        Err(_) => println!("rn: skipped {}", cave.display()),
     }
     paths.sort();
     for path in paths {

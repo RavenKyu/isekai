@@ -101,29 +101,31 @@ fn smoke_native() {
     assert!(output.stdout.is_empty(), "{output:?}");
 }
 
-struct PlayFixture(std::path::PathBuf);
+// The sheet sits in <root>/sheet. <root>/example.png is a valid PNG as well, so an
+// escaping `../example.png` can only fail on the path rules, not on a missing file.
+struct PlayFixture {
+    root: std::path::PathBuf,
+    sheet: std::path::PathBuf,
+}
 impl PlayFixture {
     fn new() -> Self {
-        let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("target")
             .join(format!("smoke-play-{}", std::process::id()));
-        std::fs::create_dir_all(&directory).unwrap();
-        let owned = Self(directory);
+        let sheet = root.join("sheet");
+        std::fs::create_dir_all(&sheet).unwrap();
+        let owned = Self { root, sheet };
         for name in ["example.png", "example.sprites.json"] {
-            std::fs::copy(
-                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join("tests/fixtures")
-                    .join(name),
-                owned.0.join(name),
-            )
-            .unwrap();
+            std::fs::copy(fixtures.join(name), owned.sheet.join(name)).unwrap();
         }
+        std::fs::copy(fixtures.join("example.png"), owned.root.join("example.png")).unwrap();
         owned
     }
 }
 impl Drop for PlayFixture {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
+        let _ = std::fs::remove_dir_all(&self.root);
     }
 }
 
@@ -131,7 +133,7 @@ impl Drop for PlayFixture {
 #[ignore = "requires X11/GL; use scripts/smoke-native.sh"]
 fn smoke_play() {
     let fixture = PlayFixture::new();
-    let sidecar = fixture.0.join("example.sprites.json");
+    let sidecar = fixture.sheet.join("example.sprites.json");
     let source = sidecar.to_str().unwrap();
     let (output, timeout) = run(
         &["--play", source, "--smoke-frames", "3"],
@@ -140,7 +142,7 @@ fn smoke_play() {
     );
     assert!(!timeout, "{output:?}");
     assert_success_line(&output, 3, true);
-    let missing = fixture.0.join("missing.sprites.json");
+    let missing = fixture.sheet.join("missing.sprites.json");
     for args in [
         vec!["--play", missing.to_str().unwrap(), "--smoke-frames", "3"],
         vec!["--play", source, "missing", "--smoke-frames", "3"],

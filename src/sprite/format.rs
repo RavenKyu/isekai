@@ -390,6 +390,12 @@ mod tests {
         assert!(store::parse(&v.to_string()).is_err());
         let mut v = fixture();
         v["sprites"][1]["name"] = "a".into();
+        // Without clips only the duplicate name, not cycle's frame "b", can reject this.
+        v["clips"] = serde_json::json!([]);
+        assert!(store::parse(&v.to_string()).is_err());
+        let mut v = fixture();
+        let clip = v["clips"][0].clone();
+        v["clips"].as_array_mut().unwrap().push(clip);
         assert!(store::parse(&v.to_string()).is_err());
         let mut v = fixture();
         v["clips"][0]["frames"][0]["sprite"] = "missing".into();

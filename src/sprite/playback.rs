@@ -44,7 +44,7 @@ impl Playback {
             return Err(format!(
                 "image {} must share sidecar directory {}",
                 loaded.image_path.display(),
-                sidecar.display()
+                parent.display()
             ));
         }
         let bytes = std::fs::read(&loaded.image_path)

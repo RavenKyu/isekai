@@ -161,6 +161,7 @@ PNG 저장 후 `Save`로 메타를 따로 쓴다. GL 최대 텍스처 크기를 
    격자는 유지하고 타일·sprite·clip 메타는 빈 상태로 시작한다.
 3. `Image output`을 확인하고 `Save image as`로 crop PNG를 쓴다. 기본은
    `assets/splites/<crop 이름>/<crop 이름>.png`다. 이 버튼은 JSON을 만들지 않는다.
+   그 경로의 사이드카가 이미 있으면 Save가 그 메타를 덮게 되므로 PNG도 쓰지 않고 거부한다.
 4. 배경을 제거하려면 그 PNG를 저장한 다음 `Key color`를 켜고 Load한다.
    이어 격자를 직접 입력하거나 Guess/Apply로 정한다. crop과 키 색 제거는 이 두 단계다.
 5. `Extract`의 `Analyze`를 누른다. 완전 투명 픽셀의 RGB를 0으로 정규화한 뒤
@@ -172,7 +173,7 @@ PNG 저장 후 `Save`로 메타를 따로 쓴다. GL 최대 텍스처 크기를 
    `Open result`로 결과를 바로 열 수 있다. sprite·clip은 자동 생성하지 않으므로
    런타임 재생 전 편집기에서 sprite와 최소 하나의 clip을 작성한다.
 
-Find regions·Guess·Analyze는 버튼에서만 동기로 실행하며 큰 이미지에서는 화면이 멈출 수 있다.
+Find regions·Suggest from objects·Guess·Analyze는 버튼에서만 동기로 실행하며 큰 이미지에서는 화면이 멈출 수 있다.
 출력은 `.png`만 받는다. checkout의 `assets/splites/` 안에서는 없는 디렉터리를 만들지만,
 밖에서는 이미 존재하는 디렉터리만 쓸 수 있다. `..`와 심볼릭 링크를 거치는 출력 디렉터리는 거부한다.
 저장소 안이면서 이 ignore 폴더 밖이면 커밋 대상이 될 수 있다는 상태 줄을 표시한다.
