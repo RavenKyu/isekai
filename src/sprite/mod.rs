@@ -11,3 +11,8 @@ pub use format::{Clip, Sprite, SpriteSheet};
 pub use timeline::{Mode, Timeline};
 
 pub mod texture;
+
+pub mod draw;
+#[cfg(target_os = "emscripten")]
+pub mod embedded;
+pub mod playback;
