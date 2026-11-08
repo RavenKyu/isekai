@@ -26,10 +26,20 @@ for target in host wasm32-unknown-emscripten; do
     if grep -q '^dear-imgui' <<<"$graph"; then
         fail "imgui dependency in non-dev graph ($target)"
     fi
+    if grep -q '^rfd ' <<<"$graph"; then
+        fail "rfd dependency in non-dev graph ($target)"
+    fi
     graph=$(cargo tree --locked -e normal,build --prefix none "${target_args[@]}" --features dev) \
         || fail "cannot inspect dev graph ($target)"
     if ! grep -q '^dear-imgui-rs v' <<<"$graph"; then
         fail "positive control missing dear-imgui-rs ($target)"
+    fi
+    if [[ "$target" == host ]]; then
+        if ! grep -q '^rfd v' <<<"$graph"; then
+            fail 'positive control missing rfd (host dev)'
+        fi
+    elif grep -q '^rfd ' <<<"$graph"; then
+        fail 'rfd dependency in web dev graph'
     fi
 done
 # Cargo's artifact message honors target configuration and CARGO_TARGET_DIR.
@@ -46,5 +56,8 @@ symbols=$(nm -C -- "$executable") || fail 'cannot read executable symbols'
 [[ -n "$symbols" && "$symbols" == *rusty_nails* ]] || fail 'missing application symbols (stripped executable?)'
 if [[ "${symbols,,}" == *imgui* ]]; then
     fail 'imgui symbol in non-dev executable'
+fi
+if [[ "$symbols" == *rfd::* ]]; then
+    fail 'rfd symbol in non-dev executable'
 fi
 printf 'check-no-imgui: ok graphs=host,wasm32-unknown-emscripten symbols=%s\n' "$executable"
