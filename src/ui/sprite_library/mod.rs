@@ -1,4 +1,6 @@
+mod extract;
 mod model;
+mod regions;
 mod tiles;
 mod view;
 pub use model::*;
@@ -263,6 +265,7 @@ impl SpriteLibrary {
                 }
                 if memory {
                     ui.text("Memory image: save the image first");
+                    regions::memory_header(self, ui);
                 }
                 ui.modal_popup("Discard changes?", || {
                     ui.text("Discard unsaved changes?");
@@ -276,11 +279,13 @@ impl SpriteLibrary {
                     }
                 });
                 self.grid_panel(ui);
-                self.sheet_view(ui, &[]);
-                if let Some(_tabs) = ui.tab_bar("Sprite library tabs")
-                    && let Some(_tab) = ui.tab_item("Tiles")
-                {
-                    self.tiles_tab(ui);
+                regions::sheet_view(self, ui);
+                if let Some(_tabs) = ui.tab_bar("Sprite library tabs") {
+                    if let Some(_tab) = ui.tab_item("Tiles") {
+                        self.tiles_tab(ui);
+                    }
+                    regions::tab(self, ui);
+                    extract::tab(self, ui);
                 }
             });
         self.open = open;
@@ -385,6 +390,7 @@ impl SpriteLibrary {
             match sheet.set_grid(grid) {
                 Ok(()) => {
                     self.tile_draft = Default::default();
+                    extract::invalidate();
                     self.status = "Grid updated".into();
                 }
                 Err(error) => self.status = error,
