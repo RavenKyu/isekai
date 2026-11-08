@@ -74,7 +74,7 @@ impl Dev {
             .library
             .apply_pending(&self.gl, &mut self.renderer);
         self.platform.new_frame(&mut self.imgui)?;
-        self.tools.draw(self.imgui.frame());
+        self.tools.draw(self.imgui.frame(), sdl3::timer::ticks());
         Ok(())
     }
 

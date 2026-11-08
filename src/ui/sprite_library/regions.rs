@@ -129,8 +129,8 @@ pub(super) fn memory_header(library: &mut SpriteLibrary, ui: &Ui) {
         }
     });
 }
-pub(super) fn sheet_view(library: &mut SpriteLibrary, ui: &Ui) {
-    let overlays = STATE.with(|state| {
+pub(super) fn sheet_view(library: &mut SpriteLibrary, ui: &Ui, mut overlays: Vec<Overlay>) {
+    let regions = STATE.with(|state| {
         let mut state = state.borrow_mut();
         let Some(sheet) = &library.sheet else {
             return vec![];
@@ -151,6 +151,7 @@ pub(super) fn sheet_view(library: &mut SpriteLibrary, ui: &Ui) {
             })
             .unwrap_or_default()
     });
+    overlays.extend(regions);
     library.sheet_view(ui, &overlays);
 }
 pub(super) fn tab(library: &mut SpriteLibrary, ui: &Ui) {
