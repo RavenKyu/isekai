@@ -6,19 +6,20 @@ cd -- "$checkout"
 profile=debug
 args=()
 dev=0
+usage() { printf 'Usage: %s [--release] [--dev]\n' "$0" >&2; exit 2; }
 for arg in "$@"; do
     case "$arg" in
         --release)
-            [[ "$profile" == debug ]] || { printf 'Usage: %s [--release] [--dev]\n' "$0" >&2; exit 2; }
+            [[ "$profile" == debug ]] || usage
             profile=release
             args+=(--release)
             ;;
         --dev)
-            [[ "$dev" == 0 ]] || { printf 'Usage: %s [--release] [--dev]\n' "$0" >&2; exit 2; }
+            [[ "$dev" == 0 ]] || usage
             dev=1
             args+=(--features dev)
             ;;
-        *) printf 'Usage: %s [--release] [--dev]\n' "$0" >&2; exit 2 ;;
+        *) usage ;;
     esac
 done
 # Keep all artifacts in this checkout, even if a caller exports CARGO_TARGET_DIR.

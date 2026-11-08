@@ -28,7 +28,8 @@ dev도 처음에는 검은 창이다. 물리 백틱 키(scancode `Grave`, 보통
 키를 길게 누를 때의 반복 입력은 토글하지 않는다. Ctrl·Alt·GUI 조합 키도 무시하며 Shift 조합은 허용한다.
 ImGui가 텍스트 입력을 요청할 때는 백틱을 문자로 입력하며 도구를 숨기지 않는다.
 라벨은 ASCII 영어다. 한글 폰트가 없어 한글 글리프는 `?`로 보인다.
-창 배치나 설정을 `imgui.ini`에 저장하지 않으며 Info/Settings 창은 아직 없다.
+창 배치나 설정을 `imgui.ini`에 저장하지 않는다. Demo의 `Log To File`도 `imgui_log.txt`를
+만들지 않으며 Info/Settings 창은 아직 없다.
 
 `dev`는 프로필과 별개다. 최적화한 개발 도구도 다음처럼 실행할 수 있다.
 

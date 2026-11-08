@@ -23,8 +23,7 @@ pub struct Dev {
 
 impl Dev {
     pub fn new(gl: &Rc<glow::Context>, window: &Window, gl_context: &GLContext) -> AppResult<Self> {
-        let mut imgui = Context::create();
-        imgui.set_ini_filename(None::<String>)?;
+        let mut imgui = context()?;
         // Attach Glow first: the SDL C++ backend advertises X11 viewport bits
         // that this single-viewport Rust build cannot republish through Glow's
         // validated set_backend_flags API. Preserve SDL's ownership of its flags.
@@ -68,14 +67,11 @@ impl Dev {
         self.tools.is_visible()
     }
 
-    pub fn render(&mut self, measure: bool) -> AppResult<usize> {
+    // Returns the frame's UI vertex count; reading it from draw data is free.
+    pub fn render(&mut self) -> AppResult<usize> {
         let pending = self.imgui.render(self.renderer.renderer_consumer()?);
         let reconciled = self.renderer.reconcile_frame(pending)?;
-        let vtx = if measure {
-            reconciled.draw_data().total_vtx_count()
-        } else {
-            0
-        };
+        let vtx = reconciled.draw_data().total_vtx_count();
         self.renderer.render_reconciled(reconciled)?;
         Ok(vtx)
     }
@@ -88,6 +84,15 @@ impl Dev {
         platform?;
         Ok(())
     }
+}
+
+// ImGui writes nothing to disk: no imgui.ini, and the Demo's "Log To File"
+// becomes a no-op instead of appending imgui_log.txt to the working directory.
+pub(crate) fn context() -> AppResult<Context> {
+    let mut imgui = Context::create();
+    imgui.set_ini_filename(None::<String>)?;
+    imgui.set_log_filename(None::<String>)?;
+    Ok(imgui)
 }
 
 // Inspect the previous frame's text-input request, independently of key capture.

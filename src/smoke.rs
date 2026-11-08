@@ -12,7 +12,6 @@ pub struct Smoke {
     target: u32,
     frames: u32,
     started_ms: Option<u64>,
-    opened: bool,
     probe_received: bool,
 }
 
@@ -75,7 +74,6 @@ impl Smoke {
             target,
             frames: 0,
             started_ms: None,
-            opened: false,
             probe_received: false,
         }))
     }
@@ -85,10 +83,16 @@ impl Smoke {
         self.probe_received = true;
     }
 
+    // A started blank smoke counts once its probe arrived; dev counts open frames.
+    fn counts(&self, visible: bool) -> bool {
+        match self.expect {
+            Expect::Blank => self.probe_received,
+            Expect::Drawn => visible,
+        }
+    }
+
     pub fn is_last_frame(&self, visible: bool) -> bool {
-        self.started_ms.is_some()
-            && (matches!(self.expect, Expect::Blank) && self.probe_received || visible)
-            && self.frames + 1 == self.target
+        self.started_ms.is_some() && self.counts(visible) && self.frames + 1 == self.target
     }
 
     pub fn finish_frame(
@@ -107,20 +111,23 @@ impl Smoke {
             self.started_ms = Some(now_ms);
             return Ok(Step::SendKeys);
         };
-        // In the browser a fast blank smoke could finish before CDP sends its
-        // probe. Count blank frames only once that input reached the app too.
-        if matches!(self.expect, Expect::Blank) && !self.probe_received {
-            if now_ms.saturating_sub(started_ms) >= 5_000 {
-                return Err("smoke key probe did not arrive within 5s".into());
+        let waited = now_ms.saturating_sub(started_ms) >= 5_000;
+        // Dev tools have opened exactly when an open frame has been counted.
+        let opened = self.frames > 0;
+        match self.expect {
+            // In the browser a fast blank smoke could finish before CDP sends its
+            // probe. Count blank frames only once that input reached the app too.
+            Expect::Blank if !self.counts(visible) => {
+                if waited {
+                    return Err("smoke key probe did not arrive within 5s".into());
+                }
+                return Ok(Step::Continue);
             }
-            return Ok(Step::Continue);
-        }
-        if matches!(self.expect, Expect::Drawn) {
-            if !self.opened && now_ms.saturating_sub(started_ms) >= 5_000 {
+            Expect::Drawn if !opened && waited => {
                 return Err("dev tools did not open within 5s".into());
             }
-            if !visible {
-                if self.opened {
+            Expect::Drawn if !self.counts(visible) => {
+                if opened {
                     return Err("dev tools closed before smoke completed".into());
                 }
                 if vtx != 0 {
@@ -128,7 +135,7 @@ impl Smoke {
                 }
                 return Ok(Step::Continue);
             }
-            self.opened = true;
+            _ => {}
         }
         self.frames += 1;
         if self.frames != self.target {
@@ -261,7 +268,8 @@ mod tests {
         for (vtx, lit) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
             let mut smoke = smoke(Expect::Blank, 1);
             assert_eq!(smoke.finish_frame(0, false, 0, 0).unwrap(), Step::SendKeys);
-            assert!(!smoke.is_last_frame(false));
+            // Measurement and counting share one predicate; visibility is not a probe.
+            assert!(!smoke.is_last_frame(false) && !smoke.is_last_frame(true));
             assert_eq!(smoke.finish_frame(1, false, 0, 0).unwrap(), Step::Continue);
             smoke.observe_key_probe();
             assert!(smoke.is_last_frame(false));

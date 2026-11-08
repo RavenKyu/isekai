@@ -135,7 +135,7 @@ impl App {
             .as_ref()
             .is_some_and(|smoke| smoke.is_last_frame(visible));
         #[cfg(feature = "dev")]
-        let vtx = self.dev.render(self.smoke.is_some())?;
+        let vtx = self.dev.render()?;
         #[cfg(not(feature = "dev"))]
         let vtx = 0;
         let lit = if measure {

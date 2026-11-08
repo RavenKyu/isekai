@@ -50,9 +50,9 @@ impl DevTools {
     fn menu_bar(&mut self, ui: &Ui) {
         ui.main_menu_bar(|| {
             ui.menu("View", || {
-                ui.menu_item_toggle("Frame stats", None::<&str>, &mut self.frame_stats, true);
-                ui.menu_item_toggle("Dear ImGui Demo", None::<&str>, &mut self.demo, true);
-                ui.menu_item_toggle("Dear ImGui Metrics", None::<&str>, &mut self.metrics, true);
+                ui.menu_item_toggle_no_shortcut("Frame stats", &mut self.frame_stats, true);
+                ui.menu_item_toggle_no_shortcut("Dear ImGui Demo", &mut self.demo, true);
+                ui.menu_item_toggle_no_shortcut("Dear ImGui Metrics", &mut self.metrics, true);
             });
             // Add future Info/Settings entries here, with their window draw in draw().
         });
@@ -91,8 +91,9 @@ mod tests {
 
     #[test]
     fn menus_and_each_window_contribute_geometry() {
-        let mut context = Context::create();
-        context.set_ini_filename(None::<String>).unwrap();
+        // The app's own context setup: no ImGui path may write a file.
+        let mut context = crate::dev::context().unwrap();
+        assert!(context.io().ini_filename().is_none() && context.io().log_filename().is_none());
         context.io_mut().set_display_size([1280.0, 720.0]);
         context.io_mut().set_delta_time(1.0 / 60.0);
         context

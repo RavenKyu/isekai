@@ -22,12 +22,13 @@ for target in host wasm32-unknown-emscripten; do
     fi
     graph=$(cargo tree --locked -e normal,build --prefix none "${target_args[@]}") \
         || fail "cannot inspect non-dev graph ($target)"
-    if [[ "$graph" == *dear-imgui* ]]; then
+    # Match package names at line start; the root line carries the checkout path.
+    if grep -q '^dear-imgui' <<<"$graph"; then
         fail "imgui dependency in non-dev graph ($target)"
     fi
     graph=$(cargo tree --locked -e normal,build --prefix none "${target_args[@]}" --features dev) \
         || fail "cannot inspect dev graph ($target)"
-    if ! python3 -c 'import re,sys; sys.exit(not any(re.match(r"dear-imgui-rs v", line) for line in sys.stdin))' <<<"$graph"; then
+    if ! grep -q '^dear-imgui-rs v' <<<"$graph"; then
         fail "positive control missing dear-imgui-rs ($target)"
     fi
 done

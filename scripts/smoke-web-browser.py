@@ -75,26 +75,29 @@ def main(browser, url, directory):
             call('Page.navigate', {'url': url}, session)
             # postRun follows App::new and RAF registration. Two RAF callbacks
             # ensure that at least one actual hidden app frame precedes the key.
+            # A result or error before readiness skips the keys but keeps evidence.
+            ready = False
             while time.monotonic() < poll_deadline:
                 result = call('Runtime.evaluate', {
-                    'expression': "document.getElementById('rn-log')?.dataset.ready === 'true'",
+                    'expression': "(log => log ? [log.dataset.ready === 'true', log.textContent]"
+                                  " : [false, ''])(document.getElementById('rn-log'))",
                     'returnByValue': True,
                 }, session)
-                if result.get('result', {}).get('value') or errors:
+                ready, text = result.get('result', {}).get('value') or [False, '']
+                if ready or errors or 'rn-smoke:' in text:
                     break
                 time.sleep(0.05)
-            else:
-                raise ValueError('app did not signal readiness')
-            call('Runtime.evaluate', {
-                'expression': 'new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))',
-                'awaitPromise': True,
-            }, session)
-            call('Runtime.evaluate', {'expression': "document.getElementById('canvas').focus()"}, session)
-            for kind, repeat in [('keyDown', False), ('keyDown', True), ('keyUp', False)]:
-                call('Input.dispatchKeyEvent', {
-                    'type': kind, 'code': 'Backquote', 'key': '`',
-                    'windowsVirtualKeyCode': 192, 'autoRepeat': repeat,
+            if ready and not errors:
+                call('Runtime.evaluate', {
+                    'expression': 'new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))',
+                    'awaitPromise': True,
                 }, session)
+                call('Runtime.evaluate', {'expression': "document.getElementById('canvas').focus()"}, session)
+                for kind, repeat in [('keyDown', False), ('keyDown', True), ('keyUp', False)]:
+                    call('Input.dispatchKeyEvent', {
+                        'type': kind, 'code': 'Backquote', 'key': '`',
+                        'windowsVirtualKeyCode': 192, 'autoRepeat': repeat,
+                    }, session)
             # CLI --dump-dom can run before RAF callbacks, even when its later
             # screenshot shows completed frames. Wait for the actual app report.
             line = ''
@@ -115,6 +118,8 @@ def main(browser, url, directory):
             (directory / 'console.json').write_text(json.dumps(errors, indent=2))
             if errors:
                 raise ValueError('browser console/network error; see console.json')
+            if not ready and not line:
+                raise ValueError('app did not signal readiness')
             if not line:
                 raise ValueError('missing smoke result before browser deadline')
         finally:
