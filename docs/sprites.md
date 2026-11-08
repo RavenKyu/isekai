@@ -130,6 +130,9 @@ cargo run --features dev
    이미지 안의 격자 밖을 클릭하면 선택을 비운다.
 6. `Tiles`는 단일 선택의 이름·쉼표 구분 태그·한 줄씩 `key=value` 속성을 편집한다.
    `=`가 없는 속성은 오류다. `Tile animation`을 켜고 mode, col/row/ms, 프레임 추가·위아래·삭제를 편집한다.
+   다른 셀을 프레임으로 넣으려면 `Pin tile`을 켠다. 켜 두면 시트에서 다른 셀을 골라도 편집 대상이 그대로이고,
+   `Add selected cells`가 고른 셀들을 행 순서, 같은 행에서는 왼쪽부터 프레임에 더한다. 끄면 다시 단일 선택을 따른다.
+   격자를 바꾸거나 시트를 다시 열면 고정이 풀린다.
 7. `Sprites`의 `New rect from selection` 또는 `New set from selection`으로 오브젝트를 만든다.
    rect는 선택의 경계 사각, set은 선택 셀만 담는다. pivot 기본값은 경계 상자 중심이며 수정할 수 있다.
    rect 좌표·크기, set 각 part의 셀과 음수도 가능한 dx/dy를 편집한다.
