@@ -6,6 +6,15 @@ fail() {
     exit 1
 }
 
+case "$#:$*" in
+    0:) ;;
+    1:--dev) ;;
+    *) printf 'Usage: %s [--dev]\n' "$0" >&2; exit 2 ;;
+esac
+if [ "$#" -eq 1 ]; then
+    set -- --features dev
+fi
+
 for tool in cargo xvfb-run Xvfb timeout python3; do
     command -v "$tool" >/dev/null 2>&1 || fail "missing required tool: $tool"
 done
@@ -18,10 +27,10 @@ export SDL_VIDEODRIVER=x11 LIBGL_ALWAYS_SOFTWARE=1
 # Reserve two seconds for forced cleanup within the 60-second total budget.
 # Each shutdown event needs its own process: SDL's platform session is global.
 if timeout --kill-after=2s 58s xvfb-run -a sh -c '
-    cargo test --locked --test smoke_native -- --ignored &&
-    cargo test --locked --bin rusty-nails -- --ignored &&
-    RN_TEST_CLOSE=1 cargo test --locked --bin rusty-nails -- --ignored
-'; then
+    cargo test --locked "$@" --test smoke_native -- --ignored &&
+    cargo test --locked "$@" --bin rusty-nails -- --ignored &&
+    RN_TEST_CLOSE=1 cargo test --locked "$@" --bin rusty-nails -- --ignored
+' sh "$@"; then
     exit 0
 else
     status=$?

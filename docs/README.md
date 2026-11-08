@@ -1,6 +1,7 @@
 # Rusty Nails 개발 시작
 
-Rust, SDL3, Dear ImGui로 같은 `Hello World`를 네이티브 창과 브라우저에 그린다.
+Rust와 SDL3로 네이티브 창과 WebGL 2 앱을 만든다. Dear ImGui 개발 도구는
+Cargo의 `dev` feature를 켰을 때만 포함되며 두 플랫폼에서 같은 UI를 쓴다.
 이 문서는 Linux에서 개발 환경을 준비하고 두 실행 경로를 확인하는 안내다.
 모든 명령은 전달받은 저장소 checkout의 최상단에서 실행한다.
 
@@ -16,6 +17,7 @@ Rust, SDL3, Dear ImGui로 같은 `Hello World`를 네이티브 창과 브라우�
 | 스크립트 | Bash, Python 3, `flock`(util-linux), GNU `timeout`(coreutils). |
 | 네이티브 스모크 | `Xvfb`, `xvfb-run`, `xauth`, Mesa software GL. Ubuntu에서는 `xvfb`, `xauth`, `libgl1-mesa-dri`를 준비한다. |
 | 웹·웹 스모크 | WebGL 2를 쓸 수 있는 브라우저. 자동 검사는 `google-chrome` 또는 `chromium`의 headless 모드를 사용한다. |
+| imgui 부재 검사 | `nm`(binutils). 의존성 그래프와 비dev 실행 파일 기호를 검사한다. |
 | 셸 검사 | ShellCheck. Python 보조 도구는 표준 라이브러리만 쓰므로 pip/npm 설치는 없다. |
 
 X11 개발 패키지는 `libx11-dev`, `libxext-dev`, `libxrandr-dev`, `libxcursor-dev`,
@@ -36,13 +38,29 @@ cargo --version
 cargo run
 ```
 
-`rusty-nails` 창 안의 `Hello` 창에 `Hello World`가 보이면 창을 닫는다.
-일반 실행은 계속 그리므로 저절로 종료되지 않는다. 화면 없는 환경에서는
-일반 창 대신 다음 자동 검사를 사용한다.
+기본 빌드는 배경만 검게 지우는 빈 창이다. 창을 닫으면 종료한다.
+개발 도구를 쓰려면 다음처럼 feature를 켜서 다시 실행한다.
+
+```sh
+cargo run --features dev
+```
+
+dev도 검은 창으로 시작한다. 백틱 키(`Grave`, 보통 Esc 아래)를 누르면 상단 메뉴바와
+`Frame stats`가 함께 나타나고 다시 누르면 모두 숨는다. `View` 메뉴에서
+`Dear ImGui Demo`와 `Dear ImGui Metrics`를 여닫는다. 처음에는 `Frame stats`만 켜져
+있다. 창을 닫거나 숨겨도 그 상태는 프로세스 안에서 유지하며 디스크에는 저장하지 않는다.
+키 반복 입력, Ctrl·Alt·GUI 조합 키, 텍스트 입력 중 누른 백틱은 도구를 토글하지 않는다.
+라벨은 ASCII 영어이며 한글 폰트가 없어 한글은 `?`로 보인다.
+
+feature는 빌드 프로필과 별개라 `cargo run --release --features dev`도 가능하다.
+일반 실행은 저절로 종료되지 않는다. 화면 없는 환경에서는 다음 자동 검사를 사용한다.
 
 ```sh
 cargo test --locked
+cargo test --locked --features dev
 scripts/smoke-native.sh
+scripts/smoke-native.sh --dev
+scripts/check-no-imgui.sh
 ```
 
 일반 테스트만으로 디스플레이 검사를 통과한 것은 아니다.
@@ -58,12 +76,17 @@ scripts/serve-web.sh
 ```
 
 마지막 명령을 실행한 터미널을 둔 채 `http://127.0.0.1:8080/`을 브라우저로 연다.
-같은 `Hello World`가 보이는지 확인한 뒤 터미널에서 Ctrl-C로 서버를 종료한다.
+기본 빌드는 검은 canvas다. 확인한 뒤 터미널에서 Ctrl-C로 서버를 종료한다.
+개발 도구가 필요하면 `scripts/build-web.sh --dev`로 다시 빌드하고 서버를 띄운다.
+네이티브와 같은 백틱 키와 `View` 메뉴를 쓴다. `target/web/`의 내용은 마지막 빌드가 덮어쓴다.
 다른 터미널에서는 빌드한 페이지를 자동으로 검사할 수 있다.
 
 ```sh
 scripts/smoke-web.sh
 ```
+
+dev 빌드 뒤에는 `scripts/smoke-web.sh --dev`를 사용한다. 기대 모드와 빌드 모드가
+다르면 검사에 실패하므로 각 스모크 실행 직전에 같은 모드로 빌드한다.
 
 SDK 공유 위치, 다른 포트, release 빌드와 오류 진단은
 [웹 실행과 문제 해결](web.md)에 있다. 웹은 upstream이 지원하지 않는 로컬 패치
@@ -76,8 +99,10 @@ SDK 공유 위치, 다른 포트, release 빌드와 오류 진단은
 - [웹 실행과 문제 해결](web.md): SDK 설치, 빌드 산출물, 서버와 브라우저 증거.
 - [의존성과 패치 관리](dependencies.md): 버전 정본, 승인된 패치, 판 올림 절차.
 
-CI 파일의 위치는 `.github/workflows/ci.yml`이다. 이 에픽에서는 git remote가 없어
-GitHub Actions의 실제 실행을 확인하지 못했다. 로컬 검사 성공과 원격 CI 성공을
-구분해야 한다. CI가 사용하는 검사도 로컬의 같은 스크립트가 입구다.
+CI 파일은 `.github/workflows/ci.yml`이다. origin 저장소가 연동되어 있어 push와 pull request마다
+실행한다. 2026-11-08 develop CI는 성공했다. v0.2.0에서 추가한 dev·비dev 두 모드 검사와
+imgui 부재 검사는 로컬에서만 확인했다. 이 에픽의 원격 CI는 아직 실행하지 않았으며,
+첫 실행은 작업을 마친 뒤 사람이 승인해 push할 때 일어난다.
+CI도 로컬과 같은 스모크 스크립트를 사용한다.
 
-Decided in: rn-35g9
+Decided in: rn-35g9, rn-7w7b
