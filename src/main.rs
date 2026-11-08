@@ -1,7 +1,9 @@
 mod app;
 #[cfg(feature = "dev")]
 mod dev;
+mod raster;
 mod smoke;
+mod sprite;
 #[cfg(feature = "dev")]
 mod ui;
 
