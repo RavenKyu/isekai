@@ -4,6 +4,7 @@
 pub enum Expect {
     Drawn,
     Blank,
+    Sprite,
 }
 
 #[derive(Debug)]
@@ -86,7 +87,7 @@ impl Smoke {
     // A started blank smoke counts once its probe arrived; dev counts open frames.
     fn counts(&self, visible: bool) -> bool {
         match self.expect {
-            Expect::Blank => self.probe_received,
+            Expect::Blank | Expect::Sprite => self.probe_received,
             Expect::Drawn => visible,
         }
     }
@@ -117,7 +118,7 @@ impl Smoke {
         match self.expect {
             // In the browser a fast blank smoke could finish before CDP sends its
             // probe. Count blank frames only once that input reached the app too.
-            Expect::Blank if !self.counts(visible) => {
+            Expect::Blank | Expect::Sprite if !self.counts(visible) => {
                 if waited {
                     return Err("smoke key probe did not arrive within 5s".into());
                 }
@@ -145,6 +146,12 @@ impl Smoke {
             Expect::Drawn if vtx == 0 => return Err("vtx=0: no UI geometry".into()),
             Expect::Drawn if lit == 0 => {
                 return Err("lit=0: framebuffer matches clear color".into());
+            }
+            Expect::Sprite if vtx != 0 => {
+                return Err(format!("vtx={vtx}: non-dev frame drew UI geometry"));
+            }
+            Expect::Sprite if lit == 0 => {
+                return Err("lit=0: sprite playback drew nothing".into());
             }
             Expect::Blank if vtx != 0 || lit != 0 => {
                 return Err(format!("vtx={vtx} lit={lit}: non-dev frame is not blank"));
@@ -308,5 +315,38 @@ mod tests {
             smoke.finish_frame(0, false, 0, 0).unwrap();
             assert!(smoke.finish_frame(1, true, vtx, lit).is_err());
         }
+    }
+}
+
+#[cfg(test)]
+mod sprite_tests {
+    use super::*;
+    fn smoke() -> Smoke {
+        Smoke::parse(["--smoke-frames".into(), "1".into()], Expect::Sprite)
+            .unwrap()
+            .unwrap()
+    }
+    #[test]
+    fn sprite_requires_probe_no_ui_and_lit_pixels() {
+        for (vtx, lit) in [(0, 0), (1, 0), (1, 1), (0, 1)] {
+            let mut smoke = smoke();
+            assert_eq!(smoke.finish_frame(0, false, 0, 99), Ok(Step::SendKeys));
+            assert!(!smoke.is_last_frame(false));
+            assert_eq!(smoke.finish_frame(4999, false, 0, 99), Ok(Step::Continue));
+            smoke.observe_key_probe();
+            assert!(smoke.is_last_frame(false));
+            assert_eq!(
+                smoke.finish_frame(4999, false, vtx, lit).is_ok(),
+                vtx == 0 && lit > 0
+            );
+        }
+        let mut late = smoke();
+        late.finish_frame(0, false, 0, 0).unwrap();
+        assert!(
+            late.finish_frame(5000, false, 0, 99)
+                .unwrap_err()
+                .contains("key probe")
+        );
+        assert!(smoke().finish_frame(0, false, 1, 99).is_err());
     }
 }

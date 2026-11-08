@@ -103,3 +103,5 @@ jobs:
         run: scripts/build-web.sh
       - name: Run web smoke (non-dev)
         run: scripts/smoke-web.sh
+      - name: Run web smoke (play)
+        run: scripts/smoke-web.sh --play
