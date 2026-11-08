@@ -1,8 +1,5 @@
 use std::{error::Error, rc::Rc};
 
-use dear_imgui_glow::GlowRenderer;
-use dear_imgui_rs::Context;
-use dear_imgui_sdl3::Sdl3PlatformBackend;
 use glow::HasContext;
 use sdl3::{
     event::{Event, WindowEvent},
@@ -18,12 +15,11 @@ pub enum Flow {
     SmokeComplete(crate::smoke::Report),
 }
 
-// Fields drop in declaration order: attachments and ImGui must be gone before
+// Fields drop in declaration order: the dev attachments and ImGui must be gone before
 // GLContext/Window, and SDL must outlive everything that uses it.
 pub struct App {
-    renderer: GlowRenderer,
-    platform: Sdl3PlatformBackend,
-    imgui: Context,
+    #[cfg(feature = "dev")]
+    dev: crate::dev::Dev,
     gl: Rc<glow::Context>,
     events: sdl3::EventPump,
     smoke: Option<crate::smoke::Smoke>,
@@ -71,29 +67,11 @@ impl App {
             })
         });
         let events = sdl.event_pump()?;
-        let mut imgui = Context::create();
-        imgui.set_ini_filename(None::<String>)?;
-        // Attach Glow first: the SDL C++ backend advertises X11 viewport bits
-        // that this single-viewport Rust build cannot republish through Glow's
-        // validated set_backend_flags API. Preserve SDL's ownership of its flags.
-        let mut renderer = GlowRenderer::with_shared_context(Rc::clone(&gl), &mut imgui)?;
-        // SAFETY: on initialization failure locals keep window/context alive
-        // through ImGui teardown. On success App's field order provides that
-        // lifetime. frame/shutdown restore this GL context before renderer work,
-        // and App stays on the initializing thread.
-        let platform = match unsafe {
-            Sdl3PlatformBackend::init_platform_for_opengl(&mut imgui, &window, &gl_context)
-        } {
-            Ok(platform) => platform,
-            Err(error) => {
-                renderer.shutdown(&mut imgui)?;
-                return Err(error.into());
-            }
-        };
+        #[cfg(feature = "dev")]
+        let dev = crate::dev::Dev::new(&gl, &window, &gl_context)?;
         Ok(Box::new(Self {
-            renderer,
-            platform,
-            imgui,
+            #[cfg(feature = "dev")]
+            dev,
             gl,
             events,
             smoke,
@@ -108,7 +86,8 @@ impl App {
         self.window.gl_make_current(&self.gl_context)?;
         let mut quit = false;
         for event in self.events.poll_iter() {
-            self.platform.process_event(&mut self.imgui, &event)?;
+            #[cfg(feature = "dev")]
+            self.dev.process_event(&event)?;
             quit |= match event {
                 Event::Quit { .. } => true,
                 Event::Window {
@@ -125,8 +104,8 @@ impl App {
             }
             return Ok(Flow::Quit);
         }
-        self.platform.new_frame(&mut self.imgui)?;
-        crate::ui::hello_world(self.imgui.frame());
+        #[cfg(feature = "dev")]
+        self.dev.begin_frame()?;
         let (width, height) = self.window.size_in_pixels();
         // SAFETY: the owned context is current; these calls use no client pointers.
         unsafe {
@@ -134,18 +113,14 @@ impl App {
             self.gl.clear_color(0.0, 0.0, 0.0, 1.0);
             self.gl.clear(glow::COLOR_BUFFER_BIT);
         }
-        let pending = self.imgui.render(self.renderer.renderer_consumer()?);
-        let reconciled = self.renderer.reconcile_frame(pending)?;
         let measure = self
             .smoke
             .as_ref()
             .is_some_and(|smoke| smoke.is_last_frame());
-        let vtx = if measure {
-            reconciled.draw_data().total_vtx_count()
-        } else {
-            0
-        };
-        self.renderer.render_reconciled(reconciled)?;
+        #[cfg(feature = "dev")]
+        let vtx = self.dev.render()?;
+        #[cfg(not(feature = "dev"))]
+        let vtx = 0;
         let lit = if measure {
             self.lit_pixels(width, height)?
         } else {
@@ -198,13 +173,15 @@ impl App {
 
     // The web driver deliberately retains App until the page is destroyed.
     #[cfg_attr(target_os = "emscripten", allow(dead_code))]
-    pub fn shutdown(mut self: Box<Self>) -> AppResult<()> {
+    // Consume the same heap-owned App used by the native and browser drivers.
+    #[allow(clippy::boxed_local)]
+    pub fn shutdown(self: Box<Self>) -> AppResult<()> {
         self.window.gl_make_current(&self.gl_context)?;
-        // Always attempt both shutdowns, in renderer/platform order.
-        let renderer = self.renderer.shutdown(&mut self.imgui);
-        let platform = self.platform.shutdown(&mut self.imgui);
-        renderer?;
-        platform?;
+        #[cfg(feature = "dev")]
+        {
+            let mut app = self;
+            app.dev.shutdown()?;
+        }
         Ok(())
     }
 }

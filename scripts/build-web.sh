@@ -5,14 +5,22 @@ checkout=$(cd -- "$script_dir/.." && pwd -P)
 cd -- "$checkout"
 profile=debug
 args=()
-if (( $# )); then
-    if [[ $# != 1 || $1 != --release ]]; then
-        printf 'Usage: %s [--release]\n' "$0" >&2
-        exit 2
-    fi
-    profile=release
-    args+=(--release)
-fi
+dev=0
+for arg in "$@"; do
+    case "$arg" in
+        --release)
+            [[ "$profile" == debug ]] || { printf 'Usage: %s [--release] [--dev]\n' "$0" >&2; exit 2; }
+            profile=release
+            args+=(--release)
+            ;;
+        --dev)
+            [[ "$dev" == 0 ]] || { printf 'Usage: %s [--release] [--dev]\n' "$0" >&2; exit 2; }
+            dev=1
+            args+=(--features dev)
+            ;;
+        *) printf 'Usage: %s [--release] [--dev]\n' "$0" >&2; exit 2 ;;
+    esac
+done
 # Keep all artifacts in this checkout, even if a caller exports CARGO_TARGET_DIR.
 export CARGO_TARGET_DIR="$checkout/target"
 "$script_dir/with-emsdk.sh" cargo build --locked --bin rusty-nails \

@@ -1,7 +1,14 @@
 //! Platform-independent smoke arguments, completion and output contract.
 
+#[derive(Debug, Clone, Copy)]
+pub enum Expect {
+    Drawn,
+    Blank,
+}
+
 #[derive(Debug)]
 pub struct Smoke {
+    expect: Expect,
     target: u32,
     frames: u32,
 }
@@ -31,7 +38,10 @@ pub fn failure(reason: &str) -> String {
 }
 
 impl Smoke {
-    pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Option<Self>, String> {
+    pub fn parse(
+        args: impl IntoIterator<Item = String>,
+        expect: Expect,
+    ) -> Result<Option<Self>, String> {
         let mut args = args.into_iter();
         let Some(arg) = args.next() else {
             return Ok(None);
@@ -50,7 +60,11 @@ impl Smoke {
             .ok()
             .filter(|n| *n > 0)
             .ok_or("--smoke-frames requires a positive integer")?;
-        Ok(Some(Self { target, frames: 0 }))
+        Ok(Some(Self {
+            expect,
+            target,
+            frames: 0,
+        }))
     }
 
     pub fn is_last_frame(&self) -> bool {
@@ -62,11 +76,15 @@ impl Smoke {
         if self.frames != self.target {
             return Ok(None);
         }
-        if vtx == 0 {
-            return Err("vtx=0: no UI geometry".into());
-        }
-        if lit == 0 {
-            return Err("lit=0: framebuffer matches clear color".into());
+        match self.expect {
+            Expect::Drawn if vtx == 0 => return Err("vtx=0: no UI geometry".into()),
+            Expect::Drawn if lit == 0 => {
+                return Err("lit=0: framebuffer matches clear color".into());
+            }
+            Expect::Blank if vtx != 0 || lit != 0 => {
+                return Err(format!("vtx={vtx} lit={lit}: non-dev frame is not blank"));
+            }
+            _ => {}
         }
         Ok(Some(Report {
             frames: self.frames,
@@ -81,7 +99,7 @@ mod tests {
     use super::*;
 
     fn parse(args: &[&str]) -> Result<Option<Smoke>, String> {
-        Smoke::parse(args.iter().map(|s| s.to_string()))
+        Smoke::parse(args.iter().map(|s| s.to_string()), Expect::Drawn)
     }
 
     #[test]
@@ -114,6 +132,24 @@ mod tests {
             failure("bad\n context\tstate"),
             "rn-smoke: fail bad context state"
         );
+    }
+
+    #[test]
+    fn blank_mode_requires_zero_geometry_and_black_pixels() {
+        for (vtx, lit) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+            let mut smoke = Smoke::parse(["--smoke-frames".into(), "1".into()], Expect::Blank)
+                .unwrap()
+                .unwrap();
+            let result = smoke.finish_frame(vtx, lit);
+            if vtx == 0 && lit == 0 {
+                assert_eq!(
+                    result.unwrap().unwrap().line(),
+                    "rn-smoke: ok frames=1 vtx=0 lit=0"
+                );
+            } else {
+                assert!(result.is_err());
+            }
+        }
     }
 
     #[test]

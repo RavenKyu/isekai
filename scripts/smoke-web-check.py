@@ -50,7 +50,7 @@ class LogParser(html.parser.HTMLParser):
             self.lines += data
 
 
-def check(directory):
+def check(directory, dev=False):
     directory = pathlib.Path(directory)
     parser = LogParser()
     parser.feed((directory / 'dom.html').read_text())
@@ -66,7 +66,8 @@ def check(directory):
     for resource in ('rusty-nails.js', 'rusty-nails.wasm'):
         if not re.search(r'GET /' + re.escape(resource) + r' HTTP/[^" ]+" 200 ', server):
             raise ValueError('missing successful request: ' + resource)
-    match = re.fullmatch(r'rn-smoke: ok frames=3 vtx=[1-9][0-9]* lit=[1-9][0-9]*\n', parser.lines)
+    counts = r'vtx=[1-9][0-9]* lit=[1-9][0-9]*' if dev else r'vtx=0 lit=0'
+    match = re.fullmatch(r'rn-smoke: ok frames=3 ' + counts + r'\n', parser.lines)
     if not match:
         raise ValueError('missing or malformed smoke result: ' + repr(parser.lines))
     print(parser.lines, end='')
@@ -74,10 +75,14 @@ def check(directory):
 
 if __name__ == '__main__':
     try:
-        if sys.argv[1] == 'ready':
+        if len(sys.argv) == 3 and sys.argv[1] == 'ready':
             ready(sys.argv[2])
+        elif len(sys.argv) in (3, 4) and sys.argv[1] == 'check' and (
+                len(sys.argv) == 3 or sys.argv[3] == '--dev'):
+            check(sys.argv[2], len(sys.argv) == 4)
         else:
-            check(sys.argv[2])
+            print('Usage: smoke-web-check.py ready <log> | check <dir> [--dev]', file=sys.stderr)
+            sys.exit(2)
     except (OSError, ValueError) as error:
         print('rn-smoke: fail ' + str(error).replace('\n', ' '), file=sys.stderr)
         sys.exit(1)

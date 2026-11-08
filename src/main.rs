@@ -1,8 +1,19 @@
 mod app;
+#[cfg(feature = "dev")]
+mod dev;
 mod smoke;
+#[cfg(feature = "dev")]
 mod ui;
 
 use app::{App, AppResult, Flow};
+
+fn smoke_expect() -> smoke::Expect {
+    if cfg!(feature = "dev") {
+        smoke::Expect::Drawn
+    } else {
+        smoke::Expect::Blank
+    }
+}
 
 #[cfg(not(target_os = "emscripten"))]
 fn run(smoke: Option<smoke::Smoke>) -> AppResult<Option<smoke::Report>> {
@@ -25,7 +36,9 @@ fn run(smoke: Option<smoke::Smoke>) -> AppResult<Option<smoke::Report>> {
 fn main() -> std::process::ExitCode {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
     let smoking = !args.is_empty();
-    let result = smoke::Smoke::parse(args).map_err(Into::into).and_then(run);
+    let result = smoke::Smoke::parse(args, smoke_expect())
+        .map_err(Into::into)
+        .and_then(run);
     match result {
         Ok(report) => {
             if let Some(report) = report {
@@ -85,9 +98,10 @@ mod web {
     }
 
     pub fn run() {
-        let app: AppResult<Box<App>> = smoke::Smoke::parse(std::env::args().skip(1))
-            .map_err(Into::into)
-            .and_then(App::new);
+        let app: AppResult<Box<App>> =
+            smoke::Smoke::parse(std::env::args().skip(1), smoke_expect())
+                .map_err(Into::into)
+                .and_then(App::new);
         let app = match app {
             Ok(app) => app,
             Err(error) => {
