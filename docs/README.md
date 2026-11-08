@@ -1,7 +1,8 @@
 # Rusty Nails 개발 시작
 
 Rust와 SDL3로 네이티브 창과 WebGL 2 앱을 만든다. Dear ImGui 개발 도구는
-Cargo의 `dev` feature를 켰을 때만 포함되며 두 플랫폼에서 같은 UI를 쓴다.
+Cargo의 `dev` feature를 켰을 때만 포함된다. 기본 개발 창은 두 플랫폼에서 공유하고,
+스프라이트 편집·추출은 네이티브 dev에서 제공한다.
 이 문서는 Linux에서 개발 환경을 준비하고 두 실행 경로를 확인하는 안내다.
 모든 명령은 전달받은 저장소 checkout의 최상단에서 실행한다.
 
@@ -39,6 +40,11 @@ cargo run
 ```
 
 기본 빌드는 배경만 검게 지우는 빈 창이다. 창을 닫으면 종료한다.
+저장소의 자체 제작 스프라이트 예제는 다음으로 재생한다.
+
+```sh
+cargo run -- --play tests/fixtures/example.sprites.json
+```
 개발 도구를 쓰려면 다음처럼 feature를 켜서 다시 실행한다.
 
 ```sh
@@ -51,6 +57,10 @@ dev도 검은 창으로 시작한다. 백틱 키(`Grave`, 보통 Esc 아래)를 
 있다. 창을 닫거나 숨겨도 그 상태는 프로세스 안에서 유지하며 디스크에는 저장하지 않는다.
 키 반복 입력, Ctrl·Alt·GUI 조합 키, 텍스트 입력 중 누른 백틱은 도구를 토글하지 않는다.
 라벨은 ASCII 영어이며 한글 폰트가 없어 한글은 `?`로 보인다.
+
+네이티브 dev의 `Assets > Sprite Library`에서 PNG 가져오기, 격자·타일·sprite·clip 편집,
+미리보기, 영역 후보와 타일셋 추출을 한다. [스프라이트 안내](sprites.md)에 저장 형식과
+사용 순서가 있다. `Guess`는 수동 적용하는 제안이며 큰 맵에서는 약 55초 멈춘 사례가 있다.
 
 feature는 빌드 프로필과 별개라 `cargo run --release --features dev`도 가능하다.
 일반 실행은 저절로 종료되지 않는다. 화면 없는 환경에서는 다음 자동 검사를 사용한다.
@@ -88,6 +98,10 @@ scripts/smoke-web.sh
 dev 빌드 뒤에는 `scripts/smoke-web.sh --dev`를 사용한다. 기대 모드와 빌드 모드가
 다르면 검사에 실패하므로 각 스모크 실행 직전에 같은 모드로 빌드한다.
 
+같은 서버에서 `http://127.0.0.1:8080/?play=example`을 열면 코드 생성 예제를 재생한다.
+`&clip=cycle`로 clip을 지정할 수 있다. 웹에는 편집·추출·저장이 없다.
+비dev 빌드 뒤 `scripts/smoke-web.sh --play`로 재생까지 검사한다.
+
 SDK 공유 위치, 다른 포트, release 빌드와 오류 진단은
 [웹 실행과 문제 해결](web.md)에 있다. 웹은 upstream이 지원하지 않는 로컬 패치
 경로를 사용하며, [의존성과 패치 관리](dependencies.md)에서 그 이유를 설명한다.
@@ -95,14 +109,15 @@ SDK 공유 위치, 다른 포트, release 빌드와 오류 진단은
 
 ## 더 읽기와 CI 상태
 
+- [스프라이트 라이브러리](sprites.md): JSON 사이드카, 편집·추출, 네이티브·웹 재생.
 - [네이티브 개발과 검사](development.md): `App`, 드라이버, 종료, 테스트와 스모크 출력.
 - [웹 실행과 문제 해결](web.md): SDK 설치, 빌드 산출물, 서버와 브라우저 증거.
 - [의존성과 패치 관리](dependencies.md): 버전 정본, 승인된 패치, 판 올림 절차.
 
 CI 파일은 `.github/workflows/ci.yml`이다. origin 저장소가 연동되어 있어 push와 pull request마다
-실행한다. 2026-11-08 develop CI는 성공했다. v0.2.0에서 추가한 dev·비dev 두 모드 검사와
-imgui 부재 검사는 로컬에서만 확인했다. 이 에픽의 원격 CI는 아직 실행하지 않았으며,
-첫 실행은 작업을 마친 뒤 사람이 승인해 push할 때 일어난다.
-CI도 로컬과 같은 스모크 스크립트를 사용한다.
+실행한다. 2026-11-08 develop CI는 성공했다. v0.3.0의 스프라이트 형식·편집·추출,
+dev·비dev 검사와 재생 스모크는 통합 브랜치에서 로컬로 확인했다.
+이 에픽의 원격 CI는 미실행이며 origin push도 하지 않았다.
+CI도 로컬과 같은 스모크 스크립트를 쓰고 웹 비dev 빌드에 `--play` 검사를 추가한다.
 
-Decided in: rn-35g9, rn-7w7b
+Decided in: rn-35g9, rn-7w7b, rn-fcuz

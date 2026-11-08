@@ -15,11 +15,12 @@ pub enum Flow {
     SmokeComplete(crate::smoke::Report),
 }
 
-// Fields drop in declaration order: the dev attachments and ImGui must be gone before
-// GLContext/Window, and SDL must outlive everything that uses it.
+// Fields drop in declaration order: dev attachments, playback textures and shaders precede
+// GLContext/Window; SDL outlives everything that uses it.
 pub struct App {
     #[cfg(feature = "dev")]
     dev: crate::dev::Dev,
+    playback: Option<crate::sprite::playback::Playback>,
     gl: Rc<glow::Context>,
     events: sdl3::EventPump,
     smoke: Option<crate::smoke::Smoke>,
@@ -30,7 +31,10 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(smoke: Option<crate::smoke::Smoke>) -> AppResult<Box<Self>> {
+    pub fn new(
+        smoke: Option<crate::smoke::Smoke>,
+        play: Option<crate::PlayRequest>,
+    ) -> AppResult<Box<Self>> {
         let sdl = sdl3::init()?;
         let video = sdl.video()?;
         let attr = video.gl_attr();
@@ -67,11 +71,32 @@ impl App {
             })
         });
         let events = sdl.event_pump()?;
+        let playback = play
+            .map(|play| {
+                #[cfg(not(target_os = "emscripten"))]
+                {
+                    crate::sprite::playback::Playback::open_native(
+                        std::path::Path::new(&play.source),
+                        play.clip.as_deref(),
+                        &gl,
+                    )
+                }
+                #[cfg(target_os = "emscripten")]
+                {
+                    crate::sprite::playback::Playback::open_embedded(
+                        &play.source,
+                        play.clip.as_deref(),
+                        &gl,
+                    )
+                }
+            })
+            .transpose()?;
         #[cfg(feature = "dev")]
         let dev = crate::dev::Dev::new(&gl, &window, &gl_context)?;
         Ok(Box::new(Self {
             #[cfg(feature = "dev")]
             dev,
+            playback,
             gl,
             events,
             smoke,
@@ -125,6 +150,9 @@ impl App {
             self.gl.viewport(0, 0, width as i32, height as i32);
             self.gl.clear_color(0.0, 0.0, 0.0, 1.0);
             self.gl.clear(glow::COLOR_BUFFER_BIT);
+        }
+        if let Some(playback) = &mut self.playback {
+            playback.draw(sdl3::timer::ticks(), width, height)?;
         }
         #[cfg(feature = "dev")]
         let visible = self.dev.is_visible();
@@ -245,7 +273,23 @@ mod tests {
     #[test]
     #[ignore = "requires a display; run under Xvfb"]
     fn event_shutdown() {
-        let mut app = App::new(None).unwrap();
+        // Texture tests also initialize SDL. Keep each SDL-owning test in its
+        // own process: SDL binds initialization to one OS thread per process.
+        if std::env::var_os("RN_APP_SHUTDOWN_CHILD").is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--ignored",
+                    "--exact",
+                    "app::tests::event_shutdown",
+                    "--nocapture",
+                ])
+                .env("RN_APP_SHUTDOWN_CHILD", "1")
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "shutdown child: {output:?}");
+            return;
+        }
+        let mut app = App::new(None, None).unwrap();
         app.frame().unwrap();
         let event = if std::env::var_os("RN_TEST_CLOSE").is_some() {
             Event::Window {
