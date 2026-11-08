@@ -30,6 +30,7 @@
       print: append,
       printErr: fail,
       onAbort: fail,
+      postRun: [() => { log.dataset.ready = 'true'; }],
       locateFile: (path, prefix) => prefix + (path.endsWith('.wasm') ? 'rusty-nails.wasm' : path),
     };
   </script>

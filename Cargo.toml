@@ -4,10 +4,13 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.95"
 
+[features]
+dev = ["dep:dear-imgui-rs", "dep:dear-imgui-sdl3", "dep:dear-imgui-glow"]
+
 [dependencies]
-dear-imgui-rs = "=0.22.0"
-dear-imgui-sdl3 = "=0.22.0"
-dear-imgui-glow = "=0.22.0"
+dear-imgui-rs = { version = "=0.22.0", optional = true }
+dear-imgui-sdl3 = { version = "=0.22.0", optional = true }
+dear-imgui-glow = { version = "=0.22.0", optional = true }
 glow = "0.18"
 sdl3 = { version = "0.20", features = ["build-from-source"] }
 

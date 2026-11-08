@@ -3,12 +3,16 @@ set -euo pipefail
 script_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 checkout=$(cd -- "$script_dir/.." && pwd -P)
 fail() { printf 'rn-smoke: fail %s\n' "$*" >&2; exit 1; }
+if (( $# > 1 )) || { (( $# == 1 )) && [[ "$1" != --dev ]]; }; then
+    printf 'Usage: %s [--dev]\n' "$0" >&2
+    exit 2
+fi
 for tool in python3 timeout mktemp; do
     command -v "$tool" >/dev/null 2>&1 || fail "missing required tool: $tool"
 done
 # Timeout's process group covers Chrome and the HTTP server as well as this shell.
 if [[ ${RN_SMOKE_WEB_BOUNDED:-0} != 1 ]]; then
-    if RN_SMOKE_WEB_BOUNDED=1 timeout --kill-after=2s 58s "$0"; then
+    if RN_SMOKE_WEB_BOUNDED=1 timeout --kill-after=2s 58s "$0" "$@"; then
         exit 0
     else
         status=$?
@@ -46,4 +50,4 @@ url=$(python3 "$script_dir/smoke-web-check.py" ready "$scratch/server.log")
 printf 'Web smoke URL: %s; evidence: %s\n' "$url" "$scratch" >&2
 python3 "$script_dir/smoke-web-browser.py" "$browser" "${url}?smoke=3" "$scratch" \
     || fail "Chrome failed; evidence: $scratch"
-python3 "$script_dir/smoke-web-check.py" check "$scratch"
+python3 "$script_dir/smoke-web-check.py" check "$scratch" "$@"

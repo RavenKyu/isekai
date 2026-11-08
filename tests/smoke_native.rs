@@ -50,9 +50,14 @@ fn assert_success_line(output: &Output, frames: u32) {
     assert!(output.status.success(), "{output:?}");
     // Use a whole-output regex, including exactly one newline. Keep dependencies
     // unchanged; the script checks that Python is available for this validator.
+    let counts = if cfg!(feature = "dev") {
+        "vtx=[1-9][0-9]* lit=[1-9][0-9]*"
+    } else {
+        "vtx=0 lit=0"
+    };
     let mut validator = Command::new("python3").args(["-c",
-        "import re,sys; s=sys.stdin.read(); assert re.fullmatch(r'rn-smoke: ok frames='+sys.argv[1]+r' vtx=[1-9][0-9]* lit=[1-9][0-9]*\\n',s),repr(s)",
-        &frames.to_string()]).stdin(Stdio::piped()).spawn().unwrap();
+        "import re,sys; s=sys.stdin.read(); assert re.fullmatch(r'rn-smoke: ok frames='+sys.argv[1]+r' '+sys.argv[2]+r'\\n',s),repr(s)",
+        &frames.to_string(), counts]).stdin(Stdio::piped()).spawn().unwrap();
     validator
         .stdin
         .take()

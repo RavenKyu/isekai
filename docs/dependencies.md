@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | Rust | `rust-toolchain.toml`의 channel `1.99.1`, target `wasm32-unknown-emscripten`, rustfmt·clippy | dear-imgui 0.22 계열의 MSRV는 1.95다. Cargo.toml의 rust-version은 최소 버전이며 실행 툴체인은 별도로 고정한다. |
 | emsdk | `.emsdk-version`의 `6.0.13` | Rust의 Emscripten 링크 방식과 `sdl3-sys`의 SDL3 소스 빌드를 실제 빌드·실행으로 검증한 조합이다. Emscripten의 SDL3 포트는 쓰지 않는다. 설치·CI에서 이 파일을 읽고 중복 pin을 만들지 않는다. |
-| dear-imgui-rs/sdl3/glow | `Cargo.toml`에서 각각 `=0.22.0` | core·platform·renderer를 같은 계열로 맞춘다. |
+| dear-imgui-rs/sdl3/glow | `Cargo.toml`에서 각각 `=0.22.0`, optional이며 `dev` feature에서만 포함 | core·platform·renderer를 같은 계열로 맞추고 비dev 빌드에서는 제외한다. |
 | sdl3 | `Cargo.toml`의 `0.20`, `Cargo.lock`의 `0.20.0` | dear-imgui-sdl3가 요구하는 0.20과 맞춰 Window·Event 타입이 갈라지지 않게 한다. |
 | sdl3-sys | `Cargo.lock`의 `0.7.3+SDL-3.4.20` | SDL3의 소스 빌드와 FFI 버전을 잠근다. 첫 빌드는 시스템 SDL 대신 이 소스를 컴파일한다. |
 | glow | `Cargo.toml`의 `0.18`, `Cargo.lock`의 `0.18.0` | 네이티브 OpenGL과 Emscripten WebGL 2 경로를 같은 renderer에서 사용한다. |
@@ -24,6 +24,23 @@ rustc -vV
 scripts/with-emsdk.sh emcc --version
 cargo tree --locked -i sdl3
 ```
+
+`dev`는 default feature에 포함되지 않으며 debug/release 프로필과도 독립적이다.
+`glow`와 `sdl3`는 두 모드 모두 사용한다. imgui 세 crate의 버전이나 로컬 패치를
+바꾸지 않고 의존성을 optional로 분리했다. 비dev와 dev 모드의 의존성은 다음 명령으로 확인한다.
+
+```sh
+cargo tree --locked -e normal,build
+cargo tree --locked -e normal,build --features dev -i dear-imgui-rs
+cargo tree --locked -e normal,build --target wasm32-unknown-emscripten
+cargo tree --locked -e normal,build --target wasm32-unknown-emscripten --features dev -i dear-imgui-rs
+scripts/check-no-imgui.sh
+```
+
+비dev 그래프에는 dear-imgui 패키지가 없어야 하고 dev 그래프에는 있어야 한다.
+자동 검사는 이 양성 대조와 새로 빌드한 비dev 실행 파일의 기호까지 확인하며, 기호가 지워진
+바이너리도 거부한다. `scripts/check-no-imgui.sh --release`는 release 바이너리의 기호 검사다.
+`Cargo.lock`은 두 모드에서 공통이며 feature 분리로 바뀌지 않는다.
 
 SDK는 [공유 설치 절차](web.md#sdk-설치와-worktree-공유)로 준비한다. Rust std를 만든
 emsdk 버전과 이 pin이 일치한다고 보장하는 것은 아니다. LLVM·C++ ABI 호환성은
@@ -91,4 +108,4 @@ Rust의 `-fwasm-exceptions`와 Emscripten 기본 `WASM_LEGACY_EXCEPTIONS` 조합
    실측 Rust/LLVM·emcc 버전, 성공한 설정, 크기와 검사 결과를 트래커에 기록한다.
    [CI 상태](README.md#더-읽기와-ci-상태)의 원격 미실행과 로컬 성공을 구분한다.
 
-Decided in: rn-35g9
+Decided in: rn-35g9, rn-7w7b
