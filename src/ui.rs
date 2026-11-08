@@ -1,6 +1,7 @@
 use dear_imgui_rs::{Condition, Ui, WindowFlags};
 
 pub struct DevTools {
+    visible: bool,
     frame_stats: bool,
     demo: bool,
     metrics: bool,
@@ -9,6 +10,7 @@ pub struct DevTools {
 impl Default for DevTools {
     fn default() -> Self {
         Self {
+            visible: false,
             frame_stats: true,
             demo: false,
             metrics: false,
@@ -17,7 +19,18 @@ impl Default for DevTools {
 }
 
 impl DevTools {
+    pub fn is_visible(&self) -> bool {
+        self.visible
+    }
+
+    pub fn toggle(&mut self) {
+        self.visible = !self.visible;
+    }
+
     pub fn draw(&mut self, ui: &Ui) {
+        if !self.visible {
+            return;
+        }
         self.menu_bar(ui);
         if self.frame_stats {
             ui.window("Frame stats")
@@ -88,43 +101,95 @@ mod tests {
         let consumer = context.create_synchronous_renderer_consumer().unwrap();
         let mut tools = DevTools::default();
         assert!(tools.frame_stats && !tools.demo && !tools.metrics);
-        let mut vertices = |tools: &mut DevTools| {
+        fn record(
+            context: &mut Context,
+            consumer: &dear_imgui_rs::render::SynchronousRendererConsumer,
+            draw: impl FnOnce(&Ui),
+        ) -> usize {
+            draw(context.frame());
+            let pending = context.render(consumer);
+            let feedback = pending
+                .texture_requests()
+                .iter()
+                .map(|request| match request.operation() {
+                    TextureOp::Create { .. } | TextureOp::Update { .. } => {
+                        request.uploaded(TextureId::new(1)).unwrap()
+                    }
+                    TextureOp::Destroy => request.destroyed().unwrap(),
+                })
+                .collect::<Vec<_>>();
+            let reconciled = pending.reconcile_texture_feedback(feedback).unwrap();
+            reconciled.draw_data().total_vtx_count()
+        }
+        fn vertices(
+            context: &mut Context,
+            consumer: &dear_imgui_rs::render::SynchronousRendererConsumer,
+            tools: &mut DevTools,
+        ) -> usize {
             let mut count = 0;
             // Warm up font textures and settle new windows before comparisons.
             for _ in 0..4 {
-                tools.draw(context.frame());
-                let pending = context.render(&consumer);
-                let feedback = pending
-                    .texture_requests()
-                    .iter()
-                    .map(|request| match request.operation() {
-                        TextureOp::Create { .. } | TextureOp::Update { .. } => {
-                            request.uploaded(TextureId::new(1)).unwrap()
-                        }
-                        TextureOp::Destroy => request.destroyed().unwrap(),
-                    })
-                    .collect::<Vec<_>>();
-                let reconciled = pending.reconcile_texture_feedback(feedback).unwrap();
-                count = reconciled.draw_data().total_vtx_count();
+                count = record(context, consumer, |ui| tools.draw(ui));
             }
             count
-        };
-        let baseline = vertices(&mut tools);
+        }
+        assert!(!tools.is_visible());
+        assert_eq!(
+            vertices(&mut context, &consumer, &mut tools),
+            0,
+            "new tools must draw no UI"
+        );
+        tools.toggle();
+        let baseline = vertices(&mut context, &consumer, &mut tools);
         tools.frame_stats = false;
-        let menu_only = vertices(&mut tools);
+        let menu_only = vertices(&mut context, &consumer, &mut tools);
         assert!(
             menu_only > 0 && baseline > menu_only,
             "baseline={baseline}, menu={menu_only}"
         );
         tools.frame_stats = true;
         tools.demo = true;
-        assert!(vertices(&mut tools) > baseline);
+        assert!(vertices(&mut context, &consumer, &mut tools) > baseline);
         tools.demo = false;
-        assert_eq!(vertices(&mut tools), baseline);
+        assert_eq!(vertices(&mut context, &consumer, &mut tools), baseline);
         tools.metrics = true;
-        assert!(vertices(&mut tools) > baseline);
+        assert!(vertices(&mut context, &consumer, &mut tools) > baseline);
         tools.metrics = false;
-        assert_eq!(vertices(&mut tools), baseline);
+        assert_eq!(vertices(&mut context, &consumer, &mut tools), baseline);
+        tools.toggle();
+        assert_eq!(vertices(&mut context, &consumer, &mut tools), 0);
+        tools.toggle();
+        assert_eq!(
+            vertices(&mut context, &consumer, &mut tools),
+            baseline,
+            "window states survive hiding"
+        );
+        // Exercise real ImGui text focus rather than assigning want_text_input.
+        let mut text = String::new();
+        for _ in 0..3 {
+            record(&mut context, &consumer, |ui| {
+                ui.window("Text input test").build(|| {
+                    ui.set_keyboard_focus_here();
+                    ui.input_text("Text", &mut text).build();
+                });
+            });
+        }
+        assert!(
+            context.io().want_text_input(),
+            "focused InputText requests text input"
+        );
+        assert!(!crate::dev::is_toggle(
+            &crate::dev::tests::key(false, sdl3::keyboard::Mod::NOMOD),
+            context.io().want_text_input()
+        ));
+        // Hidden frames omit InputText and release its active ID/IME request.
+        tools.toggle();
+        assert_eq!(vertices(&mut context, &consumer, &mut tools), 0);
+        assert!(!context.io().want_text_input());
+        assert!(crate::dev::is_toggle(
+            &crate::dev::tests::key(false, sdl3::keyboard::Mod::NOMOD),
+            context.io().want_text_input()
+        ));
         context
             .prepare_renderer_texture_reset(&consumer)
             .unwrap()

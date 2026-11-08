@@ -73,6 +73,28 @@ def main(browser, url, directory):
             for method in ('Page.enable', 'Runtime.enable', 'Network.enable'):
                 call(method, session=session)
             call('Page.navigate', {'url': url}, session)
+            # postRun follows App::new and RAF registration. Two RAF callbacks
+            # ensure that at least one actual hidden app frame precedes the key.
+            while time.monotonic() < poll_deadline:
+                result = call('Runtime.evaluate', {
+                    'expression': "document.getElementById('rn-log')?.dataset.ready === 'true'",
+                    'returnByValue': True,
+                }, session)
+                if result.get('result', {}).get('value') or errors:
+                    break
+                time.sleep(0.05)
+            else:
+                raise ValueError('app did not signal readiness')
+            call('Runtime.evaluate', {
+                'expression': 'new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))',
+                'awaitPromise': True,
+            }, session)
+            call('Runtime.evaluate', {'expression': "document.getElementById('canvas').focus()"}, session)
+            for kind, repeat in [('keyDown', False), ('keyDown', True), ('keyUp', False)]:
+                call('Input.dispatchKeyEvent', {
+                    'type': kind, 'code': 'Backquote', 'key': '`',
+                    'windowsVirtualKeyCode': 192, 'autoRepeat': repeat,
+                }, session)
             # CLI --dump-dom can run before RAF callbacks, even when its later
             # screenshot shows completed frames. Wait for the actual app report.
             line = ''

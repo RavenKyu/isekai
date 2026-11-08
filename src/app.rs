@@ -86,6 +86,19 @@ impl App {
         self.window.gl_make_current(&self.gl_context)?;
         let mut quit = false;
         for event in self.events.poll_iter() {
+            // Smoke-only observation proves the probe reached SDL even without
+            // the dev layer. It never changes interactive non-dev behavior.
+            if matches!(
+                event,
+                Event::KeyDown {
+                    scancode: Some(sdl3::keyboard::Scancode::Grave),
+                    repeat: false,
+                    ..
+                }
+            ) && let Some(smoke) = &mut self.smoke
+            {
+                smoke.observe_key_probe();
+            }
             #[cfg(feature = "dev")]
             self.dev.process_event(&event)?;
             quit |= match event {
@@ -113,12 +126,16 @@ impl App {
             self.gl.clear_color(0.0, 0.0, 0.0, 1.0);
             self.gl.clear(glow::COLOR_BUFFER_BIT);
         }
+        #[cfg(feature = "dev")]
+        let visible = self.dev.is_visible();
+        #[cfg(not(feature = "dev"))]
+        let visible = false;
         let measure = self
             .smoke
             .as_ref()
-            .is_some_and(|smoke| smoke.is_last_frame());
+            .is_some_and(|smoke| smoke.is_last_frame(visible));
         #[cfg(feature = "dev")]
-        let vtx = self.dev.render()?;
+        let vtx = self.dev.render(self.smoke.is_some())?;
         #[cfg(not(feature = "dev"))]
         let vtx = 0;
         let lit = if measure {
@@ -127,12 +144,46 @@ impl App {
             0
         };
         self.window.gl_swap_window();
-        if let Some(smoke) = &mut self.smoke
-            && let Some(report) = smoke.finish_frame(vtx, lit)?
-        {
-            return Ok(Flow::SmokeComplete(report));
+        if let Some(smoke) = &mut self.smoke {
+            match smoke.finish_frame(sdl3::timer::ticks(), visible, vtx, lit)? {
+                crate::smoke::Step::Complete(report) => return Ok(Flow::SmokeComplete(report)),
+                crate::smoke::Step::SendKeys => {
+                    #[cfg(not(target_os = "emscripten"))]
+                    self.push_smoke_keys()?;
+                }
+                crate::smoke::Step::Continue => {}
+            }
         }
         Ok(Flow::Continue)
+    }
+
+    #[cfg(not(target_os = "emscripten"))]
+    fn push_smoke_keys(&self) -> AppResult<()> {
+        use sdl3::keyboard::{Keycode, Mod, Scancode};
+        let events = self._sdl.event()?;
+        for repeat in [false, true] {
+            events.push_event(Event::KeyDown {
+                timestamp: 0,
+                window_id: self.window.id(),
+                keycode: Some(Keycode::Grave),
+                scancode: Some(Scancode::Grave),
+                keymod: Mod::NOMOD,
+                repeat,
+                which: 0,
+                raw: 0,
+            })?;
+        }
+        events.push_event(Event::KeyUp {
+            timestamp: 0,
+            window_id: self.window.id(),
+            keycode: Some(Keycode::Grave),
+            scancode: Some(Scancode::Grave),
+            keymod: Mod::NOMOD,
+            repeat: false,
+            which: 0,
+            raw: 0,
+        })?;
+        Ok(())
     }
 
     fn lit_pixels(&self, width: u32, height: u32) -> AppResult<usize> {
