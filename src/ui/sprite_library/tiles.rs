@@ -12,6 +12,23 @@ pub struct TileDraft {
     tags: String,
     props: String,
 }
+impl TileDraft {
+    pub fn validate(&self, meta: &crate::sprite::SpriteSheet) -> Result<(), String> {
+        let Some(cell) = self.cell else {
+            return Ok(());
+        };
+        parse_props(&self.props)?;
+        if !self.name.is_empty()
+            && (self.name.trim().is_empty()
+                || meta.tiles.iter().any(|t| {
+                    (t.col, t.row) != cell && t.name.as_deref() == Some(self.name.as_str())
+                }))
+        {
+            return Err(format!("empty or duplicate tile name: {:?}", self.name));
+        }
+        Ok(())
+    }
+}
 pub fn mode_combo(ui: &Ui, label: &str, mode: &mut Mode) -> bool {
     let mut current = match mode {
         Mode::Loop => 0,

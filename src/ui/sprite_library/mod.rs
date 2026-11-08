@@ -1,4 +1,8 @@
+mod clips;
+mod edit;
 mod model;
+mod preview;
+mod sprites;
 mod tiles;
 mod view;
 pub use model::*;
@@ -47,6 +51,11 @@ pub struct SpriteLibrary {
     pub pending: Vec<Action>,
     tile_draft: tiles::TileDraft,
     assets_scanned: bool,
+    selected_sprite: Option<String>,
+    selected_clip: Option<String>,
+    suggestions: Vec<raster::CellRect>,
+    clip_draft: clips::ClipDraft,
+    preview: preview::PreviewState,
 }
 impl Default for SpriteLibrary {
     fn default() -> Self {
@@ -64,6 +73,11 @@ impl Default for SpriteLibrary {
             pending: vec![],
             tile_draft: Default::default(),
             assets_scanned: false,
+            selected_sprite: None,
+            selected_clip: None,
+            suggestions: Vec::new(),
+            clip_draft: Default::default(),
+            preview: Default::default(),
         }
     }
 }
@@ -166,6 +180,10 @@ impl SpriteLibrary {
                 self.status = "Sheet closed".into();
             }
             Action::Save => {
+                if let Some(sheet) = &self.sheet {
+                    self.tile_draft.validate(&sheet.meta)?;
+                }
+                self.clip_draft.validate()?;
                 let Some(sheet) = &mut self.sheet else {
                     return Ok(());
                 };
@@ -196,6 +214,11 @@ impl SpriteLibrary {
             return Err(error);
         }
         self.sheet = Some(opened);
+        self.selected_sprite = None;
+        self.selected_clip = None;
+        self.suggestions.clear();
+        self.clip_draft = Default::default();
+        self.preview = Default::default();
         self.guess = None;
         self.tile_draft = Default::default();
         Ok(())
@@ -214,7 +237,7 @@ impl SpriteLibrary {
         self.tile_draft = Default::default();
         Ok(())
     }
-    pub fn draw(&mut self, ui: &Ui) {
+    pub fn draw(&mut self, ui: &Ui, now_ms: u64) {
         if !self.open {
             return;
         }
@@ -276,11 +299,21 @@ impl SpriteLibrary {
                     }
                 });
                 self.grid_panel(ui);
-                self.sheet_view(ui, &[]);
-                if let Some(_tabs) = ui.tab_bar("Sprite library tabs")
-                    && let Some(_tab) = ui.tab_item("Tiles")
-                {
-                    self.tiles_tab(ui);
+                let overlays = self.sprite_overlays();
+                self.sheet_view(ui, &overlays);
+                if let Some(_tabs) = ui.tab_bar("Sprite library tabs") {
+                    if let Some(_tab) = ui.tab_item("Tiles") {
+                        self.tiles_tab(ui);
+                    }
+                    if let Some(_tab) = ui.tab_item("Sprites") {
+                        self.sprites_tab(ui);
+                    }
+                    if let Some(_tab) = ui.tab_item("Clips") {
+                        self.clips_tab(ui);
+                    }
+                    if let Some(_tab) = ui.tab_item("Preview") {
+                        self.preview_tab(ui, now_ms);
+                    }
                 }
             });
         self.open = open;
@@ -547,18 +580,26 @@ mod tests {
         let library = std::cell::RefCell::new(SpriteLibrary::default());
         assert!(!library.borrow().open);
         assert_eq!(
-            vertices(&mut context, &consumer, |ui| library.borrow_mut().draw(ui)),
+            vertices(&mut context, &consumer, |ui| library
+                .borrow_mut()
+                .draw(ui, 0)),
             0
         );
         library.borrow_mut().open = true;
         library.borrow_mut().assets_scanned = true;
-        let empty = vertices(&mut context, &consumer, |ui| library.borrow_mut().draw(ui));
+        let empty = vertices(&mut context, &consumer, |ui| {
+            library.borrow_mut().draw(ui, 0)
+        });
         assert!(empty > 0);
         library.borrow_mut().sheet = Some(fake_sheet());
         library.borrow_mut().show_grid = false;
-        let no_grid = vertices(&mut context, &consumer, |ui| library.borrow_mut().draw(ui));
+        let no_grid = vertices(&mut context, &consumer, |ui| {
+            library.borrow_mut().draw(ui, 0)
+        });
         library.borrow_mut().show_grid = true;
-        let grid = vertices(&mut context, &consumer, |ui| library.borrow_mut().draw(ui));
+        let grid = vertices(&mut context, &consumer, |ui| {
+            library.borrow_mut().draw(ui, 0)
+        });
         assert!(grid > no_grid, "grid={grid}, no_grid={no_grid}");
         library.borrow_mut().zoom = 2;
         let size = std::cell::Cell::new([0.0; 2]);
@@ -579,8 +620,47 @@ mod tests {
         assert_eq!(size.get(), [128.0, 32.0]);
         library.borrow_mut().open = false;
         assert_eq!(
-            vertices(&mut context, &consumer, |ui| library.borrow_mut().draw(ui)),
+            vertices(&mut context, &consumer, |ui| library
+                .borrow_mut()
+                .draw(ui, 0)),
             0
+        );
+        let view = preview::PartView {
+            id: TextureId::new(1),
+            grid: crate::sprite::example().1.grid,
+            width: 64,
+            height: 16,
+        };
+        let one = [crate::sprite::format::Part {
+            col: 0,
+            row: 0,
+            dx: 0,
+            dy: 0,
+        }];
+        let two = [
+            one[0],
+            crate::sprite::format::Part {
+                col: 1,
+                row: 0,
+                dx: 16,
+                dy: 0,
+            },
+        ];
+        let measure_parts = |context: &mut Context, parts: &[crate::sprite::format::Part]| {
+            vertices(context, &consumer, |ui| {
+                ui.window("Preview geometry").build(|| {
+                    let origin = ui.cursor_screen_pos();
+                    preview::draw_parts(ui, &view, parts, origin, 2);
+                    ui.dummy([100.0, 100.0]);
+                });
+            })
+        };
+        let baseline = measure_parts(&mut context, &[]);
+        let single = measure_parts(&mut context, &one);
+        let double = measure_parts(&mut context, &two);
+        assert!(
+            single >= baseline + 4 && double >= single + 4,
+            "baseline={baseline}, one={single}, two={double}"
         );
         context
             .prepare_renderer_texture_reset(&consumer)

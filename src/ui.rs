@@ -34,13 +34,15 @@ impl DevTools {
         self.visible = !self.visible;
     }
 
-    pub fn draw(&mut self, ui: &Ui) {
+    pub fn draw(&mut self, ui: &Ui, now_ms: u64) {
+        #[cfg(target_os = "emscripten")]
+        let _ = now_ms;
         if !self.visible {
             return;
         }
         self.menu_bar(ui);
         #[cfg(not(target_os = "emscripten"))]
-        self.library.draw(ui);
+        self.library.draw(ui, now_ms);
         if self.frame_stats {
             ui.window("Frame stats")
                 .opened(&mut self.frame_stats)
@@ -143,7 +145,7 @@ mod tests {
             let mut count = 0;
             // Warm up font textures and settle new windows before comparisons.
             for _ in 0..4 {
-                count = record(context, consumer, |ui| tools.draw(ui));
+                count = record(context, consumer, |ui| tools.draw(ui, 0));
             }
             count
         }
