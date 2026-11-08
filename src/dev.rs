@@ -12,13 +12,15 @@ use sdl3::{
 
 use crate::app::AppResult;
 
-// Declaration order tears down renderer, platform, then ImGui. App owns this
+// Declaration order tears down editor textures, renderer, platform, then ImGui. App owns this
 // entire layer before its GL context/window and keeps them alive through teardown.
 pub struct Dev {
+    tools: crate::ui::DevTools,
     renderer: GlowRenderer,
     platform: Sdl3PlatformBackend,
     imgui: Context,
-    tools: crate::ui::DevTools,
+    #[cfg(not(target_os = "emscripten"))]
+    gl: Rc<glow::Context>,
 }
 
 impl Dev {
@@ -45,6 +47,8 @@ impl Dev {
             platform,
             imgui,
             tools: crate::ui::DevTools::default(),
+            #[cfg(not(target_os = "emscripten"))]
+            gl: Rc::clone(gl),
         })
     }
 
@@ -52,12 +56,23 @@ impl Dev {
         if is_toggle(event, self.imgui.io().want_text_input()) {
             self.tools.toggle();
         }
+        #[cfg(not(target_os = "emscripten"))]
+        if let Event::DropFile { filename, .. } = event {
+            if !self.tools.is_visible() {
+                self.tools.toggle();
+            }
+            self.tools.library.queue_drop(filename.into());
+        }
         // The backend still receives every event, including the toggle key.
         self.platform.process_event(&mut self.imgui, event)?;
         Ok(())
     }
 
     pub fn begin_frame(&mut self) -> AppResult<()> {
+        #[cfg(not(target_os = "emscripten"))]
+        self.tools
+            .library
+            .apply_pending(&self.gl, &mut self.renderer);
         self.platform.new_frame(&mut self.imgui)?;
         self.tools.draw(self.imgui.frame());
         Ok(())
@@ -77,12 +92,23 @@ impl Dev {
     }
 
     pub fn shutdown(&mut self) -> AppResult<()> {
+        #[cfg(not(target_os = "emscripten"))]
+        let library = self.tools.library.close_all(&mut self.renderer);
         // Always attempt both shutdowns, in renderer/platform order.
         let renderer = self.renderer.shutdown(&mut self.imgui);
         let platform = self.platform.shutdown(&mut self.imgui);
+        #[cfg(not(target_os = "emscripten"))]
+        library?;
         renderer?;
         platform?;
         Ok(())
+    }
+}
+
+impl Drop for Dev {
+    fn drop(&mut self) {
+        #[cfg(not(target_os = "emscripten"))]
+        let _ = self.tools.library.close_all(&mut self.renderer);
     }
 }
 

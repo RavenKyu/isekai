@@ -1,6 +1,11 @@
+#[cfg(not(target_os = "emscripten"))]
+pub mod sprite_library;
+
 use dear_imgui_rs::{Condition, Ui, WindowFlags};
 
 pub struct DevTools {
+    #[cfg(not(target_os = "emscripten"))]
+    pub library: sprite_library::SpriteLibrary,
     visible: bool,
     frame_stats: bool,
     demo: bool,
@@ -10,6 +15,8 @@ pub struct DevTools {
 impl Default for DevTools {
     fn default() -> Self {
         Self {
+            #[cfg(not(target_os = "emscripten"))]
+            library: sprite_library::SpriteLibrary::default(),
             visible: false,
             frame_stats: true,
             demo: false,
@@ -32,6 +39,8 @@ impl DevTools {
             return;
         }
         self.menu_bar(ui);
+        #[cfg(not(target_os = "emscripten"))]
+        self.library.draw(ui);
         if self.frame_stats {
             ui.window("Frame stats")
                 .opened(&mut self.frame_stats)
@@ -53,6 +62,10 @@ impl DevTools {
                 ui.menu_item_toggle_no_shortcut("Frame stats", &mut self.frame_stats, true);
                 ui.menu_item_toggle_no_shortcut("Dear ImGui Demo", &mut self.demo, true);
                 ui.menu_item_toggle_no_shortcut("Dear ImGui Metrics", &mut self.metrics, true);
+            });
+            #[cfg(not(target_os = "emscripten"))]
+            ui.menu("Assets", || {
+                ui.menu_item_toggle_no_shortcut("Sprite Library", &mut self.library.open, true);
             });
             // Add future Info/Settings entries here, with their window draw in draw().
         });
