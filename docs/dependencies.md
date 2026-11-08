@@ -14,6 +14,10 @@
 | sdl3 | `Cargo.toml`의 `0.20`, `Cargo.lock`의 `0.20.0` | dear-imgui-sdl3가 요구하는 0.20과 맞춰 Window·Event 타입이 갈라지지 않게 한다. |
 | sdl3-sys | `Cargo.lock`의 `0.7.3+SDL-3.4.20` | SDL3의 소스 빌드와 FFI 버전을 잠근다. 첫 빌드는 시스템 SDL 대신 이 소스를 컴파일한다. |
 | glow | `Cargo.toml`의 `0.18`, `Cargo.lock`의 `0.18.0` | 네이티브 OpenGL과 Emscripten WebGL 2 경로를 같은 renderer에서 사용한다. |
+| png | `Cargo.toml`의 `0.18`, 모든 빌드 | 순수 Rust PNG 디코더·인코더여서 Emscripten에서도 쓴다. PNG만 필요하므로 범용 image와 기본 rayon 의존성을 추가하지 않는다. |
+| serde | `Cargo.toml`의 `1`, derive 포함, 모든 빌드 | 편집기·런타임이 같은 엄격한 v1 구조체를 읽고 쓴다. |
+| serde_json | `Cargo.toml`의 `1`, 모든 빌드 | JSON 사이드카 읽기·정규형 pretty 저장. |
+| rfd | `Cargo.toml`의 `0.18`, 네이티브 target optional, `dev`가 활성화 | 네이티브 편집기 파일 대화상자. 비dev와 웹의 두 feature 모드에는 포함하지 않는다. |
 
 Cargo.toml의 범위 제약과 실제 해결된 버전은 다르다. 앱 저장소는 `Cargo.lock`을
 추적하고 검사·웹 빌드에서 `--locked`를 사용한다. 다음으로 현재 값을 확인한다.
@@ -34,13 +38,17 @@ cargo tree --locked -e normal,build
 cargo tree --locked -e normal,build --features dev -i dear-imgui-rs
 cargo tree --locked -e normal,build --target wasm32-unknown-emscripten
 cargo tree --locked -e normal,build --target wasm32-unknown-emscripten --features dev -i dear-imgui-rs
+cargo tree --locked -e normal,build -i rfd --features dev
 scripts/check-no-imgui.sh
 ```
 
-비dev 그래프에는 dear-imgui 패키지가 없어야 하고 dev 그래프에는 있어야 한다.
-자동 검사는 이 양성 대조와 새로 빌드한 비dev 실행 파일의 기호까지 확인하며, 기호가 지워진
+비dev 그래프에는 dear-imgui와 rfd가 없어야 하고 host dev 그래프에는 둘 다 있어야 한다.
+웹 dev 그래프에는 imgui만 있고 rfd는 없어야 한다. `scripts/check-no-imgui.sh`는 이 양성
+대조와 새로 빌드한 비dev 실행 파일의 imgui·rfd 기호까지 검사하며, 기호가 지워진
 바이너리도 거부한다. `scripts/check-no-imgui.sh --release`는 release 바이너리의 기호 검사다.
-`Cargo.lock`은 두 모드에서 공통이며 feature 분리로 바뀌지 않는다.
+`Cargo.lock`은 두 모드에서 공통이다. v0.3.0에서 png·serde·serde_json·rfd와 그 하위 의존성을
+추가하며 갱신했고 기존 패키지의 버전은 올리지 않았다. feature를 선택할 때마다 잠금 파일을
+다시 만드는 것은 아니다. [스프라이트 안내](sprites.md)에 새 형식과 실행 범위가 있다.
 
 SDK는 [공유 설치 절차](web.md#sdk-설치와-worktree-공유)로 준비한다. Rust std를 만든
 emsdk 버전과 이 pin이 일치한다고 보장하는 것은 아니다. LLVM·C++ ABI 호환성은
@@ -108,4 +116,4 @@ Rust의 `-fwasm-exceptions`와 Emscripten 기본 `WASM_LEGACY_EXCEPTIONS` 조합
    실측 Rust/LLVM·emcc 버전, 성공한 설정, 크기와 검사 결과를 트래커에 기록한다.
    [CI 상태](README.md#더-읽기와-ci-상태)의 원격 미실행과 로컬 성공을 구분한다.
 
-Decided in: rn-35g9, rn-7w7b
+Decided in: rn-35g9, rn-7w7b, rn-fcuz
