@@ -26,7 +26,8 @@ jobs:
             build-essential cmake pkg-config python3 shellcheck xvfb xauth \
             libgl1-mesa-dev libegl1-mesa-dev libgl1-mesa-dri \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
-            libxfixes-dev libxi-dev libxss-dev libxtst-dev libxkbcommon-dev
+            libxfixes-dev libxi-dev libxss-dev libxtst-dev libxkbcommon-dev \
+            libwayland-dev
       - name: Cache Cargo dependencies and native build
         uses: actions/cache@v6
         with:

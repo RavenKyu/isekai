@@ -24,6 +24,8 @@ Cargo의 `dev` feature를 켰을 때만 포함된다. 기본 개발 창은 두 �
 X11 개발 패키지는 `libx11-dev`, `libxext-dev`, `libxrandr-dev`, `libxcursor-dev`,
 `libxi-dev`, `libxfixes-dev`, `libxkbcommon-dev`이며 GL 헤더는 `libegl-dev`,
 `libgl-dev`로 준비할 수 있다. Wayland를 쓰려면 해당 개발 패키지도 필요하다.
+`dev` feature 빌드는 X11만 쓰더라도 `libwayland-dev`가 있어야 한다. 파일 대화상자
+crate `rfd`가 `wayland-sys`를 빌드하며 pkg-config로 `wayland-client`를 찾기 때문이다.
 SDL3의 다른 선택 기능에서 요구하는 라이브러리는 CMake 로그를 확인한다.
 시스템 SDL3 패키지를 미리 설치할 필요는 없다. Cargo가 SDL3를 소스로 빌드하므로
 첫 빌드는 오래 걸리며, Rust 크레이트와 웹 SDK 다운로드를 위한 네트워크도 필요하다.
