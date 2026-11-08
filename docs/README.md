@@ -1,7 +1,8 @@
 # Rusty Nails 개발 시작
 
 Rust와 SDL3로 네이티브 창과 WebGL 2 앱을 만든다. Dear ImGui 개발 도구는
-Cargo의 `dev` feature를 켰을 때만 포함되며 두 플랫폼에서 같은 UI를 쓴다.
+Cargo의 `dev` feature를 켰을 때만 포함된다. 기본 개발 창은 두 플랫폼에서 공유하고,
+스프라이트 편집·추출은 네이티브 dev에서 제공한다.
 이 문서는 Linux에서 개발 환경을 준비하고 두 실행 경로를 확인하는 안내다.
 모든 명령은 전달받은 저장소 checkout의 최상단에서 실행한다.
 
