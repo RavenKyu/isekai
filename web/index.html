@@ -23,10 +23,17 @@
     };
     window.addEventListener('error', (event) => fail(event.message || 'resource load error'), true);
     window.addEventListener('unhandledrejection', (event) => fail(event.reason));
-    const smoke = new URLSearchParams(location.search).get('smoke');
+    const query = new URLSearchParams(location.search);
+    const smoke = query.get('smoke');
+    const args = [];
+    if (query.has('play')) {
+      args.push('--play', query.get('play'));
+      if (query.has('clip')) args.push(query.get('clip'));
+    }
+    if (smoke !== null) args.push('--smoke-frames', smoke);
     var Module = {
       canvas: document.getElementById('canvas'),
-      arguments: smoke === null ? [] : ['--smoke-frames', smoke],
+      arguments: args,
       print: append,
       printErr: fail,
       onAbort: fail,
