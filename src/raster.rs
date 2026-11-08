@@ -1,6 +1,10 @@
-// CPU image primitives; analysis routines are added by lane B after checkpoint 1a.
-#![allow(dead_code)]
+// CPU-only images and analysis. No platform, renderer, or filesystem dependency.
+// TODO(rn-fcuz): remove the module allowance when editor/runtime callers cover the APIs.
+#![allow(dead_code, unused_imports)]
 use std::io::Cursor;
+
+mod analysis;
+pub use analysis::*;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RgbaImage {
