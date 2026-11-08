@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
+  <title>rusty-nails</title>
+  <style>
+    body { margin: 0; background: #000; color: #eee; font-family: sans-serif; }
+    canvas { display: block; border: 0; padding: 0; }
+    #rn-log { white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <canvas id="canvas" width="1280" height="720" tabindex="0"></canvas>
+  <pre id="rn-log" aria-live="polite"></pre>
+  <script>
+    const log = document.getElementById('rn-log');
+    const append = (line) => { log.textContent += String(line) + '\n'; };
+    const fail = (reason) => {
+      log.dataset.error = 'true';
+      append('rn-smoke: fail ' + String(reason).replace(/\s+/g, ' '));
+    };
+    window.addEventListener('error', (event) => fail(event.message || 'resource load error'), true);
+    window.addEventListener('unhandledrejection', (event) => fail(event.reason));
+    const smoke = new URLSearchParams(location.search).get('smoke');
+    var Module = {
+      canvas: document.getElementById('canvas'),
+      arguments: smoke === null ? [] : ['--smoke-frames', smoke],
+      print: append,
+      printErr: fail,
+      onAbort: fail,
+      locateFile: (path, prefix) => prefix + (path.endsWith('.wasm') ? 'rusty-nails.wasm' : path),
+    };
+  </script>
+  <script src="rusty-nails.js"></script>
+</body>
+</html>
