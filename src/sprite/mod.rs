@@ -9,3 +9,5 @@ pub mod timeline;
 pub use example::example;
 pub use format::{Clip, Sprite, SpriteSheet};
 pub use timeline::{Mode, Timeline};
+
+pub mod texture;
