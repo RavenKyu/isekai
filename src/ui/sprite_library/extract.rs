@@ -5,6 +5,7 @@ use crate::{
     sprite::{
         Grid, SpriteSheet,
         store::{self, StoreError},
+        tilemap::{self, Cell, TileMap},
     },
 };
 use dear_imgui_rs::{TextureId, Ui};
@@ -215,6 +216,8 @@ struct ExtractPlan {
     checkout: PathBuf,
     png: Vec<u8>,
     sidecar_path: PathBuf,
+    map_path: PathBuf,
+    map_json: String,
     sheet: SpriteSheet,
     report: String,
 }
@@ -224,6 +227,7 @@ fn plan_from_analysis(
     columns: u32,
     output: &Path,
     checkout: &Path,
+    source_stem: &str,
 ) -> Result<ExtractPlan, String> {
     if analysis.dedupe.unique.is_empty() {
         return Err("no full grid cells to extract".into());
@@ -246,7 +250,33 @@ fn plan_from_analysis(
     sheet
         .validate_bounds(image.width, image.height)
         .map_err(|e| e.join("; "))?;
+    let map_path = tilemap::map_path_for(&output, source_stem);
+    if map_path.parent() != output.parent()
+        || !store::image_path_is_safe(&format!("{source_stem}.map.json"))
+    {
+        return Err("invalid source name for map file".into());
+    }
+    let map = TileMap {
+        version: 1,
+        tileset: name.to_owned(),
+        tile: grid.tile,
+        cols: analysis.dedupe.cols,
+        rows: analysis.dedupe.rows,
+        cells: analysis
+            .dedupe
+            .map
+            .iter()
+            .map(|&(index, transform)| Cell {
+                index,
+                flip_x: transform.flip_x(),
+                rotation: transform.rotation(),
+            })
+            .collect(),
+    };
+    map.validate_against(image.width, image.height)?;
     Ok(ExtractPlan {
+        map_path,
+        map_json: tilemap::to_json(&map),
         sidecar_path: store::sidecar_for(&output),
         sheet,
         output,
@@ -269,6 +299,7 @@ fn plan_extract(
         columns,
         output,
         checkout,
+        "map",
     )
 }
 
@@ -283,25 +314,37 @@ fn write_plan(plan: &ExtractPlan, open_files: &[PathBuf]) -> Result<String, Stri
     store::write_atomic(&output, &plan.png).map_err(|e| format!("PNG not written: {e}"))?;
     // PNG is a regenerated artifact and is replaced even when edited metadata exists.
     // These two files are not a transaction: after any JSON error the PNG remains.
-    if let Err(error) = save_sidecar_new(&plan.sidecar_path, &plan.sheet) {
-        let reason = if matches!(&error,StoreError::Io(e) if e.kind()==io::ErrorKind::AlreadyExists)
-        {
-            "sidecar exists; remove it first".into()
-        } else {
-            error.to_string()
-        };
-        return Err(format!(
-            "PNG written: {}; sidecar not written: {reason}{}",
-            output.display(),
-            path_note(&output, &plan.checkout)
-        ));
-    }
-    Ok(format!(
-        "Wrote {} and {}{}",
+    let sidecar = match save_sidecar_new(&plan.sidecar_path, &plan.sheet) {
+        Ok(()) => format!("sidecar written: {}", plan.sidecar_path.display()),
+        Err(error) if matches!(&error,StoreError::Io(e) if e.kind()==io::ErrorKind::AlreadyExists) => {
+            "sidecar not written: sidecar exists; remove it first".into()
+        }
+        Err(error) => format!("sidecar not written: {error}"),
+    };
+    let map_write = match fs::symlink_metadata(&plan.map_path) {
+        Ok(meta) if meta.file_type().is_symlink() => Err("map output is a symlink".to_string()),
+        Ok(_) => {
+            store::write_atomic(&plan.map_path, plan.map_json.as_bytes()).map_err(|e| e.to_string())
+        }
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            store::write_atomic(&plan.map_path, plan.map_json.as_bytes()).map_err(|e| e.to_string())
+        }
+        Err(e) => Err(e.to_string()),
+    };
+    let map = match map_write {
+        Ok(()) => format!("map written: {}", plan.map_path.display()),
+        Err(error) => format!("map not written: {error}"),
+    };
+    let message = format!(
+        "PNG written: {}; {sidecar}; {map}{}",
         output.display(),
-        plan.sidecar_path.display(),
         path_note(&output, &plan.checkout)
-    ))
+    );
+    if sidecar.starts_with("sidecar not") || map.starts_with("map not") {
+        Err(message)
+    } else {
+        Ok(message)
+    }
 }
 
 pub(super) fn tab(editor: &mut SheetEditor, ui: &Ui, open_files: &[PathBuf]) {
@@ -364,6 +407,7 @@ pub(super) fn tab(editor: &mut SheetEditor, ui: &Ui, open_files: &[PathBuf]) {
                 state.columns,
                 Path::new(&state.output),
                 &checkout,
+                &source_stem(&sheet.source),
             )
             .and_then(|plan| {
                 write_plan(&plan, open_files).map(|message| format!("{message}; {}", plan.report))
@@ -514,6 +558,61 @@ pub(super) mod tests {
         );
     }
     #[test]
+    fn grouped_map_rebuilds_all_eight_variants() {
+        let temp = Temp::new();
+        let mut tile = RgbaImage::new(2, 2);
+        for y in 0..2 {
+            for x in 0..2 {
+                tile.set_pixel(x, y, [(1 + x + 2 * y) as u8, 0, 0, 255]);
+            }
+        }
+        let mut image = RgbaImage::new(16, 2);
+        for (index, transform) in crate::sprite::Transform::ALL.into_iter().enumerate() {
+            let variant = tile.transformed(transform);
+            for y in 0..2 {
+                for x in 0..2 {
+                    image.set_pixel(index as u32 * 2 + x, y, variant.pixel(x, y));
+                }
+            }
+        }
+        let grid = Grid {
+            tile: 2,
+            offset: [0, 0],
+            spacing: 0,
+        };
+        let analysis = Analysis::new(&image, &grid, true);
+        let plan = plan_from_analysis(
+            &analysis,
+            &grid,
+            16,
+            &temp.0.join("tiles.png"),
+            &temp.0,
+            "map",
+        )
+        .unwrap();
+        write_plan(&plan, &[]).unwrap();
+        let map = tilemap::parse(&fs::read_to_string(&plan.map_path).unwrap()).unwrap();
+        assert_eq!(
+            map.rebuild(&RgbaImage::from_png(&plan.png).unwrap())
+                .unwrap(),
+            image
+        );
+    }
+    #[cfg(unix)]
+    #[test]
+    fn map_destination_symlink_is_refused() {
+        let temp = Temp::new();
+        let (image, grid) = map(0, [0, 0]);
+        let plan = plan_extract(&image, &grid, 16, &temp.0.join("tiles.png"), &temp.0).unwrap();
+        let target = temp.0.join("untouched");
+        fs::write(&target, b"untouched").unwrap();
+        std::os::unix::fs::symlink(&target, &plan.map_path).unwrap();
+        let error = write_plan(&plan, &[]).unwrap_err();
+        assert!(error.contains("map not written: map output is a symlink"));
+        assert_eq!(fs::read(target).unwrap(), b"untouched");
+        assert_no_temps(&temp.0);
+    }
+    #[test]
     fn defaults_and_output_directory_boundaries() {
         let temp = Temp::new();
         let file = SheetSource::File("/x/map-01.png".into());
@@ -621,6 +720,10 @@ pub(super) mod tests {
         let output = temp.0.join("assets/splites/map/tiles.png");
         let first = plan_extract(&image, &grid, 16, &output, &temp.0).unwrap();
         write_plan(&first, &[]).unwrap();
+        assert_eq!(first.map_path, output.with_file_name("map.map.json"));
+        let stored_map = tilemap::parse(&fs::read_to_string(&first.map_path).unwrap()).unwrap();
+        let tileset = RgbaImage::from_png(&fs::read(&output).unwrap()).unwrap();
+        assert_eq!(stored_map.rebuild(&tileset).unwrap(), map(0, [0, 0]).0);
         let saved = store::load(&first.sidecar_path).unwrap();
         assert_eq!(saved.sheet, first.sheet);
         assert_eq!(
@@ -645,6 +748,11 @@ pub(super) mod tests {
             "{error}"
         );
         assert_eq!(fs::read(&first.sidecar_path).unwrap(), original_json);
+        assert_eq!(
+            fs::read_to_string(&second.map_path).unwrap(),
+            second.map_json
+        );
+        assert!(error.contains("map written:"));
         assert_eq!(fs::read(&output).unwrap(), second.png);
         let mut original_png = Vec::new();
         old_inode.read_to_end(&mut original_png).unwrap();
