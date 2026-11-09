@@ -3,7 +3,7 @@ use crate::{
     sprite::{Grid, SpriteSheet},
 };
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeSet,
     path::{Path, PathBuf},
 };
 
@@ -80,33 +80,6 @@ pub fn parse_tags(text: &str) -> Vec<String> {
 }
 pub fn format_tags(tags: &[String]) -> String {
     tags.join(", ")
-}
-pub fn parse_props(text: &str) -> Result<BTreeMap<String, String>, String> {
-    let mut props = BTreeMap::new();
-    for (i, line) in text.lines().enumerate() {
-        if line.trim().is_empty() {
-            continue;
-        }
-        let (key, value) = line
-            .split_once('=')
-            .ok_or_else(|| format!("property line {} needs key=value", i + 1))?;
-        let key = key.trim();
-        if key.is_empty() || props.contains_key(key) {
-            return Err(format!(
-                "property line {} has an empty or duplicate key",
-                i + 1
-            ));
-        }
-        props.insert(key.into(), value.into());
-    }
-    Ok(props)
-}
-pub fn format_props(props: &BTreeMap<String, String>) -> String {
-    props
-        .iter()
-        .map(|(k, v)| format!("{k}={v}"))
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 pub fn list_assets(root: &Path) -> Result<Vec<PathBuf>, String> {
     fn visit(root: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
@@ -277,10 +250,6 @@ mod tests {
             parse_tags(&format_tags(&parse_tags("a, b ,c"))),
             vec!["a", "b", "c"]
         );
-        let props = parse_props("k=v\nx=1").unwrap();
-        assert_eq!(format_props(&props), "k=v\nx=1");
-        assert!(parse_props("broken").is_err());
-        assert!(parse_props("x=1\nx=2").is_err());
     }
     #[test]
     fn import_requires_png_matching_valid_sidecar() {

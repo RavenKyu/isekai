@@ -21,6 +21,8 @@ pub struct PreviewState {
     builds: u32,
     #[cfg(test)]
     pub(super) drawn_parts: usize,
+    #[cfg(test)]
+    pub(super) highlighted: Option<usize>,
     pub zoom: u32,
     pub show_pivot: bool,
 }
@@ -37,6 +39,8 @@ impl Default for PreviewState {
             builds: 0,
             #[cfg(test)]
             drawn_parts: 0,
+            #[cfg(test)]
+            highlighted: None,
             zoom: 3,
             show_pivot: true,
         }
@@ -78,6 +82,21 @@ impl PreviewState {
             self.signature = Some(signature);
         }
         Ok(())
+    }
+    pub fn playing_frame(
+        &mut self,
+        animation: &crate::sprite::Animation,
+        now: u64,
+    ) -> Option<usize> {
+        if animation.frames.is_empty() {
+            return None;
+        }
+        self.update_timeline(
+            animation.frames.iter().map(|f| f.ms).collect(),
+            animation.mode,
+        )
+        .ok()?;
+        Some(self.frame(now).min(animation.frames.len() - 1))
     }
     pub fn frame(&self, now: u64) -> usize {
         self.timeline
@@ -275,18 +294,10 @@ impl SheetEditor {
                     return;
                 };
                 ui.text(format!("{} ({:?})", animation.name, animation.mode));
-                if animation.frames.is_empty() {
+                let Some(index) = self.preview.playing_frame(animation, now) else {
                     ui.text("No frames");
                     return;
-                }
-                if let Err(error) = self.preview.update_timeline(
-                    animation.frames.iter().map(|f| f.ms).collect(),
-                    animation.mode,
-                ) {
-                    ui.text_wrapped(error);
-                    return;
-                }
-                let index = self.preview.frame(now);
+                };
                 let frame = &animation.frames[index];
                 let finished = self
                     .preview
@@ -391,6 +402,23 @@ mod tests {
         assert_eq!(state.builds, 1);
         state.update_timeline(vec![10, 21], Mode::Loop).unwrap();
         assert_eq!(state.builds, 2);
+    }
+    #[test]
+    fn playing_frame_matches_pingpong_and_handles_last_deletion() {
+        let (_, sheet) = crate::sprite::example();
+        let mut animation = sheet.animations[0].clone();
+        animation.frames.truncate(2);
+        for f in &mut animation.frames {
+            f.ms = 100;
+        }
+        let mut state = PreviewState::default();
+        state.select(PreviewTarget::Animation(animation.id), 0);
+        assert_eq!(state.playing_frame(&animation, 150), Some(1));
+        animation.frames.push(animation.frames[0].clone());
+        animation.mode = Mode::PingPong;
+        assert_eq!(state.playing_frame(&animation, 350), Some(1));
+        animation.frames.clear();
+        assert_eq!(state.playing_frame(&animation, 350), None);
     }
     #[test]
     fn thumbnail_fit_preserves_aspect() {

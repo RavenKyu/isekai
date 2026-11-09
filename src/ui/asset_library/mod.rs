@@ -103,6 +103,12 @@ pub struct SheetEditor {
     sprite_new_input: [f32; 2],
     #[cfg(test)]
     sprite_blank_input: [f32; 2],
+    #[cfg(test)]
+    animation_new_input: [f32; 2],
+    #[cfg(test)]
+    frame_add_input: [f32; 2],
+    #[cfg(test)]
+    frame_remove_input: [f32; 2],
     pub zoom: u32,
     pub show_grid: bool,
     pub guess: Option<GridGuess>,
@@ -464,6 +470,12 @@ impl SheetEditor {
             sprite_new_input: [0.0; 2],
             #[cfg(test)]
             sprite_blank_input: [0.0; 2],
+            #[cfg(test)]
+            animation_new_input: [0.0; 2],
+            #[cfg(test)]
+            frame_add_input: [0.0; 2],
+            #[cfg(test)]
+            frame_remove_input: [0.0; 2],
             zoom: 2,
             show_grid: true,
             guess: None,
@@ -690,7 +702,7 @@ impl SheetEditor {
                         self.sheet.meta.animations.len()
                     )) {
                         self.active_tab = EditorTab::Animations;
-                        self.animations_tab(ui);
+                        self.animations_tab(ui, now_ms);
                     }
                     if let Some(_tab) = ui.tab_item_with_flags(
                         "Import",
@@ -1565,6 +1577,91 @@ mod tests {
         let large = count_vertices(context, 1000);
         assert!(large <= small + 100, "20 rows: {small}, 1000 rows: {large}");
     }
+    fn check_animation_controls(context: &mut Context, consumer: &SynchronousRendererConsumer) {
+        use std::cell::{Cell, RefCell};
+        let editor = RefCell::new(SheetEditor::new(90, fake_sheet()));
+        {
+            let mut e = editor.borrow_mut();
+            e.now = || 888;
+            e.selected_animation = Some(5);
+            e.sheet.meta.animations[0].frames.truncate(2);
+            for f in &mut e.sheet.meta.animations[0].frames {
+                f.ms = 100;
+            }
+        }
+        let tick = Cell::new(0u64);
+        let render = |context: &mut Context| {
+            vertices(context, consumer, |ui| {
+                ui.window("Animation controls test")
+                    .position([40.0, 40.0], Condition::Always)
+                    .size([1100.0, 700.0], Condition::Always)
+                    .build(|| editor.borrow_mut().animations_tab(ui, tick.get()));
+            });
+        };
+        render(context);
+        tick.set(150);
+        render(context);
+        {
+            let e = editor.borrow();
+            assert_eq!(e.preview.highlighted, Some(1));
+            assert_eq!(e.preview.frame(150), 1);
+        }
+        let remove = editor.borrow().frame_remove_input;
+        click(context, render, remove);
+        {
+            let e = editor.borrow();
+            assert_eq!(e.sheet.meta.animations[0].frames.len(), 1);
+            assert_eq!(e.sheet.meta.animations[0].modified, Some(888));
+            assert_eq!(e.preview.highlighted, Some(0));
+        }
+        let remove = editor.borrow().frame_remove_input;
+        click(context, render, remove);
+        assert!(editor.borrow().sheet.meta.animations[0].frames.is_empty());
+        assert_eq!(editor.borrow().preview.highlighted, None);
+        let new = editor.borrow().animation_new_input;
+        click(context, render, new);
+        {
+            let e = editor.borrow();
+            let a = e.sheet.meta.animations.last().unwrap();
+            assert!(a.frames.is_empty());
+            assert_eq!(a.modified, Some(888));
+            assert!(e.sheet.meta.validate().is_err());
+        }
+        let add = editor.borrow().frame_add_input;
+        click(context, render, add);
+        {
+            let e = editor.borrow();
+            let a = e.sheet.meta.animations.last().unwrap();
+            assert_eq!(a.frames[0].sprite_id, 1);
+            assert_eq!(a.frames[0].ms, 100);
+        }
+        let list = RefCell::new(SheetEditor::new(91, fake_sheet()));
+        let measure = |context: &mut Context, n: usize| {
+            {
+                let mut e = list.borrow_mut();
+                let template = e.sheet.meta.animations[0].clone();
+                e.sheet.meta.animations = (0..n)
+                    .map(|i| {
+                        let mut a = template.clone();
+                        a.id = i as u64 + 10;
+                        a.name = format!("animation-{i}");
+                        a
+                    })
+                    .collect();
+                e.selected_animation = None;
+            }
+            vertices(context, consumer, |ui| {
+                ui.window("Animation list test")
+                    .position([40.0, 40.0], Condition::Always)
+                    .size([700.0, 400.0], Condition::Always)
+                    .build(|| list.borrow_mut().animations_tab(ui, 0));
+            })
+        };
+        measure(context, 20);
+        let small = measure(context, 20);
+        let large = measure(context, 1000);
+        assert!(large <= small + 100, "20 rows: {small}, 1000 rows: {large}");
+    }
     fn check_drag_canvas(context: &mut Context, consumer: &SynchronousRendererConsumer) {
         use std::cell::RefCell;
         let a = RefCell::new(SheetEditor::new(80, fake_sheet()));
@@ -1996,6 +2093,7 @@ mod tests {
         check_tile_properties_and_marker(&mut context, &consumer);
         check_sprite_list_and_creation(&mut context, &consumer);
         check_drag_canvas(&mut context, &consumer);
+        check_animation_controls(&mut context, &consumer);
         check_sprite_rename_log_input(&mut context, &consumer);
         let library = std::cell::RefCell::new(AssetLibrary::default());
         assert!(!library.borrow().open);
