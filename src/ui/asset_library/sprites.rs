@@ -35,7 +35,8 @@ impl SheetEditor {
         if ui.button("New rect from selection") {
             let name =
                 edit::next_name("sprite", sheet.meta.sprites.iter().map(|s| s.name.as_str()));
-            if let Some(sprite) = edit::rect_from_cells(name, selection, &sheet.meta.grid) {
+            if let Some(mut sprite) = edit::rect_from_cells(name, selection, &sheet.meta.grid) {
+                sprite.id = sheet.meta.allocate_id();
                 self.selected_sprite = Some(sprite.name.clone());
                 sheet.meta.sprites.push(sprite);
                 sheet.dirty = true;
@@ -47,7 +48,8 @@ impl SheetEditor {
         if ui.button("New set from selection") {
             let name =
                 edit::next_name("sprite", sheet.meta.sprites.iter().map(|s| s.name.as_str()));
-            if let Some(sprite) = edit::set_from_cells(name, selection, &sheet.meta.grid) {
+            if let Some(mut sprite) = edit::set_from_cells(name, selection, &sheet.meta.grid) {
+                sprite.id = sheet.meta.allocate_id();
                 self.selected_sprite = Some(sprite.name.clone());
                 sheet.meta.sprites.push(sprite);
                 sheet.dirty = true;
@@ -79,7 +81,8 @@ impl SheetEditor {
                 .collect();
                 let name =
                     edit::next_name("object", sheet.meta.sprites.iter().map(|s| s.name.as_str()));
-                if let Some(sprite) = edit::rect_from_cells(name, &cells, &sheet.meta.grid) {
+                if let Some(mut sprite) = edit::rect_from_cells(name, &cells, &sheet.meta.grid) {
+                    sprite.id = sheet.meta.allocate_id();
                     self.selected_sprite = Some(sprite.name.clone());
                     sheet.meta.sprites.push(sprite);
                     sheet.dirty = true;
@@ -151,7 +154,7 @@ impl SheetEditor {
                 changed |= input_u32(ui, "Sprite cols", cols, 1);
                 changed |= input_u32(ui, "Sprite rows", rows, 1);
             }
-            Shape::Set { parts } => {
+            Shape::Set { parts, .. } => {
                 let count = parts.len();
                 let mut remove = None;
                 for (i, part) in parts.iter_mut().enumerate() {
@@ -199,7 +202,7 @@ impl SheetEditor {
         if changed {
             let mut candidate = sheet.meta.clone();
             candidate.sprites[index] = sprite.clone();
-            candidate.clips.clear();
+            candidate.animations.clear();
             match candidate.validate_bounds(sheet.image.width, sheet.image.height) {
                 Ok(()) => {
                     sheet.meta.sprites[index] = sprite;

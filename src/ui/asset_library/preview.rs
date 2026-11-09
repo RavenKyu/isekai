@@ -7,7 +7,6 @@ pub enum PreviewTarget {
     #[default]
     None,
     Animation(String),
-    Tile(u32, u32),
     Sprite(String),
 }
 pub struct PreviewState {
@@ -79,16 +78,11 @@ pub struct PartView {
     pub height: u32,
 }
 pub fn draw_parts(ui: &Ui, view: &PartView, parts: &[Part], origin: [f32; 2], zoom: u32) {
-    let min_x = parts.iter().map(|p| p.dx).min().unwrap_or(0);
-    let min_y = parts.iter().map(|p| p.dy).min().unwrap_or(0);
     let scale = zoom as f32;
     let draw = ui.get_window_draw_list();
     for part in parts {
         let (uv0, uv1) = view.grid.uv(part.col, part.row, view.width, view.height);
-        let min = [
-            origin[0] + (i64::from(part.dx) - i64::from(min_x)) as f32 * scale,
-            origin[1] + (i64::from(part.dy) - i64::from(min_y)) as f32 * scale,
-        ];
+        let min = part_position(part, origin, scale);
         let max = [
             min[0] + view.grid.tile as f32 * scale,
             min[1] + view.grid.tile as f32 * scale,
@@ -97,6 +91,12 @@ pub fn draw_parts(ui: &Ui, view: &PartView, parts: &[Part], origin: [f32; 2], zo
             image_quad(min, max, part.transform().uv_corners(uv0, uv1));
         draw.add_image_quad(view.id, p1, p2, p3, p4, uv1, uv2, uv3, uv4, [1.0; 4]);
     }
+}
+fn part_position(part: &Part, origin: [f32; 2], scale: f32) -> [f32; 2] {
+    [
+        origin[0] + part.dx as f32 * scale,
+        origin[1] + part.dy as f32 * scale,
+    ]
 }
 /// imgui walks the quad clockwise from top-left; the shared corners use
 /// triangle-strip order (top-left, top-right, bottom-left, bottom-right).
@@ -112,19 +112,11 @@ impl SheetEditor {
     pub fn preview_tab(&mut self, ui: &Ui, now: u64) {
         let sheet = &self.sheet;
         let mut choices = vec![("None".to_string(), PreviewTarget::None)];
-        for clip in &sheet.meta.clips {
+        for animation in &sheet.meta.animations {
             choices.push((
-                format!("Animation: {}", clip.name),
-                PreviewTarget::Animation(clip.name.clone()),
+                format!("Animation: {}", animation.name),
+                PreviewTarget::Animation(animation.name.clone()),
             ));
-        }
-        for tile in &sheet.meta.tiles {
-            if tile.animation.is_some() {
-                choices.push((
-                    format!("Tile: ({}, {})", tile.col, tile.row),
-                    PreviewTarget::Tile(tile.col, tile.row),
-                ));
-            }
         }
         for sprite in &sheet.meta.sprites {
             choices.push((
@@ -160,22 +152,24 @@ impl SheetEditor {
         let result: Result<(), String> = (|| {
             let sprite = match &self.preview.target {
                 PreviewTarget::Animation(name) => {
-                    let clip = sheet
+                    let animation = sheet
                         .meta
-                        .clips
+                        .animations
                         .iter()
                         .find(|c| c.name == *name)
                         .ok_or("Select an existing animation")?;
-                    self.preview
-                        .update_timeline(clip.frames.iter().map(|f| f.ms).collect(), clip.mode)?;
-                    frame_count = clip.frames.len();
-                    let frame = &clip.frames[self.preview.frame(now)];
+                    self.preview.update_timeline(
+                        animation.frames.iter().map(|f| f.ms).collect(),
+                        animation.mode,
+                    )?;
+                    frame_count = animation.frames.len();
+                    let frame = &animation.frames[self.preview.frame(now)];
                     Some(
                         sheet
                             .meta
                             .sprites
                             .iter()
-                            .find(|s| s.name == frame.sprite)
+                            .find(|s| s.id == frame.sprite_id)
                             .ok_or("animation refers to a missing sprite")?,
                     )
                 }
@@ -187,31 +181,6 @@ impl SheetEditor {
                         .find(|s| s.name == *name)
                         .ok_or("Select an existing sprite")?,
                 ),
-                PreviewTarget::Tile(col, row) => {
-                    let animation = sheet
-                        .meta
-                        .tiles
-                        .iter()
-                        .find(|t| t.col == *col && t.row == *row)
-                        .and_then(|t| t.animation.as_ref())
-                        .ok_or("Select an animated tile")?;
-                    self.preview.update_timeline(
-                        animation.frames.iter().map(|f| f.ms).collect(),
-                        animation.mode,
-                    )?;
-                    frame_count = animation.frames.len();
-                    let frame = &animation.frames[self.preview.frame(now)];
-                    parts.push(Part {
-                        col: frame.col,
-                        row: frame.row,
-                        dx: 0,
-                        dy: 0,
-                        ..Default::default()
-                    });
-                    bounds = (sheet.meta.grid.tile, sheet.meta.grid.tile);
-                    pivot = [bounds.0 as f32 / 2.0, bounds.1 as f32 / 2.0];
-                    None
-                }
                 PreviewTarget::None => None,
             };
             if let Some(sprite) = sprite {
@@ -226,13 +195,10 @@ impl SheetEditor {
             return;
         }
         if parts.is_empty() {
-            ui.text("Select an animation, an animated tile, or a sprite");
+            ui.text("Select an animation or a sprite");
             return;
         }
-        let moving = matches!(
-            self.preview.target,
-            PreviewTarget::Animation(_) | PreviewTarget::Tile(..)
-        );
+        let moving = matches!(self.preview.target, PreviewTarget::Animation(_));
         let frame = if moving { self.preview.frame(now) } else { 0 };
         ui.text(format!(
             "Frame {} / {}, elapsed {} ms{}",
@@ -284,6 +250,15 @@ impl SheetEditor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn part_position_preserves_empty_canvas_edges() {
+        let part = Part {
+            dx: 16,
+            dy: 0,
+            ..Default::default()
+        };
+        assert_eq!(part_position(&part, [10.0, 20.0], 2.0), [42.0, 20.0]);
+    }
     #[test]
     fn image_quad_corners_sample_the_transformed_pixels() {
         use crate::{raster::RgbaImage, sprite::Transform};

@@ -1,0 +1,123 @@
+{
+  "version": 2,
+  "image": "example.png",
+  "grid": {
+    "tile": 16,
+    "offset": [
+      0,
+      0
+    ],
+    "spacing": 0
+  },
+  "tiles": [
+    {
+      "col": 1,
+      "row": 0,
+      "tags": [],
+      "props": {},
+      "animation": {
+        "mode": "loop",
+        "frames": [
+          {
+            "col": 1,
+            "row": 0,
+            "ms": 0
+          }
+        ]
+      }
+    },
+    {
+      "col": 2,
+      "row": 0,
+      "name": "torch",
+      "tags": [],
+      "props": {},
+      "animation": {
+        "mode": "once",
+        "frames": [
+          {
+            "col": 9,
+            "row": 9,
+            "ms": 100
+          }
+        ]
+      }
+    }
+  ],
+  "sprites": [
+    {
+      "name": "a",
+      "kind": "rect",
+      "col": 0,
+      "row": 0,
+      "cols": 1,
+      "rows": 1,
+      "pivot": [
+        8.0,
+        8.0
+      ]
+    },
+    {
+      "name": "b",
+      "kind": "rect",
+      "col": 1,
+      "row": 0,
+      "cols": 1,
+      "rows": 1,
+      "pivot": [
+        8.0,
+        8.0
+      ]
+    },
+    {
+      "name": "c",
+      "kind": "rect",
+      "col": 2,
+      "row": 0,
+      "cols": 1,
+      "rows": 1,
+      "pivot": [
+        8.0,
+        8.0
+      ]
+    },
+    {
+      "name": "d",
+      "kind": "rect",
+      "col": 3,
+      "row": 0,
+      "cols": 1,
+      "rows": 1,
+      "pivot": [
+        8.0,
+        8.0
+      ]
+    }
+  ],
+  "clips": [
+    {
+      "name": "cycle",
+      "mode": "loop",
+      "tags": [],
+      "props": {},
+      "frames": [
+        {
+          "sprite": "a",
+          "ms": 150
+        },
+        {
+          "sprite": "b",
+          "ms": 150
+        },
+        {
+          "sprite": "c",
+          "ms": 150
+        },
+        {
+          "sprite": "d",
+          "ms": 150
+        }
+      ]
+    }
+  ]
+}

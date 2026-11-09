@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "image": "example.png",
   "grid": {
     "tile": 16,
@@ -9,9 +9,11 @@
     ],
     "spacing": 0
   },
+  "next_id": 6,
   "tiles": [],
   "sprites": [
     {
+      "id": 1,
       "name": "a",
       "kind": "rect",
       "col": 0,
@@ -21,9 +23,11 @@
       "pivot": [
         8.0,
         8.0
-      ]
+      ],
+      "props": {}
     },
     {
+      "id": 2,
       "name": "b",
       "kind": "rect",
       "col": 1,
@@ -33,9 +37,11 @@
       "pivot": [
         8.0,
         8.0
-      ]
+      ],
+      "props": {}
     },
     {
+      "id": 3,
       "name": "c",
       "kind": "rect",
       "col": 2,
@@ -45,9 +51,11 @@
       "pivot": [
         8.0,
         8.0
-      ]
+      ],
+      "props": {}
     },
     {
+      "id": 4,
       "name": "d",
       "kind": "rect",
       "col": 3,
@@ -57,30 +65,32 @@
       "pivot": [
         8.0,
         8.0
-      ]
+      ],
+      "props": {}
     }
   ],
-  "clips": [
+  "animations": [
     {
+      "id": 5,
       "name": "cycle",
       "mode": "loop",
       "tags": [],
       "props": {},
       "frames": [
         {
-          "sprite": "a",
+          "sprite_id": 1,
           "ms": 150
         },
         {
-          "sprite": "b",
+          "sprite_id": 2,
           "ms": 150
         },
         {
-          "sprite": "c",
+          "sprite_id": 3,
           "ms": 150
         },
         {
-          "sprite": "d",
+          "sprite_id": 4,
           "ms": 150
         }
       ]

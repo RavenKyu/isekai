@@ -1,12 +1,6 @@
 use super::log;
-use super::{
-    SheetEditor, format_props, format_tags, model::Selection, parse_props, parse_tags,
-    view::input_u32,
-};
-use crate::sprite::{
-    Mode,
-    format::{TileAnimation, TileFrame, TileMeta},
-};
+use super::{SheetEditor, format_props, format_tags, model::Selection, parse_props, parse_tags};
+use crate::sprite::{Mode, format::TileMeta};
 use dear_imgui_rs::Ui;
 
 #[derive(Default)]
@@ -15,17 +9,10 @@ pub struct TileDraft {
     name: String,
     tags: String,
     props: String,
-    /// While pinned, the edited tile stays put and the selection picks frame cells.
-    pinned: bool,
 }
 impl TileDraft {
-    /// The tile being edited: the pinned one, otherwise the single selected cell.
     pub fn target(&self, selection: &Selection) -> Option<(u32, u32)> {
-        if self.pinned {
-            self.cell
-        } else {
-            selection.single()
-        }
+        selection.single()
     }
     pub fn validate(&self, meta: &crate::sprite::SpriteSheet) -> Result<(), String> {
         let Some(cell) = self.cell else {
@@ -43,24 +30,12 @@ impl TileDraft {
         Ok(())
     }
 }
-/// Frames for the selected cells, row by row and left to right within a row.
-pub fn frames_from_selection(selection: &Selection, ms: u32) -> Vec<TileFrame> {
-    let mut cells: Vec<_> = selection.cells.iter().copied().collect();
-    cells.sort_by_key(|&(col, row)| (row, col));
-    cells
-        .into_iter()
-        .map(|(col, row)| TileFrame { col, row, ms })
-        .collect()
-}
 /// The format keeps only tiles with metadata: a cleared tile leaves the list.
 pub fn put_tile(tiles: &mut Vec<TileMeta>, tile: TileMeta) {
     let index = tiles
         .iter()
         .position(|t| (t.col, t.row) == (tile.col, tile.row));
-    let empty = tile.name.is_none()
-        && tile.tags.is_empty()
-        && tile.props.is_empty()
-        && tile.animation.is_none();
+    let empty = tile.name.is_none() && tile.tags.is_empty() && tile.props.is_empty();
     match (index, empty) {
         (Some(i), true) => {
             tiles.remove(i);
@@ -108,7 +83,6 @@ impl SheetEditor {
                 name: None,
                 tags: vec![],
                 props: Default::default(),
-                animation: None,
             });
         if self.tile_draft.cell != Some((col, row)) {
             self.tile_draft = TileDraft {
@@ -116,13 +90,7 @@ impl SheetEditor {
                 name: tile.name.clone().unwrap_or_default(),
                 tags: format_tags(&tile.tags),
                 props: format_props(&tile.props),
-                pinned: false,
             };
-        }
-        ui.checkbox("Pin tile", &mut self.tile_draft.pinned);
-        if self.tile_draft.pinned {
-            ui.same_line();
-            ui.text_disabled("(select frame cells on the sheet)");
         }
         let mut changed = ui
             .input_text("Tile name", &mut self.tile_draft.name)
@@ -154,68 +122,6 @@ impl SheetEditor {
                 }
             }
         }
-        let mut animated = tile.animation.is_some();
-        if ui.checkbox("Tile animation", &mut animated) {
-            changed = true;
-            tile.animation = animated.then(|| TileAnimation {
-                mode: Mode::Loop,
-                frames: vec![TileFrame { col, row, ms: 100 }],
-            });
-        }
-        if let Some(animation) = &mut tile.animation {
-            changed |= mode_combo(ui, "Tile mode", &mut animation.mode);
-            let mut operation = None;
-            let frame_count = animation.frames.len();
-            for (i, frame) in animation.frames.iter_mut().enumerate() {
-                let _id = ui.push_id(i as i32);
-                ui.set_next_item_width(110.0);
-                changed |= input_u32(ui, "Col", &mut frame.col, 0);
-                ui.same_line();
-                ui.set_next_item_width(110.0);
-                changed |= input_u32(ui, "Row", &mut frame.row, 0);
-                ui.same_line();
-                ui.set_next_item_width(120.0);
-                changed |= input_u32(ui, "ms", &mut frame.ms, 1);
-                if ui.small_button("Up") && i > 0 {
-                    operation = Some((i, 0));
-                }
-                ui.same_line();
-                if ui.small_button("Down") && i + 1 < frame_count {
-                    operation = Some((i, 1));
-                }
-                ui.same_line();
-                if ui.small_button("Remove") {
-                    operation = Some((i, 2));
-                }
-            }
-            if let Some((i, op)) = operation {
-                match op {
-                    0 => animation.frames.swap(i, i - 1),
-                    1 => animation.frames.swap(i, i + 1),
-                    _ => {
-                        animation.frames.remove(i);
-                    }
-                };
-                changed = true;
-            }
-            let label = if self.tile_draft.pinned {
-                "Add selected cells"
-            } else {
-                "Add this tile"
-            };
-            let adding = frames_from_selection(&sheet.selection, 100);
-            {
-                let _disabled = ui.begin_disabled_with_cond(adding.is_empty());
-                if ui.button(label) {
-                    animation.frames.extend(adding);
-                    changed = true;
-                }
-            }
-            if !self.tile_draft.pinned {
-                ui.same_line();
-                ui.text_disabled("Pin tile to add other cells");
-            }
-        }
         if changed {
             let mut candidate = sheet.meta.clone();
             put_tile(&mut candidate.tiles, tile);
@@ -234,30 +140,6 @@ impl SheetEditor {
 mod tests {
     use super::*;
     #[test]
-    fn pinned_tile_keeps_target_and_takes_selected_cells_in_row_order() {
-        let mut selection = Selection::default();
-        selection.apply(Some((0, 0)), false, false);
-        let mut draft = TileDraft {
-            cell: Some((0, 0)),
-            ..Default::default()
-        };
-        assert_eq!(draft.target(&selection), Some((0, 0)));
-        draft.pinned = true;
-        selection.apply(Some((2, 1)), false, false);
-        selection.apply(Some((1, 0)), false, true);
-        selection.apply(Some((1, 1)), false, true);
-        assert_eq!(draft.target(&selection), Some((0, 0)));
-        let cells: Vec<_> = frames_from_selection(&selection, 80)
-            .iter()
-            .map(|f| (f.col, f.row, f.ms))
-            .collect();
-        assert_eq!(cells, vec![(1, 0, 80), (1, 1, 80), (2, 1, 80)]);
-        draft.pinned = false;
-        assert_eq!(draft.target(&selection), None);
-        selection.apply(Some((2, 1)), false, false);
-        assert_eq!(draft.target(&selection), Some((2, 1)));
-    }
-    #[test]
     fn cleared_tile_metadata_leaves_the_sparse_list() {
         let blank = TileMeta {
             col: 1,
@@ -265,7 +147,6 @@ mod tests {
             name: None,
             tags: vec![],
             props: Default::default(),
-            animation: None,
         };
         let mut tiles = Vec::new();
         put_tile(&mut tiles, blank.clone());

@@ -3,7 +3,7 @@ use super::{
     SheetEditor, edit, format_props, format_tags, parse_props, parse_tags, tileset::mode_combo,
     view::input_u32,
 };
-use crate::sprite::{Clip, Mode, format::ClipFrame};
+use crate::sprite::{Animation, Mode, format::AnimationFrame};
 use dear_imgui_rs::Ui;
 #[derive(Default)]
 pub struct AnimationDraft {
@@ -25,10 +25,13 @@ impl SheetEditor {
         if ui.button("New animation") {
             let name = edit::next_name(
                 "animation",
-                sheet.meta.clips.iter().map(|c| c.name.as_str()),
+                sheet.meta.animations.iter().map(|c| c.name.as_str()),
             );
             self.selected_animation = Some(name.clone());
-            sheet.meta.clips.push(Clip {
+            let id = sheet.meta.allocate_id();
+            sheet.meta.animations.push(Animation {
+                id,
+                modified: None,
                 name,
                 mode: Mode::Loop,
                 tags: vec![],
@@ -41,38 +44,42 @@ impl SheetEditor {
                 "New animation needs at least one frame before Save".into(),
             );
         }
-        for clip in &sheet.meta.clips {
+        for animation in &sheet.meta.animations {
             if ui
-                .selectable_config(format!("{} ({} frames)", clip.name, clip.frames.len()))
-                .selected(self.selected_animation.as_ref() == Some(&clip.name))
+                .selectable_config(format!(
+                    "{} ({} frames)",
+                    animation.name,
+                    animation.frames.len()
+                ))
+                .selected(self.selected_animation.as_ref() == Some(&animation.name))
                 .build()
             {
-                self.selected_animation = Some(clip.name.clone());
+                self.selected_animation = Some(animation.name.clone());
             }
         }
         let Some(index) = sheet
             .meta
-            .clips
+            .animations
             .iter()
             .position(|c| Some(&c.name) == self.selected_animation.as_ref())
         else {
             return;
         };
-        let mut clip = sheet.meta.clips[index].clone();
-        if self.animation_draft.name.as_ref() != Some(&clip.name) {
+        let mut animation = sheet.meta.animations[index].clone();
+        if self.animation_draft.name.as_ref() != Some(&animation.name) {
             self.animation_draft = AnimationDraft {
-                name: Some(clip.name.clone()),
-                tags: format_tags(&clip.tags),
-                props: format_props(&clip.props),
+                name: Some(animation.name.clone()),
+                tags: format_tags(&animation.tags),
+                props: format_props(&animation.props),
             };
         }
-        let mut name = clip.name.clone();
+        let mut name = animation.name.clone();
         let mut changed = false;
         if ui.input_text("Animation name", &mut name).build() {
             if name.trim().is_empty()
                 || sheet
                     .meta
-                    .clips
+                    .animations
                     .iter()
                     .enumerate()
                     .any(|(i, c)| i != index && c.name == name)
@@ -83,17 +90,17 @@ impl SheetEditor {
                 );
             } else {
                 if self.preview.target
-                    == super::preview::PreviewTarget::Animation(clip.name.clone())
+                    == super::preview::PreviewTarget::Animation(animation.name.clone())
                 {
                     self.preview.target = super::preview::PreviewTarget::Animation(name.clone());
                 }
-                clip.name = name.clone();
+                animation.name = name.clone();
                 self.selected_animation = Some(name.clone());
                 self.animation_draft.name = Some(name);
                 changed = true;
             }
         }
-        changed |= mode_combo(ui, "Animation mode", &mut clip.mode);
+        changed |= mode_combo(ui, "Animation mode", &mut animation.mode);
         let mut text_changed = ui
             .input_text("Animation tags", &mut self.animation_draft.tags)
             .build();
@@ -105,23 +112,28 @@ impl SheetEditor {
             )
             .build();
         if text_changed {
-            clip.tags = parse_tags(&self.animation_draft.tags);
+            animation.tags = parse_tags(&self.animation_draft.tags);
             match parse_props(&self.animation_draft.props) {
                 Ok(props) => {
-                    clip.props = props;
+                    animation.props = props;
                     changed = true;
                 }
                 Err(error) => log::append(&mut self.log, error),
             }
         }
         let names: Vec<_> = sheet.meta.sprites.iter().map(|s| s.name.as_str()).collect();
-        let frame_count = clip.frames.len();
+        let frame_count = animation.frames.len();
         let mut operation = None;
-        for (i, frame) in clip.frames.iter_mut().enumerate() {
-            let _id = ui.push_id(&format!("clip-frame-{i}"));
-            let mut sprite = names.iter().position(|&s| s == frame.sprite).unwrap_or(0);
+        for (i, frame) in animation.frames.iter_mut().enumerate() {
+            let _id = ui.push_id(&format!("animation-frame-{i}"));
+            let mut sprite = sheet
+                .meta
+                .sprites
+                .iter()
+                .position(|s| s.id == frame.sprite_id)
+                .unwrap_or(0);
             if !names.is_empty() && ui.combo_simple_string("Frame sprite", &mut sprite, &names) {
-                frame.sprite = names[sprite].into();
+                frame.sprite_id = sheet.meta.sprites[sprite].id;
                 changed = true;
             }
             ui.set_next_item_width(160.0);
@@ -140,10 +152,10 @@ impl SheetEditor {
         }
         if let Some((i, op)) = operation {
             match op {
-                0 => clip.frames.swap(i, i - 1),
-                1 => clip.frames.swap(i, i + 1),
+                0 => animation.frames.swap(i, i - 1),
+                1 => animation.frames.swap(i, i + 1),
                 _ => {
-                    clip.frames.remove(i);
+                    animation.frames.remove(i);
                 }
             };
             changed = true;
@@ -157,8 +169,8 @@ impl SheetEditor {
                 self.selected_sprite = Some(names[selected].into());
             }
             if ui.button("Add frame") {
-                clip.frames.push(ClipFrame {
-                    sprite: names[selected].into(),
+                animation.frames.push(AnimationFrame {
+                    sprite_id: sheet.meta.sprites[selected].id,
                     ms: 100,
                 });
                 changed = true;
@@ -167,12 +179,12 @@ impl SheetEditor {
             ui.text("Create a sprite before adding frames");
         }
         if changed {
-            sheet.meta.clips[index] = clip;
+            sheet.meta.animations[index] = animation;
             sheet.dirty = true;
             log::append_repeat(&mut self.log, "Animation updated");
         }
         if ui.button("Delete animation") {
-            sheet.meta.clips.remove(index);
+            sheet.meta.animations.remove(index);
             self.selected_animation = None;
             self.animation_draft = Default::default();
             sheet.dirty = true;

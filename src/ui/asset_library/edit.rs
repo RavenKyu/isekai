@@ -26,6 +26,9 @@ pub fn rect_from_cells(name: String, cells: &BTreeSet<(u32, u32)>, grid: &Grid) 
     let (col, row, max_col, max_row) = cell_bounds(cells)?;
     let (cols, rows) = (max_col - col + 1, max_row - row + 1);
     Some(Sprite {
+        id: 0,
+        props: Default::default(),
+        modified: None,
         name,
         shape: Shape::Rect {
             col,
@@ -42,8 +45,12 @@ pub fn rect_from_cells(name: String, cells: &BTreeSet<(u32, u32)>, grid: &Grid) 
 pub fn set_from_cells(name: String, cells: &BTreeSet<(u32, u32)>, grid: &Grid) -> Option<Sprite> {
     let (col, row, max_col, max_row) = cell_bounds(cells)?;
     Some(Sprite {
+        id: 0,
+        props: Default::default(),
+        modified: None,
         name,
         shape: Shape::Set {
+            canvas: [max_col - col + 1, max_row - row + 1],
             parts: cells
                 .iter()
                 .map(|&(c, r)| Part {
@@ -97,25 +104,24 @@ impl SpriteSheet {
             .find(|s| s.name == old)
             .ok_or("sprite no longer exists")?;
         sprite.name = new.into();
-        for clip in &mut self.clips {
-            for frame in &mut clip.frames {
-                if frame.sprite == old {
-                    frame.sprite = new.into();
-                }
-            }
-        }
         Ok(())
     }
     pub fn remove_sprite(&mut self, name: &str) -> Result<(), String> {
-        let references: Vec<_> = self
-            .clips
+        let id = self
+            .sprites
             .iter()
-            .filter(|c| c.frames.iter().any(|f| f.sprite == name))
+            .find(|s| s.name == name)
+            .ok_or("sprite no longer exists")?
+            .id;
+        let references: Vec<_> = self
+            .animations
+            .iter()
+            .filter(|c| c.frames.iter().any(|f| f.sprite_id == id))
             .map(|c| c.name.as_str())
             .collect();
         if !references.is_empty() {
             return Err(format!(
-                "sprite {name:?} is used by clips: {}",
+                "sprite {name:?} is used by animations: {}",
                 references.join(", ")
             ));
         }
@@ -176,14 +182,14 @@ mod tests {
         assert!(sheet.rename_sprite("a", "b").is_err());
         assert!(sheet.remove_sprite("a").is_err());
         sheet.rename_sprite("a", "renamed").unwrap();
-        assert_eq!(sheet.clips[0].frames[0].sprite, "renamed");
+        assert_eq!(sheet.animations[0].frames[0].sprite_id, 1);
         assert!(sheet.remove_sprite("renamed").is_err());
         sheet.rename_sprite("renamed", "a").unwrap();
         assert_eq!(
             crate::sprite::store::to_json(&sheet),
             crate::sprite::example::EXAMPLE_JSON
         );
-        sheet.clips.clear();
+        sheet.animations.clear();
         sheet.remove_sprite("a").unwrap();
         assert_eq!(sheet.sprites.len(), 3);
         let mut image = RgbaImage::new(64, 64);

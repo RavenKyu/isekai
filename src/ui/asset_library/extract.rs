@@ -614,7 +614,7 @@ pub(super) mod tests {
             assert!(
                 plan.sheet.tiles.is_empty()
                     && plan.sheet.sprites.is_empty()
-                    && plan.sheet.clips.is_empty()
+                    && plan.sheet.animations.is_empty()
             );
             assert!(plan.report.contains("unique 3") && plan.report.contains("identical"));
             assert_eq!(

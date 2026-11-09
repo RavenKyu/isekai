@@ -77,7 +77,7 @@ impl App {
                 {
                     crate::sprite::playback::Playback::open_native(
                         std::path::Path::new(&play.source),
-                        play.clip.as_deref(),
+                        play.animation.as_deref(),
                         &gl,
                     )
                 }
@@ -85,7 +85,7 @@ impl App {
                 {
                     crate::sprite::playback::Playback::open_embedded(
                         &play.source,
-                        play.clip.as_deref(),
+                        play.animation.as_deref(),
                         &gl,
                     )
                 }

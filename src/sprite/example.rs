@@ -1,5 +1,5 @@
 use super::{
-    format::{Clip, ClipFrame, Part, Shape, Sprite, SpriteSheet},
+    format::{Animation, AnimationFrame, Part, Shape, Sprite, SpriteSheet},
     grid::Grid,
     store::{self, StoreError},
     timeline::Mode,
@@ -22,7 +22,11 @@ pub fn example() -> (RgbaImage, SpriteSheet) {
     {
         image.fill_rect(col as u32 * 16, 0, 16, 16, color);
         image.fill_rect(col as u32 * 16 + 6, 6, 4, 4, [0; 4]);
+        let id = sheet.allocate_id();
         sheet.sprites.push(Sprite {
+            id,
+            props: Default::default(),
+            modified: None,
             name: name.into(),
             shape: Shape::Rect {
                 col: col as u32,
@@ -33,15 +37,18 @@ pub fn example() -> (RgbaImage, SpriteSheet) {
             pivot: [8.0, 8.0],
         });
     }
-    sheet.clips.push(Clip {
+    let id = sheet.allocate_id();
+    sheet.animations.push(Animation {
+        id,
+        modified: None,
         name: "cycle".into(),
         mode: Mode::Loop,
         tags: vec![],
         props: Default::default(),
-        frames: ["a", "b", "c", "d"]
+        frames: [1, 2, 3, 4]
             .into_iter()
-            .map(|name| ClipFrame {
-                sprite: name.into(),
+            .map(|id| AnimationFrame {
+                sprite_id: id,
                 ms: 150,
             })
             .collect(),
@@ -52,10 +59,15 @@ pub const EXAMPLE_TURNED_JSON: &str =
     include_str!("../../tests/fixtures/example-turned.sprites.json");
 pub fn example_turned() -> (RgbaImage, SpriteSheet) {
     let (image, mut sheet) = example();
+    sheet.next_id = 3;
     sheet.sprites = vec![Sprite {
+        id: 1,
+        props: Default::default(),
+        modified: None,
         name: "turned".into(),
         pivot: [16.0, 16.0],
         shape: Shape::Set {
+            canvas: [2, 2],
             parts: [(false, 0), (false, 90), (true, 0), (true, 270)]
                 .into_iter()
                 .enumerate()
@@ -70,13 +82,15 @@ pub fn example_turned() -> (RgbaImage, SpriteSheet) {
                 .collect(),
         },
     }];
-    sheet.clips = vec![Clip {
+    sheet.animations = vec![Animation {
+        id: 2,
+        modified: None,
         name: "turned".into(),
         mode: Mode::Loop,
         tags: vec![],
         props: Default::default(),
-        frames: vec![ClipFrame {
-            sprite: "turned".into(),
+        frames: vec![AnimationFrame {
+            sprite_id: 1,
             ms: 150,
         }],
     }];

@@ -1328,7 +1328,7 @@ mod tests {
             let mut sheet = fake_sheet();
             sheet.meta.tiles.clear();
             sheet.meta.sprites.clear();
-            sheet.meta.clips.clear();
+            sheet.meta.animations.clear();
             sheet.selection.apply(Some((0, 0)), false, false);
             sheet
         };
@@ -1387,7 +1387,7 @@ mod tests {
         type_into(context, render, at, "mnopqrstuv");
         let editor = editor.borrow();
         assert_eq!(editor.sheet.meta.sprites[0].name, "amnopqrstuv");
-        assert_eq!(editor.sheet.meta.clips[0].frames[0].sprite, "amnopqrstuv");
+        assert_eq!(editor.sheet.meta.animations[0].frames[0].sprite_id, 1);
         assert_eq!(editor.log.len(), 1, "{:?}", editor.log);
         assert!(
             editor.log[0].ends_with("Sprite renamed (x10)"),
