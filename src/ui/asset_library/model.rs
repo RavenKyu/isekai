@@ -149,6 +149,20 @@ pub fn is_png(path: &Path) -> bool {
         .is_some_and(|s| s.eq_ignore_ascii_case("png"))
 }
 
+pub type ReadSheet = (RgbaImage, SpriteSheet, bool, Vec<(u32, u32)>);
+pub fn read_sheet(path: &Path, key: Option<[u8; 3]>) -> Result<ReadSheet, String> {
+    let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+    let sidecar = crate::sprite::store::sidecar_for(path);
+    let (meta, dropped) = if sidecar.try_exists().map_err(|e| e.to_string())? {
+        let loaded = crate::sprite::store::load(&sidecar).map_err(|e| e.to_string())?;
+        (Some(loaded.sheet), loaded.dropped_tile_animations)
+    } else {
+        (None, Vec::new())
+    };
+    let (image, meta, dirty) = open_sheet(path, &bytes, key, meta)?;
+    Ok((image, meta, dirty || !dropped.is_empty(), dropped))
+}
+
 pub fn open_sheet(
     path: &Path,
     bytes: &[u8],
@@ -183,6 +197,39 @@ pub fn open_sheet(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn legacy_tile_animations_open_dirty_then_save_clean() {
+        let temp = crate::test_support::TempDir::new("legacy-warning");
+        let image = temp.0.join("example.png");
+        std::fs::write(
+            &image,
+            include_bytes!("../../../tests/fixtures/example.png"),
+        )
+        .unwrap();
+        let sidecar = crate::sprite::store::sidecar_for(&image);
+        std::fs::write(
+            &sidecar,
+            include_str!("../../../tests/fixtures/tile-animation-v2.sprites.json"),
+        )
+        .unwrap();
+        let (_, sheet, dirty, dropped) = read_sheet(&image, None).unwrap();
+        assert!(dirty);
+        assert_eq!(dropped, vec![(1, 0), (2, 0)]);
+        let warning = crate::sprite::store::dropped_tile_animation_warning(&dropped).unwrap();
+        assert!(warning.contains("(1, 0)") && warning.contains("(2, 0)"));
+        crate::sprite::store::save(&sidecar, &sheet).unwrap();
+        let saved = std::fs::read_to_string(&sidecar).unwrap();
+        assert!(saved.contains("\"version\": 3"));
+        assert!(!saved.contains("\"animation\":"));
+        let (_, _, dirty, dropped) = read_sheet(&image, None).unwrap();
+        assert!(!dirty && dropped.is_empty());
+        std::fs::write(
+            &sidecar,
+            include_str!("../../../tests/fixtures/example-v2.sprites.json"),
+        )
+        .unwrap();
+        assert!(!read_sheet(&image, None).unwrap().2);
+    }
     #[test]
     fn old_folder_hint_detects_existing_path() {
         let temp = crate::test_support::TempDir::new("old-output-hint");

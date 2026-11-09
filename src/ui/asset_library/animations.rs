@@ -21,23 +21,23 @@ impl AnimationDraft {
 }
 impl SheetEditor {
     pub fn animations_tab(&mut self, ui: &Ui) {
+        let now = (self.now)();
         let sheet = &mut self.sheet;
         if ui.button("New animation") {
             let name = edit::next_name(
                 "animation",
                 sheet.meta.animations.iter().map(|c| c.name.as_str()),
             );
-            self.selected_animation = Some(name.clone());
-            let id = sheet.meta.allocate_id();
-            sheet.meta.animations.push(Animation {
-                id,
+            let animation = Animation {
+                id: 0,
                 modified: None,
                 name,
                 mode: Mode::Loop,
                 tags: vec![],
                 props: Default::default(),
                 frames: vec![],
-            });
+            };
+            self.selected_animation = Some(sheet.meta.add_animation(animation, now));
             sheet.dirty = true;
             log::append(
                 &mut self.log,
@@ -51,17 +51,17 @@ impl SheetEditor {
                     animation.name,
                     animation.frames.len()
                 ))
-                .selected(self.selected_animation.as_ref() == Some(&animation.name))
+                .selected(self.selected_animation == Some(animation.id))
                 .build()
             {
-                self.selected_animation = Some(animation.name.clone());
+                self.selected_animation = Some(animation.id);
             }
         }
         let Some(index) = sheet
             .meta
             .animations
             .iter()
-            .position(|c| Some(&c.name) == self.selected_animation.as_ref())
+            .position(|c| Some(c.id) == self.selected_animation)
         else {
             return;
         };
@@ -89,13 +89,7 @@ impl SheetEditor {
                     format!("empty or duplicate animation name: {name:?}"),
                 );
             } else {
-                if self.preview.target
-                    == super::preview::PreviewTarget::Animation(animation.name.clone())
-                {
-                    self.preview.target = super::preview::PreviewTarget::Animation(name.clone());
-                }
                 animation.name = name.clone();
-                self.selected_animation = Some(name.clone());
                 self.animation_draft.name = Some(name);
                 changed = true;
             }
@@ -162,11 +156,17 @@ impl SheetEditor {
         }
         let mut selected = names
             .iter()
-            .position(|&s| Some(s) == self.selected_sprite.as_deref())
+            .position(|&s| {
+                sheet
+                    .meta
+                    .sprites
+                    .iter()
+                    .any(|sprite| sprite.name == s && Some(sprite.id) == self.selected_sprite)
+            })
             .unwrap_or(0);
         if !names.is_empty() {
             if ui.combo_simple_string("Add sprite", &mut selected, &names) {
-                self.selected_sprite = Some(names[selected].into());
+                self.selected_sprite = Some(sheet.meta.sprites[selected].id);
             }
             if ui.button("Add frame") {
                 animation.frames.push(AnimationFrame {
@@ -179,9 +179,14 @@ impl SheetEditor {
             ui.text("Create a sprite before adding frames");
         }
         if changed {
-            sheet.meta.animations[index] = animation;
-            sheet.dirty = true;
-            log::append_repeat(&mut self.log, "Animation updated");
+            match sheet.meta.put_animation(animation.id, animation, now) {
+                Ok(true) => {
+                    sheet.dirty = true;
+                    log::append_repeat(&mut self.log, "Animation updated");
+                }
+                Ok(false) => {}
+                Err(error) => log::append(&mut self.log, error),
+            }
         }
         if ui.button("Delete animation") {
             sheet.meta.animations.remove(index);

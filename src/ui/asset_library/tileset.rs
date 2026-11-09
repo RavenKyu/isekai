@@ -123,11 +123,12 @@ impl SheetEditor {
             }
         }
         if changed {
-            let mut candidate = sheet.meta.clone();
-            put_tile(&mut candidate.tiles, tile);
-            match candidate.validate_bounds(sheet.image.width, sheet.image.height) {
+            match sheet
+                .meta
+                .validate_tile_edit(&tile, sheet.image.width, sheet.image.height)
+            {
                 Ok(()) => {
-                    sheet.meta = candidate;
+                    put_tile(&mut sheet.meta.tiles, tile);
                     sheet.dirty = true;
                     log::append_repeat(&mut self.log, "Tile metadata updated");
                 }

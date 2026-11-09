@@ -71,6 +71,7 @@ pub enum Action {
 pub struct SheetEditor {
     pub id: SheetId,
     pub sheet: OpenSheet,
+    now: fn() -> u64,
     focus_requested: bool,
     confirm_close: bool,
     #[cfg(test)]
@@ -90,8 +91,8 @@ pub struct SheetEditor {
     /// Where Save image as wrote the memory image, for the library's PNG path field.
     saved_path: Option<PathBuf>,
     tile_draft: tileset::TileDraft,
-    selected_sprite: Option<String>,
-    selected_animation: Option<String>,
+    selected_sprite: Option<u64>,
+    selected_animation: Option<u64>,
     suggestions: Vec<raster::CellRect>,
     suggest_job: Option<job::Job<Vec<raster::ObjectBox>>>,
     animation_draft: animations::AnimationDraft,
@@ -194,16 +195,7 @@ impl AssetLibrary {
                     LoadStep::Focused => return Ok(()),
                     LoadStep::Open(path) => path,
                 };
-                let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
-                let sidecar = store::sidecar_for(&path);
-                // try_exists propagates permission errors rather than treating them
-                // as a new sidecar and risking an accidental overwrite.
-                let meta = if sidecar.try_exists().map_err(|e| e.to_string())? {
-                    Some(store::load(&sidecar).map_err(|e| e.to_string())?.sheet)
-                } else {
-                    None
-                };
-                let (image, meta, dirty) = open_sheet(&path, &bytes, self.key()?, meta)?;
+                let (image, meta, dirty, dropped) = read_sheet(&path, self.key()?)?;
                 let opened = OpenSheet::prepare(
                     SheetSource::File(path.clone()),
                     image,
@@ -212,7 +204,7 @@ impl AssetLibrary {
                     gl,
                     renderer,
                 )?;
-                self.install(opened);
+                self.install_with_warning(opened, &dropped);
                 self.path_input = path.to_string_lossy().into_owned();
                 self.status = format!("Opened {}", path.display());
             }
@@ -279,6 +271,15 @@ impl AssetLibrary {
             SheetSource::Memory { .. } => editor.log("Memory image: save the image first"),
         }
         self.sheets.push(editor);
+    }
+    fn install_with_warning(&mut self, opened: OpenSheet, dropped: &[(u32, u32)]) {
+        self.install(opened);
+        if let Some(warning) = store::dropped_tile_animation_warning(dropped) {
+            self.sheets
+                .last_mut()
+                .expect("installed editor")
+                .log(warning);
+        }
     }
     /// Releases one sheet's texture and drops its editor. On error the editor stays.
     pub fn close(&mut self, id: SheetId, renderer: &mut GlowRenderer) -> Result<(), String> {
@@ -418,6 +419,12 @@ impl SheetEditor {
         Self {
             id,
             sheet,
+            now: || {
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs()
+            },
             focus_requested: true,
             confirm_close: false,
             #[cfg(test)]
@@ -819,7 +826,7 @@ impl OpenSheet {
         let mut candidate = self.meta.clone();
         candidate.grid = grid;
         candidate
-            .validate_bounds(self.image.width, self.image.height)
+            .validate_edit_bounds(self.image.width, self.image.height)
             .map_err(|e| e.join("; "))?;
         self.meta = candidate;
         self.selection = Selection::default();
@@ -1328,7 +1335,7 @@ mod tests {
             let mut sheet = fake_sheet();
             sheet.meta.tiles.clear();
             sheet.meta.sprites.clear();
-            sheet.meta.animations.clear();
+            sheet.meta.animations[0].frames.clear();
             sheet.selection.apply(Some((0, 0)), false, false);
             sheet
         };
@@ -1372,7 +1379,10 @@ mod tests {
     ) {
         use dear_imgui_rs::Condition;
         let mut editor = SheetEditor::new(22, fake_sheet());
-        editor.selected_sprite = Some("a".into());
+        editor.selected_sprite = Some(1);
+        editor.preview.target = preview::PreviewTarget::Sprite(1);
+        editor.now = || 12345;
+        let animation_before = editor.sheet.meta.animations[0].clone();
         let editor = std::cell::RefCell::new(editor);
         let render = |context: &mut Context| {
             vertices(context, consumer, |ui| {
@@ -1387,7 +1397,10 @@ mod tests {
         type_into(context, render, at, "mnopqrstuv");
         let editor = editor.borrow();
         assert_eq!(editor.sheet.meta.sprites[0].name, "amnopqrstuv");
-        assert_eq!(editor.sheet.meta.animations[0].frames[0].sprite_id, 1);
+        assert_eq!(editor.sheet.meta.animations[0], animation_before);
+        assert_eq!(editor.selected_sprite, Some(1));
+        assert_eq!(editor.preview.target, preview::PreviewTarget::Sprite(1));
+        assert_eq!(editor.sheet.meta.sprites[0].modified, Some(12345));
         assert_eq!(editor.log.len(), 1, "{:?}", editor.log);
         assert!(
             editor.log[0].ends_with("Sprite renamed (x10)"),
@@ -1441,6 +1454,25 @@ mod tests {
             matches!(library.borrow().pending[..], [Action::Close(11)]),
             "clean x closes immediately"
         );
+    }
+    #[test]
+    fn install_warns_after_open_and_preserves_dirty() {
+        let mut library = AssetLibrary::default();
+        let mut sheet = fake_sheet();
+        sheet.dirty = true;
+        library.install_with_warning(sheet, &[(1, 0), (2, 0)]);
+        let editor = &library.sheets[0];
+        assert!(editor.sheet.dirty);
+        assert!(editor.log[0].contains("Opened"));
+        assert!(editor.log[1].contains("(1, 0)") && editor.log[1].contains("(2, 0)"));
+    }
+    #[test]
+    fn incomplete_animation_does_not_block_grid_edit() {
+        let mut sheet = fake_sheet();
+        sheet.meta.animations[0].frames.clear();
+        assert!(sheet.meta.validate().is_err());
+        assert!(sheet.set_grid(sheet.meta.grid).is_ok());
+        assert!(sheet.meta.validate().is_err());
     }
     #[test]
     fn invalid_grid_edit_preserves_metadata_and_selection() {

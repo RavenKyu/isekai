@@ -523,6 +523,9 @@ impl SpriteSheet {
         id
     }
     pub fn validate(&self) -> Result<(), Vec<String>> {
+        self.validate_internal(true)
+    }
+    fn validate_internal(&self, complete: bool) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
         if !matches!(self.version, 1..=3) {
             errors.push(format!(
@@ -553,56 +556,7 @@ impl SpriteSheet {
             if sprite.name.trim().is_empty() || !names.insert(sprite.name.as_str()) {
                 errors.push(format!("empty or duplicate sprite name: {:?}", sprite.name));
             }
-            if sprite.pivot.iter().any(|p| !p.is_finite()) {
-                errors.push(format!("sprite {:?} pivot must be finite", sprite.name));
-            }
-            match &sprite.shape {
-                Shape::Rect {
-                    col,
-                    row,
-                    cols,
-                    rows,
-                } => {
-                    if *cols == 0
-                        || *rows == 0
-                        || col.checked_add(*cols).is_none()
-                        || row.checked_add(*rows).is_none()
-                        || u64::from(*cols) * u64::from(self.grid.tile) > i32::MAX as u64
-                        || u64::from(*rows) * u64::from(self.grid.tile) > i32::MAX as u64
-                    {
-                        errors.push(format!(
-                            "sprite {:?} has invalid rectangle dimensions",
-                            sprite.name
-                        ));
-                    }
-                }
-                Shape::Set { canvas, parts } => {
-                    let w = u64::from(canvas[0]) * u64::from(self.grid.tile);
-                    let h = u64::from(canvas[1]) * u64::from(self.grid.tile);
-                    if canvas.contains(&0) || w > i32::MAX as u64 || h > i32::MAX as u64 {
-                        errors.push(format!("sprite {:?} has invalid canvas", sprite.name));
-                    }
-                    if parts.is_empty() {
-                        errors.push(format!(
-                            "sprite {:?} needs parts with representable bounds",
-                            sprite.name
-                        ));
-                    }
-                    for p in parts {
-                        if let Err(error) = Transform::new(p.flip_x, p.rotation) {
-                            errors.push(error);
-                        }
-                        if p.dx < 0
-                            || p.dy < 0
-                            || i64::from(p.dx) + i64::from(self.grid.tile) > w as i64
-                            || i64::from(p.dy) + i64::from(self.grid.tile) > h as i64
-                        {
-                            errors
-                                .push(format!("sprite {:?} part outside its canvas", sprite.name));
-                        }
-                    }
-                }
-            }
+            self.sprite_shape_errors(sprite, complete, &mut errors);
         }
         let mut ids = BTreeSet::new();
         if self.next_id == 0 {
@@ -624,7 +578,6 @@ impl SpriteSheet {
                 errors.push(format!("duplicate id {id}"));
             }
         }
-        let sprite_ids: BTreeSet<_> = self.sprites.iter().map(|s| s.id).collect();
         let mut names = BTreeSet::new();
         for animation in &self.animations {
             if animation.name.trim().is_empty() || !names.insert(&animation.name) {
@@ -633,23 +586,10 @@ impl SpriteSheet {
                     animation.name
                 ));
             }
-            if animation.frames.is_empty() {
+            if complete && animation.frames.is_empty() {
                 errors.push(format!("animation {:?} needs frames", animation.name));
             }
-            for frame in &animation.frames {
-                if frame.ms == 0 {
-                    errors.push(format!(
-                        "animation {:?} frame ms must be >= 1",
-                        animation.name
-                    ));
-                }
-                if !sprite_ids.contains(&frame.sprite_id) {
-                    errors.push(format!(
-                        "animation {:?} references missing sprite id {}",
-                        animation.name, frame.sprite_id
-                    ));
-                }
-            }
+            self.animation_frame_errors(animation, &mut errors);
         }
         if errors.is_empty() {
             Ok(())
@@ -657,39 +597,202 @@ impl SpriteSheet {
             Err(errors)
         }
     }
-    pub fn validate_bounds(&self, width: u32, height: u32) -> Result<(), Vec<String>> {
-        let mut errors = self.validate().err().unwrap_or_default();
+    fn sprite_shape_errors(&self, sprite: &Sprite, complete: bool, errors: &mut Vec<String>) {
+        if sprite.pivot.iter().any(|p| !p.is_finite()) {
+            errors.push(format!("sprite {:?} pivot must be finite", sprite.name));
+        }
+        match &sprite.shape {
+            Shape::Rect {
+                col,
+                row,
+                cols,
+                rows,
+            } => {
+                if *cols == 0
+                    || *rows == 0
+                    || col.checked_add(*cols).is_none()
+                    || row.checked_add(*rows).is_none()
+                    || u64::from(*cols) * u64::from(self.grid.tile) > i32::MAX as u64
+                    || u64::from(*rows) * u64::from(self.grid.tile) > i32::MAX as u64
+                {
+                    errors.push(format!(
+                        "sprite {:?} has invalid rectangle dimensions",
+                        sprite.name
+                    ));
+                }
+            }
+            Shape::Set { canvas, parts } => {
+                let w = u64::from(canvas[0]) * u64::from(self.grid.tile);
+                let h = u64::from(canvas[1]) * u64::from(self.grid.tile);
+                if canvas.contains(&0) || w > i32::MAX as u64 || h > i32::MAX as u64 {
+                    errors.push(format!("sprite {:?} has invalid canvas", sprite.name));
+                }
+                if complete && parts.is_empty() {
+                    errors.push(format!(
+                        "sprite {:?} needs parts with representable bounds",
+                        sprite.name
+                    ));
+                }
+                for p in parts {
+                    if let Err(error) = Transform::new(p.flip_x, p.rotation) {
+                        errors.push(error);
+                    }
+                    if p.dx < 0
+                        || p.dy < 0
+                        || i64::from(p.dx) + i64::from(self.grid.tile) > w as i64
+                        || i64::from(p.dy) + i64::from(self.grid.tile) > h as i64
+                    {
+                        errors.push(format!("sprite {:?} part outside its canvas", sprite.name));
+                    }
+                }
+            }
+        }
+    }
+    fn sprite_bounds_errors(
+        &self,
+        sprite: &Sprite,
+        width: u32,
+        height: u32,
+        errors: &mut Vec<String>,
+    ) {
         let cells = self.grid.cells(width, height);
-        let inside = |col: u32, row: u32| col < cells.cols && row < cells.rows;
-        for t in &self.tiles {
-            if !inside(t.col, t.row) {
+        let valid = match &sprite.shape {
+            Shape::Rect {
+                col,
+                row,
+                cols,
+                rows,
+            } => {
+                *cols > 0
+                    && *rows > 0
+                    && col.checked_add(*cols).is_some_and(|v| v <= cells.cols)
+                    && row.checked_add(*rows).is_some_and(|v| v <= cells.rows)
+            }
+            Shape::Set { parts, .. } => parts
+                .iter()
+                .all(|p| p.col < cells.cols && p.row < cells.rows),
+        };
+        if !valid {
+            errors.push(format!(
+                "sprite {:?} outside {}x{} grid",
+                sprite.name, cells.cols, cells.rows
+            ));
+        }
+    }
+    fn tile_bounds_errors(
+        &self,
+        tile: &TileMeta,
+        width: u32,
+        height: u32,
+        errors: &mut Vec<String>,
+    ) {
+        let cells = self.grid.cells(width, height);
+        if tile.col >= cells.cols || tile.row >= cells.rows {
+            errors.push(format!(
+                "tile ({}, {}) outside {}x{} grid",
+                tile.col, tile.row, cells.cols, cells.rows
+            ));
+        }
+    }
+    pub fn validate_sprite_edit(
+        &self,
+        sprite: &Sprite,
+        width: u32,
+        height: u32,
+    ) -> Result<(), Vec<String>> {
+        let mut errors = Vec::new();
+        if sprite.name.trim().is_empty()
+            || self
+                .sprites
+                .iter()
+                .any(|s| s.id != sprite.id && s.name == sprite.name)
+        {
+            errors.push(format!("empty or duplicate sprite name: {:?}", sprite.name));
+        }
+        self.sprite_shape_errors(sprite, false, &mut errors);
+        self.sprite_bounds_errors(sprite, width, height, &mut errors);
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+    pub fn validate_tile_edit(
+        &self,
+        tile: &TileMeta,
+        width: u32,
+        height: u32,
+    ) -> Result<(), Vec<String>> {
+        let mut errors = Vec::new();
+        if let Some(name) = &tile.name
+            && (name.trim().is_empty()
+                || self.tiles.iter().any(|t| {
+                    (t.col, t.row) != (tile.col, tile.row) && t.name.as_ref() == Some(name)
+                }))
+        {
+            errors.push(format!("empty or duplicate tile name: {name:?}"));
+        }
+        self.tile_bounds_errors(tile, width, height, &mut errors);
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+    pub fn validate_animation_edit(&self, animation: &Animation) -> Result<(), Vec<String>> {
+        let mut errors = Vec::new();
+        if animation.name.trim().is_empty()
+            || self
+                .animations
+                .iter()
+                .any(|a| a.id != animation.id && a.name == animation.name)
+        {
+            errors.push(format!(
+                "empty or duplicate animation name: {:?}",
+                animation.name
+            ));
+        }
+        self.animation_frame_errors(animation, &mut errors);
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+    fn animation_frame_errors(&self, animation: &Animation, errors: &mut Vec<String>) {
+        for frame in &animation.frames {
+            if frame.ms == 0 {
                 errors.push(format!(
-                    "tile ({}, {}) outside {}x{} grid",
-                    t.col, t.row, cells.cols, cells.rows
+                    "animation {:?} frame ms must be >= 1",
+                    animation.name
+                ));
+            }
+            if !self.sprites.iter().any(|s| s.id == frame.sprite_id) {
+                errors.push(format!(
+                    "animation {:?} references missing sprite id {}",
+                    animation.name, frame.sprite_id
                 ));
             }
         }
+    }
+    pub fn validate_bounds(&self, width: u32, height: u32) -> Result<(), Vec<String>> {
+        self.validate_bounds_internal(width, height, true)
+    }
+    pub fn validate_edit_bounds(&self, width: u32, height: u32) -> Result<(), Vec<String>> {
+        self.validate_bounds_internal(width, height, false)
+    }
+    fn validate_bounds_internal(
+        &self,
+        width: u32,
+        height: u32,
+        complete: bool,
+    ) -> Result<(), Vec<String>> {
+        let mut errors = self.validate_internal(complete).err().unwrap_or_default();
+        for tile in &self.tiles {
+            self.tile_bounds_errors(tile, width, height, &mut errors);
+        }
         for sprite in &self.sprites {
-            let valid = match &sprite.shape {
-                Shape::Rect {
-                    col,
-                    row,
-                    cols,
-                    rows,
-                } => {
-                    *cols > 0
-                        && *rows > 0
-                        && col.checked_add(*cols).is_some_and(|end| end <= cells.cols)
-                        && row.checked_add(*rows).is_some_and(|end| end <= cells.rows)
-                }
-                Shape::Set { parts, .. } => parts.iter().all(|p| inside(p.col, p.row)),
-            };
-            if !valid {
-                errors.push(format!(
-                    "sprite {:?} outside {}x{} grid",
-                    sprite.name, cells.cols, cells.rows
-                ));
-            }
+            self.sprite_bounds_errors(sprite, width, height, &mut errors);
         }
         if errors.is_empty() {
             Ok(())

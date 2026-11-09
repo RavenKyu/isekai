@@ -13,7 +13,7 @@ impl SheetEditor {
             .meta
             .sprites
             .iter()
-            .find(|s| Some(&s.name) == self.selected_sprite.as_ref())
+            .find(|s| Some(s.id) == self.selected_sprite)
         else {
             return vec![];
         };
@@ -30,15 +30,14 @@ impl SheetEditor {
             .collect()
     }
     pub fn sprites_tab(&mut self, ui: &Ui) {
+        let now = (self.now)();
         let sheet = &mut self.sheet;
         let selection = &sheet.selection.cells;
         if ui.button("New rect from selection") {
             let name =
                 edit::next_name("sprite", sheet.meta.sprites.iter().map(|s| s.name.as_str()));
-            if let Some(mut sprite) = edit::rect_from_cells(name, selection, &sheet.meta.grid) {
-                sprite.id = sheet.meta.allocate_id();
-                self.selected_sprite = Some(sprite.name.clone());
-                sheet.meta.sprites.push(sprite);
+            if let Some(sprite) = edit::rect_from_cells(name, selection, &sheet.meta.grid) {
+                self.selected_sprite = Some(sheet.meta.add_sprite(sprite, now));
                 sheet.dirty = true;
             } else {
                 log::append(&mut self.log, "Select tiles first".into());
@@ -48,10 +47,8 @@ impl SheetEditor {
         if ui.button("New set from selection") {
             let name =
                 edit::next_name("sprite", sheet.meta.sprites.iter().map(|s| s.name.as_str()));
-            if let Some(mut sprite) = edit::set_from_cells(name, selection, &sheet.meta.grid) {
-                sprite.id = sheet.meta.allocate_id();
-                self.selected_sprite = Some(sprite.name.clone());
-                sheet.meta.sprites.push(sprite);
+            if let Some(sprite) = edit::set_from_cells(name, selection, &sheet.meta.grid) {
+                self.selected_sprite = Some(sheet.meta.add_sprite(sprite, now));
                 sheet.dirty = true;
             } else {
                 log::append(&mut self.log, "Select tiles first".into());
@@ -81,10 +78,8 @@ impl SheetEditor {
                 .collect();
                 let name =
                     edit::next_name("object", sheet.meta.sprites.iter().map(|s| s.name.as_str()));
-                if let Some(mut sprite) = edit::rect_from_cells(name, &cells, &sheet.meta.grid) {
-                    sprite.id = sheet.meta.allocate_id();
-                    self.selected_sprite = Some(sprite.name.clone());
-                    sheet.meta.sprites.push(sprite);
+                if let Some(sprite) = edit::rect_from_cells(name, &cells, &sheet.meta.grid) {
+                    self.selected_sprite = Some(sheet.meta.add_sprite(sprite, now));
                     sheet.dirty = true;
                 }
             }
@@ -98,17 +93,17 @@ impl SheetEditor {
             };
             if ui
                 .selectable_config(format!("{} ({kind}, {w}x{h} px)", sprite.name))
-                .selected(self.selected_sprite.as_ref() == Some(&sprite.name))
+                .selected(self.selected_sprite == Some(sprite.id))
                 .build()
             {
-                self.selected_sprite = Some(sprite.name.clone());
+                self.selected_sprite = Some(sprite.id);
             }
         }
         let Some(index) = sheet
             .meta
             .sprites
             .iter()
-            .position(|s| Some(&s.name) == self.selected_sprite.as_ref())
+            .position(|s| Some(s.id) == self.selected_sprite)
         else {
             return;
         };
@@ -122,19 +117,17 @@ impl SheetEditor {
             self.sprite_name_input = [min[0] + 20.0, min[1] + size[1] * 0.5];
         }
         if renamed {
-            match sheet.meta.rename_sprite(&old_name, &sprite.name) {
-                Ok(()) => {
-                    self.selected_sprite = Some(sprite.name.clone());
-                    if self.preview.target
-                        == super::preview::PreviewTarget::Sprite(old_name.clone())
-                    {
-                        self.preview.target =
-                            super::preview::PreviewTarget::Sprite(sprite.name.clone());
-                    }
+            match sheet.meta.rename_sprite(
+                sprite.id,
+                &sprite.name,
+                now,
+                (sheet.image.width, sheet.image.height),
+            ) {
+                Ok(true) => {
                     sheet.dirty = true;
-                    // Fires on every keystroke of the name field, like "Sprite updated".
                     log::append_repeat(&mut self.log, "Sprite renamed");
                 }
+                Ok(false) => {}
                 Err(error) => {
                     log::append(&mut self.log, error);
                     sprite.name = old_name.clone();
@@ -200,16 +193,18 @@ impl SheetEditor {
             }
         }
         if changed {
-            let mut candidate = sheet.meta.clone();
-            candidate.sprites[index] = sprite.clone();
-            candidate.animations.clear();
-            match candidate.validate_bounds(sheet.image.width, sheet.image.height) {
-                Ok(()) => {
-                    sheet.meta.sprites[index] = sprite;
+            match sheet.meta.put_sprite(
+                sprite.id,
+                sprite,
+                now,
+                (sheet.image.width, sheet.image.height),
+            ) {
+                Ok(true) => {
                     sheet.dirty = true;
                     log::append_repeat(&mut self.log, "Sprite updated");
                 }
-                Err(errors) => log::append(&mut self.log, errors.join("; ")),
+                Ok(false) => {}
+                Err(error) => log::append(&mut self.log, error),
             }
         }
         if ui.button("Delete sprite") {

@@ -6,8 +6,8 @@ use dear_imgui_rs::{TextureId, Ui};
 pub enum PreviewTarget {
     #[default]
     None,
-    Animation(String),
-    Sprite(String),
+    Animation(u64),
+    Sprite(u64),
 }
 pub struct PreviewState {
     pub target: PreviewTarget,
@@ -115,13 +115,13 @@ impl SheetEditor {
         for animation in &sheet.meta.animations {
             choices.push((
                 format!("Animation: {}", animation.name),
-                PreviewTarget::Animation(animation.name.clone()),
+                PreviewTarget::Animation(animation.id),
             ));
         }
         for sprite in &sheet.meta.sprites {
             choices.push((
                 format!("Sprite: {}", sprite.name),
-                PreviewTarget::Sprite(sprite.name.clone()),
+                PreviewTarget::Sprite(sprite.id),
             ));
         }
         let mut index = choices
@@ -151,12 +151,12 @@ impl SheetEditor {
         let mut frame_count = 1;
         let result: Result<(), String> = (|| {
             let sprite = match &self.preview.target {
-                PreviewTarget::Animation(name) => {
+                PreviewTarget::Animation(id) => {
                     let animation = sheet
                         .meta
                         .animations
                         .iter()
-                        .find(|c| c.name == *name)
+                        .find(|c| c.id == *id)
                         .ok_or("Select an existing animation")?;
                     self.preview.update_timeline(
                         animation.frames.iter().map(|f| f.ms).collect(),
@@ -173,12 +173,12 @@ impl SheetEditor {
                             .ok_or("animation refers to a missing sprite")?,
                     )
                 }
-                PreviewTarget::Sprite(name) => Some(
+                PreviewTarget::Sprite(id) => Some(
                     sheet
                         .meta
                         .sprites
                         .iter()
-                        .find(|s| s.name == *name)
+                        .find(|s| s.id == *id)
                         .ok_or("Select an existing sprite")?,
                 ),
                 PreviewTarget::None => None,
@@ -284,7 +284,7 @@ mod tests {
     #[test]
     fn playback_clock_pause_restart_and_timeline_edits() {
         let mut state = PreviewState::default();
-        state.select(PreviewTarget::Animation("test".into()), 1000);
+        state.select(PreviewTarget::Animation(1), 1000);
         state.update_timeline(vec![100, 100], Mode::Loop).unwrap();
         assert_eq!(state.frame(1150), 1);
         state.pause_or_play(1150);
