@@ -8,7 +8,14 @@ use crate::{
     sprite::{Grid, store},
 };
 use dear_imgui_rs::{TextureId, Ui};
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        mpsc::{self, Receiver, TryRecvError},
+    },
+};
 
 pub(super) struct RegionsState {
     source: Option<TextureId>,
@@ -18,6 +25,8 @@ pub(super) struct RegionsState {
     candidates: Vec<ObjectBox>,
     selected: Option<usize>,
     save_path: String,
+    batch_dir: String,
+    batch_job: Option<CropJob>,
 }
 impl Default for RegionsState {
     fn default() -> Self {
@@ -29,6 +38,8 @@ impl Default for RegionsState {
             candidates: vec![],
             selected: None,
             save_path: String::new(),
+            batch_dir: String::new(),
+            batch_job: None,
         }
     }
 }
@@ -39,6 +50,7 @@ impl RegionsState {
             self.candidates.clear();
             self.selected = None;
             self.save_path.clear();
+            self.batch_dir.clear();
         }
     }
     fn background(&self) -> Result<Background, String> {
@@ -52,6 +64,147 @@ impl RegionsState {
 }
 fn region_name(stem: &str, n: usize) -> String {
     format!("{stem}-region-{n}")
+}
+type CropTarget = (ObjectBox, PathBuf);
+fn plan_batch(
+    candidates: &[ObjectBox],
+    stem: &str,
+    dir: &Path,
+    checkout: &Path,
+) -> Result<Vec<CropTarget>, String> {
+    let mut targets = Vec::new();
+    let mut conflicts = Vec::new();
+    for (i, &bbox) in candidates.iter().enumerate() {
+        let name = format!("{}.png", region_name(stem, i + 1));
+        if !store::image_path_is_safe(&name) || Path::new(&name).components().count() != 1 {
+            return Err("invalid region name".into());
+        }
+        let output =
+            extract::absolute_output(&dir.join(name), checkout).map_err(|e| e.to_string())?;
+        for path in [store::sidecar_for(&output), output.clone()] {
+            match std::fs::symlink_metadata(&path) {
+                Ok(meta) if path != output || meta.file_type().is_symlink() => conflicts.push(path),
+                Ok(_) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e.to_string()),
+            }
+        }
+        targets.push((bbox, output));
+    }
+    if !conflicts.is_empty() {
+        return Err(format!(
+            "sidecar or symlink conflicts: {}",
+            conflicts
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    // Only after all conflicts have been inspected may a directory be created.
+    if let Some((_, first)) = targets.first() {
+        extract::ensure_output_dir(first, checkout).map_err(|e| e.to_string())?;
+    }
+    Ok(targets)
+}
+fn run_crop_batch(
+    image: &RgbaImage,
+    targets: Vec<CropTarget>,
+    cancel: &AtomicBool,
+    done: &AtomicU64,
+    tx: &mpsc::Sender<Result<PathBuf, String>>,
+) {
+    for (bbox, path) in targets {
+        if cancel.load(Ordering::Relaxed) {
+            break;
+        }
+        let result = image
+            .crop(bbox.x, bbox.y, bbox.w, bbox.h)
+            .ok_or_else(|| "region outside image".to_string())
+            .and_then(|crop| crop.to_png())
+            .and_then(|png| store::write_atomic(&path, &png).map_err(|e| e.to_string()))
+            .map(|()| path.clone())
+            .map_err(|e| format!("{}: {e}", path.display()));
+        let _ = tx.send(result);
+        done.fetch_add(1, Ordering::Relaxed);
+    }
+}
+struct CropJob {
+    cancel: Arc<AtomicBool>,
+    done: Arc<AtomicU64>,
+    total: usize,
+    result: Receiver<Result<PathBuf, String>>,
+    saved: usize,
+}
+impl CropJob {
+    fn start(image: RgbaImage, targets: Vec<CropTarget>) -> Result<Self, String> {
+        let cancel = Arc::new(AtomicBool::new(false));
+        let done = Arc::new(AtomicU64::new(0));
+        let total = targets.len();
+        let (tx, result) = mpsc::channel();
+        let worker_cancel = Arc::clone(&cancel);
+        let worker_done = Arc::clone(&done);
+        std::thread::Builder::new()
+            .name("sprite-region-crop".into())
+            .spawn(move || {
+                run_crop_batch(&image, targets, &worker_cancel, &worker_done, &tx);
+            })
+            .map_err(|e| format!("Cannot start region save: {e}"))?;
+        Ok(Self {
+            cancel,
+            done,
+            total,
+            result,
+            saved: 0,
+        })
+    }
+    fn fraction(&self) -> f32 {
+        if self.total == 0 {
+            1.0
+        } else {
+            self.done.load(Ordering::Relaxed) as f32 / self.total as f32
+        }
+    }
+}
+impl Drop for CropJob {
+    fn drop(&mut self) {
+        self.cancel.store(true, Ordering::Relaxed);
+    }
+}
+impl SheetEditor {
+    pub(super) fn cancel_batch(&mut self) {
+        if let Some(job) = &self.regions.batch_job {
+            job.cancel.store(true, Ordering::Relaxed);
+        }
+        self.poll_batch();
+        self.regions.batch_job = None;
+    }
+    pub(super) fn poll_batch(&mut self) {
+        let Some(job) = &mut self.regions.batch_job else {
+            return;
+        };
+        let mut messages = Vec::new();
+        let finished = loop {
+            match job.result.try_recv() {
+                Ok(Ok(path)) => {
+                    job.saved += 1;
+                    messages.push(format!("Saved region {}", path.display()));
+                }
+                Ok(Err(error)) => messages.push(format!("Region not saved: {error}")),
+                Err(TryRecvError::Empty) => break false,
+                Err(TryRecvError::Disconnected) => break true,
+            }
+        };
+        if finished {
+            messages.push(format!("Saved {} of {} regions", job.saved, job.total));
+        }
+        for message in messages {
+            log::append(&mut self.log, message);
+        }
+        if finished {
+            self.regions.batch_job = None;
+        }
+    }
 }
 fn crop_action(
     image: &RgbaImage,
@@ -250,12 +403,180 @@ pub(super) fn tab(editor: &mut SheetEditor, ui: &Ui) {
             }
         }
     }
+    let checkout = match std::env::current_dir() {
+        Ok(path) => path,
+        Err(e) => {
+            log::append(log, e.to_string());
+            return;
+        }
+    };
+    let stem = extract::source_stem(&sheet.source);
+    if state.batch_dir.is_empty() {
+        state.batch_dir = checkout
+            .join("assets/splites")
+            .join(&stem)
+            .to_string_lossy()
+            .into_owned();
+    }
+    ui.input_text("Output dir", &mut state.batch_dir).build();
+    if let Some(job) = &state.batch_job {
+        let fraction = job.fraction();
+        ui.progress_bar(fraction)
+            .size([240.0, 0.0])
+            .overlay_text(format!("Saving regions... {:.0}%", fraction * 100.0))
+            .build();
+        ui.same_line();
+        if ui.button("Cancel region save") {
+            job.cancel.store(true, Ordering::Relaxed);
+        }
+    } else {
+        let _disabled = ui.begin_disabled_with_cond(state.candidates.is_empty());
+        if ui.button("Save all regions") && !state.candidates.is_empty() {
+            match plan_batch(
+                &state.candidates,
+                &stem,
+                Path::new(&state.batch_dir),
+                &checkout,
+            )
+            .and_then(|targets| CropJob::start(sheet.image.clone(), targets))
+            {
+                Ok(job) => {
+                    log::append(
+                        log,
+                        format!(
+                            "Saving {} regions{}",
+                            job.total,
+                            extract::path_note(
+                                Path::new(&state.batch_dir).join("region.png").as_path(),
+                                &checkout
+                            )
+                        ),
+                    );
+                    state.batch_job = Some(job);
+                }
+                Err(error) => log::append(log, error),
+            }
+        }
+    }
     ui.text_wrapped("Crops keep the grid and start empty metadata. Save the image, then turn on Key color and Reload image in its window to remove a panel background.");
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn batch_preflight_rejects_sidecars_and_unsafe_directories_without_writes() {
+        let temp = super::super::extract::tests::Temp::new();
+        let boxes = vec![
+            ObjectBox {
+                x: 0,
+                y: 0,
+                w: 2,
+                h: 2
+            };
+            2
+        ];
+        let dir = temp.0.join("assets/splites/map");
+        std::fs::create_dir_all(&dir).unwrap();
+        let sidecar = store::sidecar_for(&dir.join("map-region-2.png"));
+        std::fs::write(&sidecar, b"existing").unwrap();
+        assert!(plan_batch(&boxes, "map", &dir, &temp.0).is_err());
+        assert!(!dir.join("map-region-1.png").exists());
+        assert_eq!(std::fs::read(&sidecar).unwrap(), b"existing");
+        let outside = temp.0.join("outside");
+        assert!(plan_batch(&boxes, "map", &outside, &temp.0).is_err());
+        assert!(!outside.exists());
+        assert!(
+            plan_batch(
+                &boxes,
+                "map",
+                &temp.0.join("assets/splites/../bad"),
+                &temp.0
+            )
+            .is_err()
+        );
+        #[cfg(unix)]
+        {
+            let link = temp.0.join("assets/splites/link");
+            std::os::unix::fs::symlink(&temp.0, &link).unwrap();
+            assert!(plan_batch(&boxes, "map", &link.join("new"), &temp.0).is_err());
+            assert!(!temp.0.join("new").exists());
+        }
+    }
+    #[test]
+    fn cancelled_batch_writes_nothing() {
+        let temp = super::super::extract::tests::Temp::new();
+        let bbox = ObjectBox {
+            x: 0,
+            y: 0,
+            w: 2,
+            h: 2,
+        };
+        let targets = plan_batch(
+            &[bbox, bbox],
+            "map",
+            &temp.0.join("assets/splites/map"),
+            &temp.0,
+        )
+        .unwrap();
+        let cancel = AtomicBool::new(true);
+        let done = AtomicU64::new(0);
+        let (tx, rx) = mpsc::channel();
+        run_crop_batch(&RgbaImage::new(2, 2), targets.clone(), &cancel, &done, &tx);
+        assert!(rx.try_recv().is_err());
+        assert_eq!(done.load(Ordering::Relaxed), 0);
+        assert!(targets.iter().all(|(_, path)| !path.exists()));
+    }
+    #[test]
+    fn batch_worker_saves_exact_crops_and_drop_signals_cancel() {
+        let temp = super::super::extract::tests::Temp::new();
+        let mut image = RgbaImage::new(4, 2);
+        for y in 0..2 {
+            for x in 0..4 {
+                image.set_pixel(x, y, [x as u8, y as u8, 7, 255]);
+            }
+        }
+        let boxes = vec![
+            ObjectBox {
+                x: 0,
+                y: 0,
+                w: 2,
+                h: 2,
+            },
+            ObjectBox {
+                x: 2,
+                y: 0,
+                w: 2,
+                h: 2,
+            },
+        ];
+        let targets =
+            plan_batch(&boxes, "map", &temp.0.join("assets/splites/map"), &temp.0).unwrap();
+        let job = CropJob::start(image.clone(), targets.clone()).unwrap();
+        for (bbox, path) in &targets {
+            assert_eq!(
+                job.result
+                    .recv_timeout(std::time::Duration::from_secs(5))
+                    .unwrap()
+                    .unwrap(),
+                *path
+            );
+            assert_eq!(
+                RgbaImage::from_png(&std::fs::read(path).unwrap()).unwrap(),
+                image.crop(bbox.x, bbox.y, bbox.w, bbox.h).unwrap()
+            );
+        }
+        let flag = Arc::clone(&job.cancel);
+        drop(job);
+        assert!(flag.load(Ordering::Relaxed));
+        for (_, path) in targets {
+            assert!(
+                std::fs::read_dir(path.parent().unwrap())
+                    .unwrap()
+                    .all(|e| !e.unwrap().file_name().to_string_lossy().contains(".tmp-"))
+            );
+        }
+    }
     #[test]
     fn regions_are_proposals_and_crop_is_a_queued_image() {
         let mut image = RgbaImage::new(200, 160);

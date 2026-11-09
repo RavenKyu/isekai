@@ -128,6 +128,7 @@ impl SpriteLibrary {
     pub fn apply_pending(&mut self, gl: &Rc<glow::Context>, renderer: &mut GlowRenderer) {
         for editor in &mut self.sheets {
             editor.poll_guess();
+            editor.poll_batch();
         }
         for action in std::mem::take(&mut self.pending) {
             let target = match &action {
@@ -426,6 +427,7 @@ impl SheetEditor {
             return Err(error);
         }
         self.cancel_guess();
+        self.cancel_batch();
         self.sheet = opened;
         self.selected_sprite = None;
         self.selected_clip = None;
