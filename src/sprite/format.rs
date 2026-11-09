@@ -157,19 +157,7 @@ impl SpriteWire {
                 shape: Shape::Set {
                     parts: parts
                         .into_iter()
-                        .map(|p| {
-                            let flip_x = p.flip_x.unwrap_or(false);
-                            let rotation = p.rotation.unwrap_or(0);
-                            Transform::new(flip_x, rotation)?;
-                            Ok(Part {
-                                col: p.col,
-                                row: p.row,
-                                dx: p.dx,
-                                dy: p.dy,
-                                flip_x,
-                                rotation,
-                            })
-                        })
+                        .map(Part::try_from)
                         .collect::<Result<_, String>>()?,
                 },
             },
@@ -196,7 +184,7 @@ where
     T::deserialize(deserializer).map(Some)
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(try_from = "PartWire", deny_unknown_fields)]
 pub struct Part {
     pub col: u32,
     pub row: u32,
@@ -206,6 +194,23 @@ pub struct Part {
     pub flip_x: bool,
     #[serde(default, skip_serializing_if = "is_zero")]
     pub rotation: u16,
+}
+impl TryFrom<PartWire> for Part {
+    type Error = String;
+
+    fn try_from(wire: PartWire) -> Result<Self, Self::Error> {
+        let flip_x = wire.flip_x.unwrap_or(false);
+        let rotation = wire.rotation.unwrap_or(0);
+        Transform::new(flip_x, rotation)?;
+        Ok(Self {
+            col: wire.col,
+            row: wire.row,
+            dx: wire.dx,
+            dy: wire.dy,
+            flip_x,
+            rotation,
+        })
+    }
 }
 fn is_false(value: &bool) -> bool {
     !value
@@ -691,5 +696,68 @@ mod version_tests {
         );
         assert!(canonical.contains("\"flip_x\": true"));
         assert!(canonical.contains("\"rotation\": 270"));
+    }
+}
+
+#[cfg(test)]
+mod direct_read_tests {
+    use super::*;
+
+    #[test]
+    fn direct_part_and_shape_reads_reject_invalid_transforms() {
+        let base = serde_json::json!({"col":0,"row":0,"dx":0,"dy":0});
+        for (field, invalid) in [
+            ("rotation", serde_json::json!(45)),
+            ("rotation", serde_json::json!(-90)),
+            ("rotation", serde_json::json!("90")),
+            ("rotation", serde_json::Value::Null),
+            ("flip_x", serde_json::Value::Null),
+            ("unknown", serde_json::json!(true)),
+        ] {
+            let mut part = base.clone();
+            part[field] = invalid;
+            assert!(
+                serde_json::from_value::<Part>(part.clone()).is_err(),
+                "Part: {part}"
+            );
+            let shape = serde_json::json!({"kind":"set","parts":[part]});
+            assert!(
+                serde_json::from_value::<Shape>(shape.clone()).is_err(),
+                "Shape: {shape}"
+            );
+        }
+        for transform in Transform::ALL {
+            let mut part = base.clone();
+            part["flip_x"] = transform.flip_x().into();
+            part["rotation"] = transform.rotation().into();
+            let decoded: Part = serde_json::from_value(part.clone()).unwrap();
+            assert_eq!(decoded.transform(), transform);
+            let Shape::Set { parts } =
+                serde_json::from_value::<Shape>(serde_json::json!({"kind":"set","parts":[part]}))
+                    .unwrap()
+            else {
+                panic!("expected set")
+            };
+            assert_eq!(parts[0].transform(), transform);
+        }
+        assert_eq!(
+            serde_json::from_value::<Part>(base).unwrap().transform(),
+            Transform::IDENTITY
+        );
+    }
+
+    #[test]
+    fn direct_sheet_read_rejects_unsupported_version_before_validation() {
+        let mut value: serde_json::Value =
+            serde_json::from_str(super::super::example::EXAMPLE_JSON).unwrap();
+        value["version"] = 3.into();
+        assert!(serde_json::from_value::<SpriteSheet>(value).is_err());
+    }
+
+    #[test]
+    fn in_memory_sheet_validation_rejects_unsupported_version_without_deserializing() {
+        let (_, mut sheet) = super::super::example();
+        sheet.version = 3;
+        assert!(sheet.validate().is_err());
     }
 }
