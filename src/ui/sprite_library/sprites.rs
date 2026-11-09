@@ -1,15 +1,13 @@
 use super::{
-    SpriteLibrary, edit,
+    SheetEditor, edit,
     view::{Overlay, input_u32},
 };
 use crate::sprite::format::{Part, Shape};
 use dear_imgui_rs::Ui;
 
-impl SpriteLibrary {
+impl SheetEditor {
     pub fn sprite_overlays(&self) -> Vec<Overlay> {
-        let Some(sheet) = &self.sheet else {
-            return vec![];
-        };
+        let sheet = &self.sheet;
         let Some(sprite) = sheet
             .meta
             .sprites
@@ -31,9 +29,7 @@ impl SpriteLibrary {
             .collect()
     }
     pub fn sprites_tab(&mut self, ui: &Ui) {
-        let Some(sheet) = &mut self.sheet else {
-            return;
-        };
+        let sheet = &mut self.sheet;
         let selection = &sheet.selection.cells;
         if ui.button("New rect from selection") {
             let name =

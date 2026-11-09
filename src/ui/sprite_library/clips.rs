@@ -1,5 +1,5 @@
 use super::{
-    SpriteLibrary, edit, format_props, format_tags, parse_props, parse_tags, tiles::mode_combo,
+    SheetEditor, edit, format_props, format_tags, parse_props, parse_tags, tiles::mode_combo,
     view::input_u32,
 };
 use crate::sprite::{Clip, Mode, format::ClipFrame};
@@ -18,11 +18,9 @@ impl ClipDraft {
         Ok(())
     }
 }
-impl SpriteLibrary {
+impl SheetEditor {
     pub fn clips_tab(&mut self, ui: &Ui) {
-        let Some(sheet) = &mut self.sheet else {
-            return;
-        };
+        let sheet = &mut self.sheet;
         if ui.button("New clip") {
             let name = edit::next_name("clip", sheet.meta.clips.iter().map(|c| c.name.as_str()));
             self.selected_clip = Some(name.clone());

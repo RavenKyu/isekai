@@ -1,4 +1,4 @@
-use super::{OpenSheet, SheetSource, SpriteLibrary, view};
+use super::{Action, OpenSheet, SheetEditor, SheetSource, view};
 use crate::{
     raster::{self, Dedupe, RgbaImage},
     sprite::{
@@ -8,13 +8,10 @@ use crate::{
 };
 use dear_imgui_rs::{TextureId, Ui};
 use std::{
-    cell::RefCell,
     fs, io,
     path::{Component, Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
 };
-
-thread_local! { static STATE: RefCell<ExtractState> = RefCell::new(ExtractState::default()); }
 
 struct Analysis {
     dedupe: Dedupe,
@@ -46,7 +43,7 @@ impl Analysis {
         )
     }
 }
-struct ExtractState {
+pub(super) struct ExtractState {
     source: Option<(TextureId, String)>,
     grid: Option<Grid>,
     columns: u32,
@@ -83,15 +80,12 @@ impl ExtractState {
             self.grid = Some(sheet.meta.grid);
         }
     }
+    pub(super) fn invalidate(&mut self) {
+        self.analysis = None;
+        self.written = None;
+    }
 }
 
-pub(super) fn invalidate() {
-    STATE.with(|state| {
-        let mut state = state.borrow_mut();
-        state.analysis = None;
-        state.written = None;
-    });
-}
 pub(super) fn source_stem(source: &SheetSource) -> String {
     match source {
         SheetSource::File(path) => path
@@ -305,72 +299,74 @@ fn write_plan(plan: &ExtractPlan) -> Result<String, String> {
     ))
 }
 
-pub(super) fn tab(library: &mut SpriteLibrary, ui: &Ui) {
+pub(super) fn tab(editor: &mut SheetEditor, ui: &Ui) {
     let Some(_tab) = ui.tab_item("Extract") else {
         return;
     };
-    let Some(sheet) = &library.sheet else { return };
+    let SheetEditor {
+        sheet,
+        extract: state,
+        status,
+        pending,
+        ..
+    } = editor;
     let checkout = match std::env::current_dir() {
         Ok(path) => path,
         Err(e) => {
-            library.status = e.to_string();
+            *status = e.to_string();
             return;
         }
     };
-    STATE.with(|state| {
-        let mut state = state.borrow_mut();
-        state.sync(sheet, &checkout);
-        let mut changed = view::input_u32(ui, "Columns", &mut state.columns, 1);
-        changed |= ui.input_text("Output", &mut state.output).build();
-        if changed {
+    state.sync(sheet, &checkout);
+    let mut changed = view::input_u32(ui, "Columns", &mut state.columns, 1);
+    changed |= ui.input_text("Output", &mut state.output).build();
+    if changed {
+        state.written = None;
+    }
+    if ui.button("Analyze") {
+        // Synchronous, explicit action. Large sheets pause this dev tool.
+        state.analysis = Some(Analysis::new(&sheet.image, &sheet.meta.grid));
+        state.written = None;
+    }
+    if let Some(analysis) = &state.analysis {
+        let report = analysis.report();
+        if analysis.rebuild.is_err() {
+            ui.text_colored([1.0, 0.3, 0.3, 1.0], &report);
+        } else {
+            ui.text_wrapped(&report);
+        }
+    }
+    let ready = state
+        .analysis
+        .as_ref()
+        .is_some_and(|a| !a.dedupe.unique.is_empty());
+    {
+        let _disabled = ui.begin_disabled_with_cond(!ready);
+        if ui.button("Write tileset") && ready {
             state.written = None;
-        }
-        if ui.button("Analyze") {
-            // Synchronous, explicit action. Large sheets pause this dev tool.
-            state.analysis = Some(Analysis::new(&sheet.image, &sheet.meta.grid));
-            state.written = None;
-        }
-        if let Some(analysis) = &state.analysis {
-            let report = analysis.report();
-            if analysis.rebuild.is_err() {
-                ui.text_colored([1.0, 0.3, 0.3, 1.0], &report);
-            } else {
-                ui.text_wrapped(&report);
-            }
-        }
-        let ready = state
-            .analysis
-            .as_ref()
-            .is_some_and(|a| !a.dedupe.unique.is_empty());
-        {
-            let _disabled = ui.begin_disabled_with_cond(!ready);
-            if ui.button("Write tileset") && ready {
-                state.written = None;
-                let analysis = state.analysis.as_ref().unwrap();
-                match plan_from_analysis(
-                    analysis,
-                    &sheet.meta.grid,
-                    state.columns,
-                    Path::new(&state.output),
-                    &checkout,
-                )
-                .and_then(|plan| {
-                    write_plan(&plan).map(|message| format!("{message}; {}", plan.report))
-                }) {
-                    Ok(message) => {
-                        library.status = message;
-                        state.written = absolute_output(Path::new(&state.output), &checkout).ok();
-                    }
-                    Err(error) => library.status = error,
+            let analysis = state.analysis.as_ref().unwrap();
+            match plan_from_analysis(
+                analysis,
+                &sheet.meta.grid,
+                state.columns,
+                Path::new(&state.output),
+                &checkout,
+            )
+            .and_then(|plan| write_plan(&plan).map(|message| format!("{message}; {}", plan.report)))
+            {
+                Ok(message) => {
+                    *status = message;
+                    state.written = absolute_output(Path::new(&state.output), &checkout).ok();
                 }
+                Err(error) => *status = error,
             }
         }
-        if let Some(path) = &state.written
-            && ui.button("Open result")
-        {
-            library.pending.push(super::Action::Load(path.clone()));
-        }
-    });
+    }
+    if let Some(path) = &state.written
+        && ui.button("Open result")
+    {
+        pending.push(Action::Load(path.clone()));
+    }
 }
 
 #[cfg(test)]
