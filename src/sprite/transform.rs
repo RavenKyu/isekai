@@ -60,6 +60,16 @@ impl Transform {
     pub fn is_identity(self) -> bool {
         self == Self::IDENTITY
     }
+    /// Texture corners in strip order: top-left, top-right, bottom-left, bottom-right.
+    pub fn uv_corners(self, uv0: [f32; 2], uv1: [f32; 2]) -> [[f32; 2]; 4] {
+        [(0, 0), (1, 0), (0, 1), (1, 1)].map(|(x, y)| {
+            let (sx, sy) = self.source(x, y, 2);
+            [
+                uv0[0] + sx as f32 * (uv1[0] - uv0[0]),
+                uv0[1] + sy as f32 * (uv1[1] - uv0[1]),
+            ]
+        })
+    }
     /// Output pixel (x,y) samples this input pixel of a square of side n.
     pub fn source(self, x: u32, y: u32, n: u32) -> (u32, u32) {
         assert!(x < n && y < n, "transform pixel outside square");
@@ -127,5 +137,30 @@ mod tests {
         assert_eq!(variants.len(), 8);
         assert_eq!(image.transformed(Transform::IDENTITY), image);
         assert!(Transform::new(false, 45).is_err());
+    }
+}
+
+#[cfg(test)]
+mod uv_tests {
+    use super::*;
+    #[test]
+    fn all_uv_corners_sample_the_transformed_pixels() {
+        let mut image = RgbaImage::new(2, 2);
+        for (i, p) in image.pixels.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+            *p = [i as u8 + 1, 0, 0, 255];
+        }
+        for t in Transform::ALL {
+            let pixels = image.transformed(t);
+            let corners = t.uv_corners([0.25, 0.5], [0.75, 1.0]);
+            for (i, uv) in corners.into_iter().enumerate() {
+                let sx = ((uv[0] - 0.25) * 2.0).round() as u32;
+                let sy = ((uv[1] - 0.5) * 2.0).round() as u32;
+                assert_eq!(
+                    image.pixel(sx, sy),
+                    pixels.pixel(i as u32 % 2, i as u32 / 2),
+                    "{t:?} corner {i}"
+                );
+            }
+        }
     }
 }

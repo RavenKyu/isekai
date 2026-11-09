@@ -93,7 +93,20 @@ pub fn draw_parts(ui: &Ui, view: &PartView, parts: &[Part], origin: [f32; 2], zo
             min[0] + view.grid.tile as f32 * scale,
             min[1] + view.grid.tile as f32 * scale,
         ];
-        draw.add_image(view.id, min, max, uv0, uv1, [1.0; 4]);
+        let corners = part.transform().uv_corners(uv0, uv1);
+        // imgui walks clockwise; our shared corners use triangle-strip order.
+        draw.add_image_quad(
+            view.id,
+            min,
+            [max[0], min[1]],
+            max,
+            [min[0], max[1]],
+            corners[0],
+            corners[1],
+            corners[3],
+            corners[2],
+            [1.0; 4],
+        );
     }
 }
 impl SheetEditor {
