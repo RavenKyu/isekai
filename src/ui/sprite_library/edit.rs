@@ -1,5 +1,5 @@
 use crate::{
-    raster::{self, CellRect, RgbaImage},
+    raster::{self, CellRect},
     sprite::{
         Grid, Sprite, SpriteSheet,
         format::{Part, Shape},
@@ -61,14 +61,24 @@ pub fn set_from_cells(name: String, cells: &BTreeSet<(u32, u32)>, grid: &Grid) -
         ],
     })
 }
-pub fn suggestions(image: &RgbaImage, grid: &Grid) -> Vec<CellRect> {
-    let mut rects = Vec::new();
-    for object in raster::find_objects(
+#[cfg(test)]
+pub fn suggestions(image: &raster::RgbaImage, grid: &Grid) -> Vec<CellRect> {
+    let objects = raster::find_objects(
         image,
         raster::Background::Auto,
         raster::DEFAULT_MIN_OBJECT_SIZE,
-    ) {
-        if let Some(rect) = object.snap(grid, image.width, image.height)
+    );
+    snap_objects(&objects, grid, image.width, image.height)
+}
+pub fn snap_objects(
+    objects: &[raster::ObjectBox],
+    grid: &Grid,
+    width: u32,
+    height: u32,
+) -> Vec<CellRect> {
+    let mut rects = Vec::new();
+    for object in objects {
+        if let Some(rect) = object.snap(grid, width, height)
             && !rects.contains(&rect)
         {
             rects.push(rect);
@@ -121,6 +131,7 @@ impl SpriteSheet {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::raster::RgbaImage;
     #[test]
     fn selections_names_references_and_suggestions() {
         let grid = Grid {
