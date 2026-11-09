@@ -109,7 +109,14 @@ impl SheetEditor {
         };
         let mut sprite = sheet.meta.sprites[index].clone();
         let old_name = sprite.name.clone();
-        if ui.input_text("Sprite name", &mut sprite.name).build() {
+        let renamed = ui.input_text("Sprite name", &mut sprite.name).build();
+        #[cfg(test)]
+        {
+            let min = ui.item_rect_min();
+            let size = ui.item_rect_size();
+            self.sprite_name_input = [min[0] + 20.0, min[1] + size[1] * 0.5];
+        }
+        if renamed {
             match sheet.meta.rename_sprite(&old_name, &sprite.name) {
                 Ok(()) => {
                     self.selected_sprite = Some(sprite.name.clone());
@@ -120,10 +127,8 @@ impl SheetEditor {
                             super::preview::PreviewTarget::Sprite(sprite.name.clone());
                     }
                     sheet.dirty = true;
-                    log::append(
-                        &mut self.log,
-                        "Sprite renamed and clip references updated".into(),
-                    );
+                    // Fires on every keystroke of the name field, like "Sprite updated".
+                    log::append_repeat(&mut self.log, "Sprite renamed and clip references updated");
                 }
                 Err(error) => {
                     log::append(&mut self.log, error);

@@ -147,6 +147,10 @@ impl LogView {
                 // selecting/copying across lines without a second vertical scrollbar.
                 let width = self.width.max(ui.content_region_avail()[0]);
                 let height = (lines.len().max(1) as f32 * ui.text_line_height()) + 16.0;
+                // Any frame that shows (or copies) a stale cache fails here,
+                // including the frame in which Clear ran.
+                #[cfg(test)]
+                assert_eq!(self.text, lines.join("\n"), "log widget shows stale text");
                 ui.input_text_multiline("##log text", &mut self.text, [width, height])
                     .read_only(true)
                     .build();
@@ -221,6 +225,29 @@ impl LogView {
             view.borrow().scroll_max_x > 0.0,
             "long lines grow the horizontal scroll range"
         );
+        let (joins, measurements, width) = {
+            let view = view.borrow();
+            (view.joins, view.measurements, view.width)
+        };
+        let scale = context.style().font_scale_main();
+        context.style_mut().set_font_scale_main(scale * 2.0);
+        render(context);
+        {
+            let view = view.borrow();
+            assert_eq!(view.joins, joins, "a font change keeps the joined text");
+            assert_eq!(
+                view.measurements,
+                measurements + 1,
+                "a font change re-measures the width once"
+            );
+            assert!(
+                view.width > width * 1.5,
+                "width follows the font: {width} -> {}",
+                view.width
+            );
+        }
+        context.style_mut().set_font_scale_main(scale);
+        render(context);
         for i in 0..LIMIT {
             append(&mut lines.borrow_mut(), format!("new {i}"));
         }
@@ -330,6 +357,25 @@ pub(super) mod tests {
         assert!(log[497].ends_with("Grid updated (x20)"));
         assert!(log[498].ends_with("validation error"));
         assert!(log[500 - 1].ends_with("Grid updated"));
+    }
+
+    #[test]
+    fn clear_ends_a_run_and_each_log_keeps_its_own_run() {
+        let mut log = SheetLog::default();
+        append_repeat(&mut log, "Clip updated");
+        append_repeat(&mut log, "Clip updated");
+        log.clear();
+        append_repeat(&mut log, "Clip updated");
+        assert_eq!(log.len(), 1);
+        assert!(log[0].ends_with(" Clip updated"), "{:?}", log[0]);
+        let mut other = SheetLog::default();
+        append(&mut other, "Saved other".into());
+        append_repeat(&mut other, "Clip updated");
+        append_repeat(&mut log, "Clip updated");
+        assert!(log[0].ends_with(" Clip updated (x2)"), "{:?}", log[0]);
+        assert_eq!(other.len(), 2);
+        assert!(other[0].ends_with(" Saved other"));
+        assert!(other[1].ends_with(" Clip updated"));
     }
 
     #[test]
