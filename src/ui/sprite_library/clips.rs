@@ -164,7 +164,7 @@ impl SheetEditor {
         if changed {
             sheet.meta.clips[index] = clip;
             sheet.dirty = true;
-            log::append(&mut self.log, "Clip updated".into());
+            log::append_repeat(&mut self.log, "Clip updated");
         }
         if ui.button("Delete clip") {
             sheet.meta.clips.remove(index);

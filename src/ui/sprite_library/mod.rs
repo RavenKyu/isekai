@@ -68,11 +68,15 @@ pub struct SheetEditor {
     confirm_close: bool,
     #[cfg(test)]
     close_controls: [[f32; 2]; 3],
+    #[cfg(test)]
+    tile_name_input: [f32; 2],
+    #[cfg(test)]
+    sprite_name_input: [f32; 2],
     pub zoom: u32,
     pub show_grid: bool,
     pub guess: Option<GridGuess>,
     guess_job: Option<guess::GuessJob>,
-    pub log: Vec<String>,
+    pub log: log::SheetLog,
     log_view: log::LogView,
     guess_logged_percent: u32,
     /// Actions this editor queued; the library takes them after drawing.
@@ -394,11 +398,15 @@ impl SheetEditor {
             confirm_close: false,
             #[cfg(test)]
             close_controls: [[0.0; 2]; 3],
+            #[cfg(test)]
+            tile_name_input: [0.0; 2],
+            #[cfg(test)]
+            sprite_name_input: [0.0; 2],
             zoom: 2,
             show_grid: true,
             guess: None,
             guess_job: None,
-            log: vec![],
+            log: Default::default(),
             log_view: Default::default(),
             guess_logged_percent: 0,
             pending: vec![],
@@ -700,7 +708,7 @@ impl SheetEditor {
                 Ok(()) => {
                     self.tile_draft = Default::default();
                     self.extract.invalidate();
-                    log::append(&mut self.log, "Grid updated".into());
+                    log::append_repeat(&mut self.log, "Grid updated");
                 }
                 Err(error) => log::append(&mut self.log, error),
             }
@@ -1132,6 +1140,87 @@ mod tests {
         let size = ui.item_rect_size();
         [min[0] + size[0] * 0.5, min[1] + size[1] * 0.5]
     }
+    fn type_into(context: &mut Context, render: impl Fn(&mut Context), at: [f32; 2], text: &str) {
+        click(context, &render, at);
+        for ch in text.chars() {
+            context.io_mut().add_input_character(ch);
+            render(context);
+        }
+    }
+    fn check_tile_log_input(context: &mut Context, consumer: &SynchronousRendererConsumer) {
+        use dear_imgui_rs::Condition;
+        use std::cell::RefCell;
+        let sheet = || {
+            let mut sheet = fake_sheet();
+            sheet.meta.tiles.clear();
+            sheet.meta.sprites.clear();
+            sheet.meta.clips.clear();
+            sheet.selection.apply(Some((0, 0)), false, false);
+            sheet
+        };
+        let editor = RefCell::new(SheetEditor::new(20, sheet()));
+        // Drawn in the same frames with the same fields, so a run or a keystroke
+        // that leaked across sheets would land here.
+        let other = RefCell::new(SheetEditor::new(21, sheet()));
+        let render = |context: &mut Context| {
+            vertices(context, consumer, |ui| {
+                for (target, y) in [(&editor, 40.0), (&other, 300.0)] {
+                    let id = target.borrow().id;
+                    ui.window(format!("Tile input test {id}"))
+                        .position([40.0, y], Condition::Always)
+                        .size([900.0, 220.0], Condition::Always)
+                        .build(|| target.borrow_mut().tiles_tab(ui));
+                }
+            });
+        };
+        render(context);
+        let at = editor.borrow().tile_name_input;
+        type_into(context, render, at, "abcdefghijkl");
+        let editor = editor.borrow();
+        assert_eq!(
+            editor.sheet.meta.tiles[0].name.as_deref(),
+            Some("abcdefghijkl")
+        );
+        assert!(editor.sheet.dirty);
+        assert_eq!(editor.log.len(), 1, "each keystroke belongs to one run");
+        assert!(
+            editor.log[0].ends_with("Tile metadata updated (x12)"),
+            "{:?}",
+            editor.log
+        );
+        let other = other.borrow();
+        assert!(other.log.is_empty(), "other sheets have independent logs");
+        assert!(other.sheet.meta.tiles.is_empty() && !other.sheet.dirty);
+    }
+    fn check_sprite_rename_log_input(
+        context: &mut Context,
+        consumer: &SynchronousRendererConsumer,
+    ) {
+        use dear_imgui_rs::Condition;
+        let mut editor = SheetEditor::new(22, fake_sheet());
+        editor.selected_sprite = Some("a".into());
+        let editor = std::cell::RefCell::new(editor);
+        let render = |context: &mut Context| {
+            vertices(context, consumer, |ui| {
+                ui.window("Sprite input test")
+                    .position([40.0, 40.0], Condition::Always)
+                    .size([900.0, 400.0], Condition::Always)
+                    .build(|| editor.borrow_mut().sprites_tab(ui));
+            });
+        };
+        render(context);
+        let at = editor.borrow().sprite_name_input;
+        type_into(context, render, at, "mnopqrstuv");
+        let editor = editor.borrow();
+        assert_eq!(editor.sheet.meta.sprites[0].name, "amnopqrstuv");
+        assert_eq!(editor.sheet.meta.clips[0].frames[0].sprite, "amnopqrstuv");
+        assert_eq!(editor.log.len(), 1, "{:?}", editor.log);
+        assert!(
+            editor.log[0].ends_with("Sprite renamed and clip references updated (x10)"),
+            "{:?}",
+            editor.log
+        );
+    }
     fn check_window_close_interactions(
         context: &mut Context,
         consumer: &SynchronousRendererConsumer,
@@ -1355,6 +1444,8 @@ mod tests {
     fn hidden_library_grid_and_zoom_geometry() {
         // Same serialized CPU ImGui context style as the existing UI tests.
         let (mut context, consumer) = context();
+        check_tile_log_input(&mut context, &consumer);
+        check_sprite_rename_log_input(&mut context, &consumer);
         let library = std::cell::RefCell::new(SpriteLibrary::default());
         assert!(!library.borrow().open);
         assert_eq!(
