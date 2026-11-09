@@ -130,7 +130,7 @@ impl SheetEditor {
                     }
                     sheet.dirty = true;
                     // Fires on every keystroke of the name field, like "Sprite updated".
-                    log::append_repeat(&mut self.log, "Sprite renamed and clip references updated");
+                    log::append_repeat(&mut self.log, "Sprite renamed");
                 }
                 Err(error) => {
                     log::append(&mut self.log, error);

@@ -67,7 +67,7 @@ impl DevTools {
             });
             #[cfg(not(target_os = "emscripten"))]
             ui.menu("Assets", || {
-                ui.menu_item_toggle_no_shortcut("Sprite Library", &mut self.library.open, true);
+                ui.menu_item_toggle_no_shortcut("Asset Library", &mut self.library.open, true);
             });
             // Add future Info/Settings entries here, with their window draw in draw().
         });

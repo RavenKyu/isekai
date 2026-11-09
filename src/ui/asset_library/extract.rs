@@ -167,7 +167,7 @@ pub(super) fn source_stem(source: &SheetSource) -> String {
         SheetSource::Memory { name } => name.clone(),
     }
 }
-const LOCAL_ASSETS: &str = "assets/splites";
+const LOCAL_ASSETS: &str = "assets/sprites";
 pub(super) fn default_directory(source: &SheetSource, checkout: &Path) -> PathBuf {
     checkout.join(LOCAL_ASSETS).join(source_stem(source))
 }
@@ -266,7 +266,7 @@ pub(super) fn create_output_dir(output: &Path, checkout: &Path) -> Result<(), St
         if !output.starts_with(checkout.join(LOCAL_ASSETS)) {
             return Err(io::Error::new(
                 io::ErrorKind::NotFound,
-                "output directory does not exist; only assets/splites directories are created",
+                "output directory does not exist; only assets/sprites directories are created",
             )
             .into());
         }
@@ -707,8 +707,8 @@ pub(super) mod tests {
     fn output_directory_requires_a_validated_absolute_path() {
         let temp = crate::test_support::TempDir::new("output-precondition");
         for output in [
-            temp.0.join("assets/splites/../../escaped/out.png"),
-            PathBuf::from("assets/splites/new/out.png"),
+            temp.0.join("assets/sprites/../../escaped/out.png"),
+            PathBuf::from("assets/sprites/new/out.png"),
         ] {
             let panic = std::panic::catch_unwind(|| create_output_dir(&output, &temp.0))
                 .expect_err(
@@ -732,27 +732,30 @@ pub(super) mod tests {
         };
         assert_eq!(
             default_output(&file, &temp.0),
-            temp.0.join("assets/splites/map-01/map-01-tileset.png")
+            temp.0.join("assets/sprites/map-01/map-01-tileset.png")
         );
         assert_eq!(
             default_output(&memory, &temp.0),
             temp.0
-                .join("assets/splites/224070-region-1/224070-region-1-tileset.png")
+                .join("assets/sprites/224070-region-1/224070-region-1-tileset.png")
         );
         let output = default_output(&file, &temp.0);
         assert!(inside_local_assets(&output, &temp.0));
         assert!(inside_local_assets(
-            Path::new("assets/splites/map/out.png"),
+            Path::new("assets/sprites/map/out.png"),
             &temp.0
         ));
         assert!(!inside_local_assets(
-            &temp.0.join("assets/splites/../x/out.png"),
+            &temp.0.join("assets/sprites/../x/out.png"),
             &temp.0
         ));
         assert!(!inside_local_assets(
-            &temp.0.join("assets/splites-other/out.png"),
+            &temp.0.join("assets/sprites-other/out.png"),
             &temp.0
         ));
+        let old_output = temp.0.join("assets/splites/new/out.png");
+        assert!(create_output_dir(&old_output, &temp.0).is_err());
+        assert!(!old_output.parent().unwrap().exists());
         create_output_dir(&output, &temp.0).unwrap();
         assert!(output.parent().unwrap().is_dir());
         for directory in [
@@ -774,9 +777,9 @@ pub(super) mod tests {
         #[cfg(unix)]
         {
             let external = crate::test_support::TempDir::new("extract");
-            std::os::unix::fs::symlink(&external.0, temp.0.join("assets/splites/link")).unwrap();
+            std::os::unix::fs::symlink(&external.0, temp.0.join("assets/sprites/link")).unwrap();
             assert!(
-                create_output_dir(&temp.0.join("assets/splites/link/new/out.png"), &temp.0)
+                create_output_dir(&temp.0.join("assets/sprites/link/new/out.png"), &temp.0)
                     .is_err()
             );
             assert!(!external.0.join("new").exists());
@@ -810,7 +813,7 @@ pub(super) mod tests {
         }
         // A still-open editor may hold a path whose PNG has since disappeared.
         // The refusal must happen before create_output_dir creates this parent.
-        let missing = temp.0.join("assets/splites/missing/result.png");
+        let missing = temp.0.join("assets/sprites/missing/result.png");
         let plan = plan_extract(&image, &grid, 16, &missing, &temp.0).unwrap();
         assert!(
             write_plan(&plan, std::slice::from_ref(&missing))
@@ -828,7 +831,7 @@ pub(super) mod tests {
     fn writes_are_atomic_png_replaced_sidecar_preserved_and_temps_cleaned() {
         let temp = crate::test_support::TempDir::new("extract");
         let (mut image, grid) = map(1, [2, 0]);
-        let output = temp.0.join("assets/splites/map/tiles.png");
+        let output = temp.0.join("assets/sprites/map/tiles.png");
         let first = plan_extract(&image, &grid, 16, &output, &temp.0).unwrap();
         write_plan(&first, &[]).unwrap();
         assert_eq!(first.map_path, output.with_file_name("map.map.json"));

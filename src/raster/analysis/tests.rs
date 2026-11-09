@@ -412,7 +412,7 @@ fn local_assets_report() {
         std::path::PathBuf::from("/home/raven/Works/splites/splite-cave-01.png"),
         std::path::PathBuf::from("/home/raven/Works/splites/splite-cave-02.png"),
     ];
-    let cave = root.join("assets/splites/cave");
+    let cave = root.join("assets/sprites/cave");
     match std::fs::read_dir(&cave) {
         Ok(entries) => paths.extend(
             entries
@@ -431,7 +431,7 @@ fn local_assets_report() {
         let image = RgbaImage::from_png(&bytes).unwrap();
         let grid = Grid::DEFAULT;
         let cells = grid.cells(image.width, image.height);
-        if path.starts_with(root.join("assets/splites/cave")) {
+        if path.starts_with(root.join("assets/sprites/cave")) {
             assert!([(256, 64), (256, 144)].contains(&(image.width, image.height)));
             assert_eq!((cells.cols, cells.rows), (16, image.height / 16));
         }

@@ -302,7 +302,7 @@ impl AssetLibrary {
                 self.assets_scanned = true;
             }
             let mut open = self.open;
-            ui.window("Sprite Library")
+            ui.window("Asset Library")
                 .opened(&mut open)
                 .size([620.0, 260.0], Condition::FirstUseEver)
                 .position([140.0, 40.0], Condition::FirstUseEver)
@@ -335,9 +335,12 @@ impl AssetLibrary {
         }
     }
     fn refresh_assets(&mut self) {
-        match std::env::current_dir().map(|p| p.join("assets")) {
-            Ok(root) => match list_assets(&root) {
-                Ok(files) => self.assets = files,
+        match std::env::current_dir() {
+            Ok(root) => match list_assets(&root.join("assets")) {
+                Ok(files) => {
+                    self.assets = files;
+                    self.status = old_output_folder_hint(&root).unwrap_or_default();
+                }
                 Err(error) => {
                     self.assets.clear();
                     self.status = error;
@@ -506,7 +509,7 @@ impl SheetEditor {
             SheetSource::Memory { name } => name.as_str().into(),
         };
         format!(
-            "{name}{}###sheet-{}",
+            "{name}{} - Sheet Editor###sheet-{}",
             if self.sheet.dirty { " *" } else { "" },
             self.id
         )
@@ -606,14 +609,14 @@ impl SheetEditor {
         self.grid_panel(ui);
         let overlays = self.sprite_overlays();
         regions::sheet_view(self, ui, overlays);
-        if let Some(_tabs) = ui.tab_bar("Sprite library tabs") {
-            if let Some(_tab) = ui.tab_item("Tiles") {
+        if let Some(_tabs) = ui.tab_bar("Sheet editor tabs") {
+            if let Some(_tab) = ui.tab_item("Tileset") {
                 self.tileset_tab(ui);
             }
             if let Some(_tab) = ui.tab_item("Sprites") {
                 self.sprites_tab(ui);
             }
-            if let Some(_tab) = ui.tab_item("Clips") {
+            if let Some(_tab) = ui.tab_item("Animations") {
                 self.animations_tab(ui);
             }
             if let Some(_tab) = ui.tab_item("Preview") {
@@ -1387,7 +1390,7 @@ mod tests {
         assert_eq!(editor.sheet.meta.clips[0].frames[0].sprite, "amnopqrstuv");
         assert_eq!(editor.log.len(), 1, "{:?}", editor.log);
         assert!(
-            editor.log[0].ends_with("Sprite renamed and clip references updated (x10)"),
+            editor.log[0].ends_with("Sprite renamed (x10)"),
             "{:?}",
             editor.log
         );
@@ -1553,10 +1556,10 @@ mod tests {
         grid.tile = 8;
         editor.sheet.set_grid(grid).unwrap();
         assert!(editor.can_save());
-        assert!(editor.window_title().contains(" *###"));
+        assert!(editor.window_title().contains(" * - Sheet Editor###"));
         editor.save().unwrap();
         assert!(!editor.can_save());
-        assert!(!editor.window_title().contains(" *###"));
+        assert!(!editor.window_title().contains(" * - Sheet Editor###"));
         assert_eq!(
             store::load(&store::sidecar_for(&path)).unwrap().sheet.grid,
             grid
@@ -1579,6 +1582,7 @@ mod tests {
     fn title_and_close_request_keep_sheet_identity_and_dirty_changes() {
         let mut editor = SheetEditor::new(42, fake_sheet());
         let clean_title = editor.window_title();
+        assert!(clean_title.ends_with(" - Sheet Editor###sheet-42"));
         editor.request_close();
         assert!(matches!(editor.pending[..], [Action::Close(42)]));
         assert!(!editor.confirm_close);
@@ -1588,7 +1592,7 @@ mod tests {
             clean_title.split("###").last(),
             editor.window_title().split("###").last()
         );
-        assert!(editor.window_title().contains(" *###"));
+        assert!(editor.window_title().contains(" * - Sheet Editor###"));
         editor.request_close();
         assert!(editor.confirm_close);
         assert!(editor.pending.is_empty(), "dirty x waits for Discard");
@@ -1606,14 +1610,14 @@ mod tests {
         let editor = &mut library.sheets[0];
         editor.log("Grid updated");
         editor.pending.push(Action::Save(7));
-        editor.saved_path = Some("assets/splites/map/map.png".into());
+        editor.saved_path = Some("assets/sprites/map/map.png".into());
         library.collect_editor_output();
         assert_eq!(
             library.status, "old",
             "sheet logs do not replace Library status"
         );
         assert!(matches!(library.pending[..], [Action::Save(7)]));
-        assert_eq!(library.path_input, "assets/splites/map/map.png");
+        assert_eq!(library.path_input, "assets/sprites/map/map.png");
         let editor = &library.sheets[0];
         assert!(editor.log.last().unwrap().ends_with("Grid updated"));
         assert!(editor.pending.is_empty());

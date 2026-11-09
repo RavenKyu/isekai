@@ -114,7 +114,7 @@ impl SheetEditor {
         let mut choices = vec![("None".to_string(), PreviewTarget::None)];
         for clip in &sheet.meta.clips {
             choices.push((
-                format!("Clip: {}", clip.name),
+                format!("Animation: {}", clip.name),
                 PreviewTarget::Animation(clip.name.clone()),
             ));
         }
@@ -165,7 +165,7 @@ impl SheetEditor {
                         .clips
                         .iter()
                         .find(|c| c.name == *name)
-                        .ok_or("Select an existing clip")?;
+                        .ok_or("Select an existing animation")?;
                     self.preview
                         .update_timeline(clip.frames.iter().map(|f| f.ms).collect(), clip.mode)?;
                     frame_count = clip.frames.len();
@@ -176,7 +176,7 @@ impl SheetEditor {
                             .sprites
                             .iter()
                             .find(|s| s.name == frame.sprite)
-                            .ok_or("clip refers to a missing sprite")?,
+                            .ok_or("animation refers to a missing sprite")?,
                     )
                 }
                 PreviewTarget::Sprite(name) => Some(
@@ -226,7 +226,7 @@ impl SheetEditor {
             return;
         }
         if parts.is_empty() {
-            ui.text("Select a clip, an animated tile, or a sprite");
+            ui.text("Select an animation, an animated tile, or a sprite");
             return;
         }
         let moving = matches!(

@@ -362,20 +362,20 @@ pub(super) mod tests {
     #[test]
     fn clear_ends_a_run_and_each_log_keeps_its_own_run() {
         let mut log = SheetLog::default();
-        append_repeat(&mut log, "Clip updated");
-        append_repeat(&mut log, "Clip updated");
+        append_repeat(&mut log, "Animation updated");
+        append_repeat(&mut log, "Animation updated");
         log.clear();
-        append_repeat(&mut log, "Clip updated");
+        append_repeat(&mut log, "Animation updated");
         assert_eq!(log.len(), 1);
-        assert!(log[0].ends_with(" Clip updated"), "{:?}", log[0]);
+        assert!(log[0].ends_with(" Animation updated"), "{:?}", log[0]);
         let mut other = SheetLog::default();
         append(&mut other, "Saved other".into());
-        append_repeat(&mut other, "Clip updated");
-        append_repeat(&mut log, "Clip updated");
-        assert!(log[0].ends_with(" Clip updated (x2)"), "{:?}", log[0]);
+        append_repeat(&mut other, "Animation updated");
+        append_repeat(&mut log, "Animation updated");
+        assert!(log[0].ends_with(" Animation updated (x2)"), "{:?}", log[0]);
         assert_eq!(other.len(), 2);
         assert!(other[0].ends_with(" Saved other"));
-        assert!(other[1].ends_with(" Clip updated"));
+        assert!(other[1].ends_with(" Animation updated"));
     }
 
     #[test]

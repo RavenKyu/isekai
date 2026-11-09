@@ -127,7 +127,7 @@ pub fn list_assets(root: &Path) -> Result<Vec<PathBuf>, String> {
         }
         Ok(())
     }
-    // A checkout without local assets (assets/splites is ignored) lists nothing.
+    // A checkout without local assets (assets/sprites is ignored) lists nothing.
     if matches!(root.symlink_metadata(), Err(e) if e.kind() == std::io::ErrorKind::NotFound) {
         return Ok(Vec::new());
     }
@@ -136,6 +136,14 @@ pub fn list_assets(root: &Path) -> Result<Vec<PathBuf>, String> {
     files.sort();
     Ok(files)
 }
+pub fn old_output_folder_hint(checkout: &Path) -> Option<String> {
+    checkout
+        .join("assets/splites")
+        .symlink_metadata()
+        .ok()
+        .map(|_| "Old output folder assets/splites/ found; move it to assets/sprites/".into())
+}
+
 pub fn is_png(path: &Path) -> bool {
     path.extension()
         .is_some_and(|s| s.eq_ignore_ascii_case("png"))
@@ -175,6 +183,18 @@ pub fn open_sheet(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn old_folder_hint_detects_existing_path() {
+        let temp = crate::test_support::TempDir::new("old-output-hint");
+        assert_eq!(old_output_folder_hint(&temp.0), None);
+        std::fs::create_dir_all(temp.0.join("assets/splites")).unwrap();
+        assert!(
+            old_output_folder_hint(&temp.0)
+                .unwrap()
+                .contains("assets/sprites/")
+        );
+    }
+
     #[test]
     fn picking_selection_guess_and_text_roundtrips() {
         let grid = Grid {

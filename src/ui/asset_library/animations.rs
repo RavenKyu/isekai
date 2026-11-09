@@ -22,8 +22,11 @@ impl AnimationDraft {
 impl SheetEditor {
     pub fn animations_tab(&mut self, ui: &Ui) {
         let sheet = &mut self.sheet;
-        if ui.button("New clip") {
-            let name = edit::next_name("clip", sheet.meta.clips.iter().map(|c| c.name.as_str()));
+        if ui.button("New animation") {
+            let name = edit::next_name(
+                "animation",
+                sheet.meta.clips.iter().map(|c| c.name.as_str()),
+            );
             self.selected_animation = Some(name.clone());
             sheet.meta.clips.push(Clip {
                 name,
@@ -35,7 +38,7 @@ impl SheetEditor {
             sheet.dirty = true;
             log::append(
                 &mut self.log,
-                "New clip needs at least one frame before Save".into(),
+                "New animation needs at least one frame before Save".into(),
             );
         }
         for clip in &sheet.meta.clips {
@@ -65,7 +68,7 @@ impl SheetEditor {
         }
         let mut name = clip.name.clone();
         let mut changed = false;
-        if ui.input_text("Clip name", &mut name).build() {
+        if ui.input_text("Animation name", &mut name).build() {
             if name.trim().is_empty()
                 || sheet
                     .meta
@@ -76,7 +79,7 @@ impl SheetEditor {
             {
                 log::append(
                     &mut self.log,
-                    format!("empty or duplicate clip name: {name:?}"),
+                    format!("empty or duplicate animation name: {name:?}"),
                 );
             } else {
                 if self.preview.target
@@ -90,13 +93,13 @@ impl SheetEditor {
                 changed = true;
             }
         }
-        changed |= mode_combo(ui, "Clip mode", &mut clip.mode);
+        changed |= mode_combo(ui, "Animation mode", &mut clip.mode);
         let mut text_changed = ui
-            .input_text("Clip tags", &mut self.animation_draft.tags)
+            .input_text("Animation tags", &mut self.animation_draft.tags)
             .build();
         text_changed |= ui
             .input_text_multiline(
-                "Clip props (key=value)",
+                "Animation props (key=value)",
                 &mut self.animation_draft.props,
                 [0.0, 65.0],
             )
@@ -166,9 +169,9 @@ impl SheetEditor {
         if changed {
             sheet.meta.clips[index] = clip;
             sheet.dirty = true;
-            log::append_repeat(&mut self.log, "Clip updated");
+            log::append_repeat(&mut self.log, "Animation updated");
         }
-        if ui.button("Delete clip") {
+        if ui.button("Delete animation") {
             sheet.meta.clips.remove(index);
             self.selected_animation = None;
             self.animation_draft = Default::default();
