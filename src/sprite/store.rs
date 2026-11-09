@@ -154,6 +154,20 @@ fn stage_bytes(path: &Path, bytes: &[u8]) -> Result<Staged, StoreError> {
     drop(file);
     Ok(temp)
 }
+/// Create or replace the destination with complete bytes through one `rename`.
+///
+/// On success, the bytes were written to a new same-directory temporary file,
+/// synced with `sync_all`, closed, and published with `rename`. On local Linux
+/// filesystems readers see the old or the new file, never a partial one, and
+/// handles already open keep reading the old contents; other platforms and
+/// network mounts are not verified. A symlink at the destination is replaced,
+/// not followed, and the new file does not keep the old file's permissions.
+/// On error, the destination is normally unchanged and the temporary file is
+/// removed on a best-effort basis; a network filesystem may report a failed
+/// `rename` that took effect.
+/// The parent directory is not synced, so after a crash the destination may
+/// still show its previous state and a temporary file may remain: crash
+/// durability of the published name is not guaranteed on any platform.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
     let temp = stage_bytes(path, bytes)?;
     fs::rename(&temp.0, path)?;
@@ -161,6 +175,16 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
 }
 /// Publish complete, synced bytes without replacing any existing destination,
 /// including a dangling symlink. Competing publishers cannot both succeed.
+///
+/// On success, the bytes were written to a new same-directory temporary file,
+/// synced with `sync_all`, closed, and published with `hard_link`; the
+/// temporary name is then removed on a best-effort basis.
+/// On error, no destination is normally created and the temporary file is
+/// removed on a best-effort basis; a network filesystem may report a failed
+/// `hard_link` that took effect.
+/// The parent directory is not synced, so after a crash the published name may
+/// be missing and a temporary file may remain: crash durability of the
+/// published name is not guaranteed on any platform.
 pub fn publish_new(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
     let temp = stage_bytes(path, bytes)?;
     fs::hard_link(&temp.0, path)?;
