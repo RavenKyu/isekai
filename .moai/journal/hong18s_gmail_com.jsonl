@@ -299,3 +299,11 @@
 {"ts":"2026-11-09T00:02:39Z","id":"rn-fx6y","kind":"note","by":"Raven","by_email":"hong18s@gmail.com","text":"Checked on screen by the person: Pin tile + Add selected cells animates in Preview."}
 {"ts":"2026-11-09T01:24:46Z","id":"rn-pzbl","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.3.2"}
 {"ts":"2026-11-09T01:24:58Z","id":"rn-89r2","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"Sprite Library: Load 버튼을 PNG path 옆에 두고 경로가 비면 비활성화"}
+{"ts":"2026-11-09T02:36:49Z","id":"rn-hk1c","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"Sprite Library 시트별 편집 창"}
+{"ts":"2026-11-09T02:36:49Z","id":"rn-hk1c.dpq","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"시트 편집 상태를 시트별 구조로 분리"}
+{"ts":"2026-11-09T02:36:49Z","id":"rn-hk1c.ii2","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"시트마다 편집 창을 띄우고 Close 버튼 제거"}
+{"ts":"2026-11-09T02:36:49Z","id":"rn-hk1c.hqk","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"Save 버튼은 변경이 있을 때만 활성"}
+{"ts":"2026-11-09T02:36:49Z","id":"rn-hk1c.24i","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"Guess를 백그라운드에서 돌리고 진행 막대 표시"}
+{"ts":"2026-11-09T02:36:49Z","id":"rn-hk1c.e8f","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"편집 창 아래 로그 영역"}
+{"ts":"2026-11-09T02:38:23Z","id":"rn-b6bh","kind":"note","by":"Raven","by_email":"hong18s@gmail.com","text":"에픽 rn-hk1c(시트별 편집 창, v0.3.2)의 rn-hk1c.ii2가 끝나면 다른 시트는 새 창으로 열리므로 이 문제가 사라진다. rn-hk1c.ii2를 닫을 때 같이 닫는다."}
+{"ts":"2026-11-09T02:38:23Z","id":"rn-sf4m","kind":"note","by":"Raven","by_email":"hong18s@gmail.com","text":"Guess는 rn-hk1c.24i(v0.3.2)에서 백그라운드 실행과 진행 막대로 다룬다. Suggest from objects, Find regions, Analyze는 이 항목에 남는다."}
