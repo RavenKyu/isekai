@@ -1,6 +1,9 @@
 use super::RgbaImage;
-use crate::sprite::grid::Grid;
-use std::collections::{HashMap, HashSet};
+use crate::sprite::{Transform, grid::Grid};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 pub const REPEAT_RATIO: f64 = 0.25;
 pub const DEFAULT_GUESS_CANDIDATES: [u32; 7] = [8, 12, 16, 24, 32, 48, 64];
@@ -70,9 +73,52 @@ pub struct GridGuess {
     pub scores: Vec<GridScore>,
 }
 
+/// Number of offsets that contain at least two rows and columns of cells.
+/// A partial edge skips offsets exactly as the scoring loop does.
+pub fn guess_grid_work(image: &RgbaImage, candidates: &[u32], search_offset: bool) -> u64 {
+    candidates.iter().fold(0u64, |total, &tile| {
+        if tile == 0 {
+            return total;
+        }
+        let limit = if search_offset { u64::from(tile) } else { 1 };
+        let offsets = |size: u32| {
+            (u64::from(size) + 1)
+                .saturating_sub(2 * u64::from(tile))
+                .min(limit)
+        };
+        total.saturating_add(offsets(image.width) * offsets(image.height))
+    })
+}
+
 /// Expensive suggestion: invoke from an explicit editor button, never on every frame.
 /// Full normalized byte keys preserve equality even when hash values collide.
 pub fn guess_grid(image: &RgbaImage, candidates: &[u32], search_offset: bool) -> GridGuess {
+    guess_grid_with(
+        image,
+        candidates,
+        search_offset,
+        &|_, _| {},
+        &AtomicBool::new(false),
+    )
+    .expect("uncancelled grid guess")
+}
+
+/// The synchronous algorithm with progress after each scored offset. Cancellation
+/// is checked between cells as well, so a large offset cannot hold up cancellation.
+/// Cancelled work returns no partial suggestion.
+pub fn guess_grid_with(
+    image: &RgbaImage,
+    candidates: &[u32],
+    search_offset: bool,
+    progress: &dyn Fn(u64, u64),
+    cancel: &AtomicBool,
+) -> Option<GridGuess> {
+    let total_work = guess_grid_work(image, candidates, search_offset);
+    let mut done = 0;
+    progress(done, total_work);
+    if cancel.load(Ordering::Relaxed) {
+        return None;
+    }
     let mut scores = Vec::new();
     for &tile in candidates {
         let bounds = Grid {
@@ -88,6 +134,9 @@ pub fn guess_grid(image: &RgbaImage, candidates: &[u32], search_offset: bool) ->
         let limit = if search_offset { tile } else { 1 };
         for oy in 0..limit {
             for ox in 0..limit {
+                if cancel.load(Ordering::Relaxed) {
+                    return None;
+                }
                 let grid = Grid {
                     tile,
                     offset: [ox, oy],
@@ -100,6 +149,9 @@ pub fn guess_grid(image: &RgbaImage, candidates: &[u32], search_offset: bool) ->
                 let mut unique = HashSet::new();
                 for row in 0..cells.rows {
                     for col in 0..cells.cols {
+                        if cancel.load(Ordering::Relaxed) {
+                            return None;
+                        }
                         unique.insert(image.normalized_tile_bytes(&grid, col, row));
                     }
                 }
@@ -114,6 +166,8 @@ pub fn guess_grid(image: &RgbaImage, candidates: &[u32], search_offset: bool) ->
                 if best.as_ref().is_none_or(|old| score.ratio < old.ratio) {
                     best = Some(score);
                 }
+                done += 1;
+                progress(done, total_work);
             }
         }
         if let Some(score) = best {
@@ -130,19 +184,54 @@ pub fn guess_grid(image: &RgbaImage, candidates: &[u32], search_offset: bool) ->
                 .min_by_key(|s| (s.unique as u128 * u128::from(s.tile).pow(2), s.tile))
         })
         .map(|s| (s.tile, s.offset));
-    GridGuess { pick, scores }
+    if cancel.load(Ordering::Relaxed) {
+        None
+    } else {
+        Some(GridGuess { pick, scores })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Dedupe {
     pub unique: Vec<RgbaImage>,
-    pub map: Vec<usize>,
+    pub map: Vec<(usize, Transform)>,
     pub cols: u32,
     pub rows: u32,
     pub counts: Vec<usize>,
 }
 
 pub fn dedupe(image: &RgbaImage, grid: &Grid) -> Dedupe {
+    dedupe_with(image, grid, false)
+}
+
+pub fn dedupe_with(image: &RgbaImage, grid: &Grid, group_transforms: bool) -> Dedupe {
+    dedupe_progress(
+        image,
+        grid,
+        group_transforms,
+        &|_, _| {},
+        &AtomicBool::new(false),
+    )
+    .expect("uncancelled dedupe")
+}
+
+pub fn dedupe_work(image: &RgbaImage, grid: &Grid) -> u64 {
+    let cells = grid.cells(image.width, image.height);
+    u64::from(cells.cols) * u64::from(cells.rows)
+}
+pub fn dedupe_progress(
+    image: &RgbaImage,
+    grid: &Grid,
+    group_transforms: bool,
+    progress: &dyn Fn(u64, u64),
+    cancel: &AtomicBool,
+) -> Option<Dedupe> {
+    let total = dedupe_work(image, grid);
+    let mut done = 0;
+    progress(done, total);
+    if cancel.load(Ordering::Relaxed) {
+        return None;
+    }
     let cells = grid.cells(image.width, image.height);
     let mut result = Dedupe {
         unique: Vec::new(),
@@ -151,25 +240,47 @@ pub fn dedupe(image: &RgbaImage, grid: &Grid) -> Dedupe {
         rows: cells.rows,
         counts: Vec::new(),
     };
-    let mut indices = HashMap::<Vec<u8>, usize>::new();
+    let mut indices = HashMap::<Vec<u8>, (usize, Transform)>::new();
     for row in 0..cells.rows {
         for col in 0..cells.cols {
+            if cancel.load(Ordering::Relaxed) {
+                return None;
+            }
             let bytes = image.normalized_tile_bytes(grid, col, row);
-            let next = result.unique.len();
-            let index = *indices.entry(bytes.clone()).or_insert_with(|| {
-                result.unique.push(RgbaImage {
+            let entry = if let Some(&entry) = indices.get(&bytes) {
+                entry
+            } else {
+                let index = result.unique.len();
+                let tile = RgbaImage {
                     width: grid.tile,
                     height: grid.tile,
                     pixels: bytes,
-                });
+                };
+                let transforms: &[Transform] = if group_transforms {
+                    &Transform::ALL
+                } else {
+                    &Transform::ALL[..1]
+                };
+                for &transform in transforms {
+                    indices
+                        .entry(tile.transformed(transform).pixels)
+                        .or_insert((index, transform));
+                }
+                result.unique.push(tile);
                 result.counts.push(0);
-                next
-            });
-            result.map.push(index);
-            result.counts[index] += 1;
+                (index, Transform::IDENTITY)
+            };
+            result.map.push(entry);
+            result.counts[entry.0] += 1;
+            done += 1;
+            progress(done, total);
         }
     }
-    result
+    if cancel.load(Ordering::Relaxed) {
+        None
+    } else {
+        Some(result)
+    }
 }
 
 pub fn build_sheet(unique: &[RgbaImage], tile: u32, columns: u32) -> RgbaImage {
@@ -198,27 +309,55 @@ pub fn rebuild_matches(
     grid: &Grid,
     dedupe: &Dedupe,
 ) -> Result<(), Vec<(u32, u32)>> {
+    rebuild_matches_with(image, grid, dedupe, &|_, _| {}, &AtomicBool::new(false))
+        .expect("uncancelled rebuild")
+}
+pub fn rebuild_matches_with(
+    image: &RgbaImage,
+    grid: &Grid,
+    dedupe: &Dedupe,
+    progress: &dyn Fn(u64, u64),
+    cancel: &AtomicBool,
+) -> Option<Result<(), Vec<(u32, u32)>>> {
+    let total = dedupe_work(image, grid);
+    let mut done = 0;
+    progress(done, total);
+    if cancel.load(Ordering::Relaxed) {
+        return None;
+    }
     let cells = grid.cells(image.width, image.height);
     let mut different = Vec::new();
     for row in 0..cells.rows {
         for col in 0..cells.cols {
+            if cancel.load(Ordering::Relaxed) {
+                return None;
+            }
             let index = row as usize * cells.cols as usize + col as usize;
             let expected = image.normalized_tile_bytes(grid, col, row);
-            let actual = dedupe.map.get(index).and_then(|&i| dedupe.unique.get(i));
+            let actual = dedupe
+                .map
+                .get(index)
+                .and_then(|&(i, transform)| dedupe.unique.get(i).map(|tile| (tile, transform)));
             if dedupe.cols != cells.cols
                 || dedupe.rows != cells.rows
-                || actual.is_none_or(|tile| {
-                    tile.width != grid.tile || tile.height != grid.tile || tile.pixels != expected
+                || actual.is_none_or(|(tile, transform)| {
+                    tile.width != grid.tile
+                        || tile.height != grid.tile
+                        || tile.transformed(transform).pixels != expected
                 })
             {
                 different.push((col, row));
             }
+            done += 1;
+            progress(done, total);
         }
     }
-    if different.is_empty() {
-        Ok(())
+    if cancel.load(Ordering::Relaxed) {
+        None
+    } else if different.is_empty() {
+        Some(Ok(()))
     } else {
-        Err(different)
+        Some(Err(different))
     }
 }
 
@@ -245,17 +384,55 @@ pub struct CellRect {
 
 /// Linear flood fill with an explicit stack; call on demand, not during every draw.
 pub fn find_objects(image: &RgbaImage, background: Background, min_size: u32) -> Vec<ObjectBox> {
+    find_objects_with(
+        image,
+        background,
+        min_size,
+        &|_, _| {},
+        &AtomicBool::new(false),
+    )
+    .expect("uncancelled object search")
+}
+pub fn find_objects_work(image: &RgbaImage) -> u64 {
+    u64::from(image.height)
+}
+pub fn find_objects_with(
+    image: &RgbaImage,
+    background: Background,
+    min_size: u32,
+    progress: &dyn Fn(u64, u64),
+    cancel: &AtomicBool,
+) -> Option<Vec<ObjectBox>> {
+    let total = find_objects_work(image);
+    progress(0, total);
+    if cancel.load(Ordering::Relaxed) {
+        return None;
+    }
     let Some(len) = (image.width as usize).checked_mul(image.height as usize) else {
-        return Vec::new();
+        return Some(Vec::new());
     };
     if len == 0 {
-        return Vec::new();
+        progress(total, total);
+        return Some(Vec::new());
     }
     let background = match background {
-        Background::Auto if image.pixels.as_chunks::<4>().0.iter().any(|p| p[3] == 0) => {
-            Background::Transparent
+        Background::Auto => {
+            let mut transparent = false;
+            for row in image.pixels.chunks((image.width as usize) * 4) {
+                if cancel.load(Ordering::Relaxed) {
+                    return None;
+                }
+                if row.as_chunks::<4>().0.iter().any(|p| p[3] == 0) {
+                    transparent = true;
+                    break;
+                }
+            }
+            if transparent {
+                Background::Transparent
+            } else {
+                Background::Color(image.pixel(0, 0))
+            }
         }
-        Background::Auto => Background::Color(image.pixel(0, 0)),
         other => other,
     };
     let foreground = |x, y| match background {
@@ -267,6 +444,9 @@ pub fn find_objects(image: &RgbaImage, background: Background, min_size: u32) ->
     let mut objects = Vec::new();
     let mut stack = Vec::new();
     for y in 0..image.height {
+        if cancel.load(Ordering::Relaxed) {
+            return None;
+        }
         for x in 0..image.width {
             let i = y as usize * image.width as usize + x as usize;
             if visited[i] {
@@ -279,6 +459,9 @@ pub fn find_objects(image: &RgbaImage, background: Background, min_size: u32) ->
             let (mut left, mut top, mut right, mut bottom) = (x, y, x, y);
             stack.push((x, y));
             while let Some((px, py)) = stack.pop() {
+                if cancel.load(Ordering::Relaxed) {
+                    return None;
+                }
                 left = left.min(px);
                 top = top.min(py);
                 right = right.max(px);
@@ -305,9 +488,14 @@ pub fn find_objects(image: &RgbaImage, background: Background, min_size: u32) ->
                 objects.push(object);
             }
         }
+        progress(u64::from(y) + 1, total);
     }
     objects.sort_by_key(|b| (b.y, b.x));
-    objects
+    if cancel.load(Ordering::Relaxed) {
+        None
+    } else {
+        Some(objects)
+    }
 }
 
 impl ObjectBox {

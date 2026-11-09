@@ -1,4 +1,4 @@
-use super::{SpriteLibrary, cell_under};
+use super::{SheetEditor, cell_under};
 use dear_imgui_rs::{MouseButton, Ui, WindowFlags};
 
 pub struct Overlay {
@@ -7,6 +7,15 @@ pub struct Overlay {
     pub cols: u32,
     pub rows: u32,
     pub color: [f32; 4],
+}
+/// Draws a background job's progress and its cancel button; true when it was pressed.
+pub fn job_progress(ui: &Ui, fraction: f32, verb: &str, cancel: &str) -> bool {
+    ui.progress_bar(fraction)
+        .size([240.0, 0.0])
+        .overlay_text(format!("{verb}... {:.0}%", fraction * 100.0))
+        .build();
+    ui.same_line();
+    ui.button(cancel)
 }
 pub fn input_u32(ui: &Ui, label: &str, value: &mut u32, min: u32) -> bool {
     let mut number = (*value).min(i32::MAX as u32) as i32;
@@ -17,11 +26,9 @@ pub fn input_u32(ui: &Ui, label: &str, value: &mut u32, min: u32) -> bool {
         false
     }
 }
-impl SpriteLibrary {
+impl SheetEditor {
     pub fn sheet_view(&mut self, ui: &Ui, overlays: &[Overlay]) {
-        let Some(sheet) = &mut self.sheet else {
-            return;
-        };
+        let sheet = &mut self.sheet;
         if let Some(texture) = &sheet.texture {
             debug_assert_eq!(texture.width, sheet.image.width);
         }

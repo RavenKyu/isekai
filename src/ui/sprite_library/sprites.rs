@@ -1,15 +1,14 @@
+use super::log;
 use super::{
-    SpriteLibrary, edit,
-    view::{Overlay, input_u32},
+    SheetEditor, edit,
+    view::{Overlay, input_u32, job_progress},
 };
 use crate::sprite::format::{Part, Shape};
 use dear_imgui_rs::Ui;
 
-impl SpriteLibrary {
+impl SheetEditor {
     pub fn sprite_overlays(&self) -> Vec<Overlay> {
-        let Some(sheet) = &self.sheet else {
-            return vec![];
-        };
+        let sheet = &self.sheet;
         let Some(sprite) = sheet
             .meta
             .sprites
@@ -31,9 +30,7 @@ impl SpriteLibrary {
             .collect()
     }
     pub fn sprites_tab(&mut self, ui: &Ui) {
-        let Some(sheet) = &mut self.sheet else {
-            return;
-        };
+        let sheet = &mut self.sheet;
         let selection = &sheet.selection.cells;
         if ui.button("New rect from selection") {
             let name =
@@ -43,7 +40,7 @@ impl SpriteLibrary {
                 sheet.meta.sprites.push(sprite);
                 sheet.dirty = true;
             } else {
-                self.status = "Select tiles first".into();
+                log::append(&mut self.log, "Select tiles first".into());
             }
         }
         ui.same_line();
@@ -55,15 +52,17 @@ impl SpriteLibrary {
                 sheet.meta.sprites.push(sprite);
                 sheet.dirty = true;
             } else {
-                self.status = "Select tiles first".into();
+                log::append(&mut self.log, "Select tiles first".into());
             }
         }
-        if ui.button("Suggest from objects") {
-            self.suggestions = edit::suggestions(&sheet.image, &sheet.meta.grid);
-            if self.suggestions.is_empty() {
-                self.status = "No object suggestions".into();
+        if let Some(job) = &self.suggest_job {
+            if job_progress(ui, job.fraction(), "Suggesting", "Cancel Suggest") {
+                self.cancel_suggest();
             }
+        } else if ui.button("Suggest from objects") {
+            self.start_suggest();
         }
+        let sheet = &mut self.sheet;
         for (i, rect) in self.suggestions.iter().enumerate() {
             let _id = ui.push_id(&format!("object-{i}"));
             ui.text(format!(
@@ -112,7 +111,14 @@ impl SpriteLibrary {
         };
         let mut sprite = sheet.meta.sprites[index].clone();
         let old_name = sprite.name.clone();
-        if ui.input_text("Sprite name", &mut sprite.name).build() {
+        let renamed = ui.input_text("Sprite name", &mut sprite.name).build();
+        #[cfg(test)]
+        {
+            let min = ui.item_rect_min();
+            let size = ui.item_rect_size();
+            self.sprite_name_input = [min[0] + 20.0, min[1] + size[1] * 0.5];
+        }
+        if renamed {
             match sheet.meta.rename_sprite(&old_name, &sprite.name) {
                 Ok(()) => {
                     self.selected_sprite = Some(sprite.name.clone());
@@ -123,10 +129,11 @@ impl SpriteLibrary {
                             super::preview::PreviewTarget::Sprite(sprite.name.clone());
                     }
                     sheet.dirty = true;
-                    self.status = "Sprite renamed and clip references updated".into();
+                    // Fires on every keystroke of the name field, like "Sprite updated".
+                    log::append_repeat(&mut self.log, "Sprite renamed and clip references updated");
                 }
                 Err(error) => {
-                    self.status = error;
+                    log::append(&mut self.log, error);
                     sprite.name = old_name.clone();
                 }
             }
@@ -160,6 +167,13 @@ impl SpriteLibrary {
                     ui.same_line();
                     ui.set_next_item_width(140.0);
                     changed |= ui.input_int("dy", &mut part.dy);
+                    changed |= ui.checkbox("Flip X", &mut part.flip_x);
+                    let mut rotation = usize::from(part.rotation / 90);
+                    if ui.combo_simple_string("Rotation", &mut rotation, &["0", "90", "180", "270"])
+                    {
+                        part.rotation = rotation as u16 * 90;
+                        changed = true;
+                    }
                     if count > 1 && ui.small_button("Remove part") {
                         remove = Some(i);
                     }
@@ -176,6 +190,7 @@ impl SpriteLibrary {
                         row,
                         dx: 0,
                         dy: 0,
+                        ..Default::default()
                     });
                     changed = true;
                 }
@@ -189,9 +204,9 @@ impl SpriteLibrary {
                 Ok(()) => {
                     sheet.meta.sprites[index] = sprite;
                     sheet.dirty = true;
-                    self.status = "Sprite updated".into();
+                    log::append_repeat(&mut self.log, "Sprite updated");
                 }
-                Err(errors) => self.status = errors.join("; "),
+                Err(errors) => log::append(&mut self.log, errors.join("; ")),
             }
         }
         if ui.button("Delete sprite") {
@@ -201,7 +216,7 @@ impl SpriteLibrary {
                     self.selected_sprite = None;
                     sheet.dirty = true;
                 }
-                Err(error) => self.status = error,
+                Err(error) => log::append(&mut self.log, error),
             }
         }
     }

@@ -40,7 +40,7 @@ impl Playback {
             .parent()
             .filter(|p| !p.as_os_str().is_empty())
             .unwrap_or(std::path::Path::new("."));
-        if loaded.image_path.parent() != Some(parent) {
+        if parent.join(&loaded.sheet.image).parent() != Some(parent) {
             return Err(format!(
                 "image {} must share sidecar directory {}",
                 loaded.image_path.display(),
@@ -121,8 +121,11 @@ impl Playback {
                 self.sheet
                     .grid
                     .uv(part.col, part.row, self.texture.width, self.texture.height);
-            self.quad
-                .draw(self.texture.raw(), dest, [uv0[0], uv0[1], uv1[0], uv1[1]])?;
+            self.quad.draw(
+                self.texture.raw(),
+                dest,
+                part.transform().uv_corners(uv0, uv1),
+            )?;
         }
         Ok(())
     }

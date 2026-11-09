@@ -1,0 +1,67 @@
+{
+  "version": 2,
+  "image": "example.png",
+  "grid": {
+    "tile": 16,
+    "offset": [
+      0,
+      0
+    ],
+    "spacing": 0
+  },
+  "tiles": [],
+  "sprites": [
+    {
+      "name": "turned",
+      "kind": "set",
+      "parts": [
+        {
+          "col": 0,
+          "row": 0,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "col": 1,
+          "row": 0,
+          "dx": 16,
+          "dy": 0,
+          "rotation": 90
+        },
+        {
+          "col": 2,
+          "row": 0,
+          "dx": 0,
+          "dy": 16,
+          "flip_x": true
+        },
+        {
+          "col": 3,
+          "row": 0,
+          "dx": 16,
+          "dy": 16,
+          "flip_x": true,
+          "rotation": 270
+        }
+      ],
+      "pivot": [
+        16.0,
+        16.0
+      ]
+    }
+  ],
+  "clips": [
+    {
+      "name": "turned",
+      "mode": "loop",
+      "tags": [],
+      "props": {},
+      "frames": [
+        {
+          "sprite": "turned",
+          "ms": 150
+        }
+      ]
+    }
+  ]
+}

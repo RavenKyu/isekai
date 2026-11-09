@@ -5,10 +5,13 @@ pub use grid::Grid;
 pub mod example;
 pub mod format;
 pub mod store;
+pub mod tilemap;
 pub mod timeline;
+pub mod transform;
 pub use example::example;
 pub use format::{Clip, Sprite, SpriteSheet};
 pub use timeline::{Mode, Timeline};
+pub use transform::Transform;
 
 pub mod texture;
 

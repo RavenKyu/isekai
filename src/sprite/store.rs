@@ -71,17 +71,35 @@ pub fn load(sidecar: &Path) -> Result<Loaded, StoreError> {
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
-    let image_path = parent.join(&sheet.image);
-    // Reject existing symlinks that would take a lexically safe image outside
-    // the sidecar directory. Missing images are diagnosed by the image reader.
-    match image_path.canonicalize() {
-        Ok(actual) if !actual.starts_with(parent.canonicalize()?) => {
+    let given = parent.join(&sheet.image);
+    let image_path = match image_within_directory(&given, parent) {
+        Ok(checked) => checked,
+        // Keep missing-image diagnosis with the image reader, as before.
+        Err(StoreError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => given,
+        Err(StoreError::UnsafeImagePath(_)) => {
             return Err(StoreError::UnsafeImagePath(sheet.image));
         }
-        Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error.into()),
-        _ => {}
-    }
+        Err(error) => return Err(error),
+    };
     Ok(Loaded { sheet, image_path })
+}
+/// Reject existing image symlinks that escape the given directory. Directory
+/// symlinks are allowed when both paths resolve within the same directory.
+/// Return exactly the canonical image path that was checked. Callers must use
+/// this path rather than resolve the input again. Missing images return IO errors.
+pub fn image_within_directory(image: &Path, dir: &Path) -> Result<PathBuf, StoreError> {
+    let dir = if dir.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        dir
+    };
+    let actual = image.canonicalize()?;
+    if !actual.starts_with(dir.canonicalize()?) {
+        return Err(StoreError::UnsafeImagePath(
+            image.to_string_lossy().into_owned(),
+        ));
+    }
+    Ok(actual)
 }
 pub fn to_json(sheet: &SpriteSheet) -> String {
     let mut normalized = sheet.clone();
@@ -97,7 +115,22 @@ pub fn save(sidecar: &Path, sheet: &SpriteSheet) -> Result<(), StoreError> {
 }
 
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
-pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
+struct Staged(Option<PathBuf>);
+impl Staged {
+    fn rename_to(&mut self, path: &Path) -> Result<(), std::io::Error> {
+        fs::rename(self.0.as_ref().unwrap(), path)?;
+        self.0 = None;
+        Ok(())
+    }
+}
+impl Drop for Staged {
+    fn drop(&mut self) {
+        if let Some(path) = &self.0 {
+            let _ = fs::remove_file(path);
+        }
+    }
+}
+fn stage_bytes(path: &Path, bytes: &[u8]) -> Result<Staged, StoreError> {
     let name = path.file_name().ok_or_else(|| {
         std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -119,22 +152,51 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
         ));
         let temp = parent.join(filename);
         match OpenOptions::new().write(true).create_new(true).open(&temp) {
-            Ok(file) => break (temp, file),
+            Ok(file) => break (Staged(Some(temp)), file),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(e) => return Err(e.into()),
         }
     };
-    let result = (|| {
-        file.write_all(bytes)?;
-        file.sync_all()?;
-        // Close before rename also supports platforms disallowing open-file moves.
-        drop(file);
-        fs::rename(&temp, path)
-    })();
-    if let Err(error) = result {
-        let _ = fs::remove_file(&temp);
-        return Err(error.into());
-    }
+    file.write_all(bytes)?;
+    file.sync_all()?;
+    // Close before publication also supports platforms disallowing open-file moves.
+    drop(file);
+    Ok(temp)
+}
+/// Create or replace the destination with complete bytes through one `rename`.
+///
+/// On success, the bytes were written to a new same-directory temporary file,
+/// synced with `sync_all`, closed, and published with `rename`. On local Linux
+/// filesystems readers see the old or the new file, never a partial one, and
+/// handles already open keep reading the old contents; other platforms and
+/// network mounts are not verified. A symlink at the destination is replaced,
+/// not followed, and the new file does not keep the old file's permissions.
+/// On error, the destination is normally unchanged and the temporary file is
+/// removed on a best-effort basis; a network filesystem may report a failed
+/// `rename` that took effect.
+/// The parent directory is not synced, so after a crash the destination may
+/// still show its previous state and a temporary file may remain: crash
+/// durability of the published name is not guaranteed on any platform.
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
+    let mut temp = stage_bytes(path, bytes)?;
+    temp.rename_to(path)?;
+    Ok(())
+}
+/// Publish complete, synced bytes without replacing any existing destination,
+/// including a dangling symlink. Competing publishers cannot both succeed.
+///
+/// On success, the bytes were written to a new same-directory temporary file,
+/// synced with `sync_all`, closed, and published with `hard_link`; the
+/// temporary name is then removed on a best-effort basis.
+/// On error, no destination is normally created and the temporary file is
+/// removed on a best-effort basis; a network filesystem may report a failed
+/// `hard_link` that took effect.
+/// The parent directory is not synced, so after a crash the published name may
+/// be missing and a temporary file may remain: crash durability of the
+/// published name is not guaranteed on any platform.
+pub fn publish_new(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
+    let temp = stage_bytes(path, bytes)?;
+    fs::hard_link(temp.0.as_ref().unwrap(), path)?;
     Ok(())
 }
 
@@ -142,22 +204,17 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
 mod tests {
     use super::*;
     use std::io::Read;
-    struct Temp(PathBuf);
-    impl Temp {
-        fn new() -> Self {
-            let path = std::env::temp_dir().join(format!(
-                "rusty-nails-store-{}-{}",
-                std::process::id(),
-                NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
-            ));
-            fs::create_dir(&path).unwrap();
-            Self(path)
-        }
-    }
-    impl Drop for Temp {
-        fn drop(&mut self) {
-            fs::remove_dir_all(&self.0).unwrap();
-        }
+    #[test]
+    fn renamed_stage_does_not_remove_a_reused_name() {
+        let dir = crate::test_support::TempDir::new("rename-reuse");
+        let destination = dir.0.join("destination");
+        let mut staged = stage_bytes(&destination, b"first").unwrap();
+        let old_name = staged.0.as_ref().unwrap().clone();
+        staged.rename_to(&destination).unwrap();
+        fs::write(&old_name, b"second").unwrap();
+        drop(staged);
+        assert_eq!(fs::read(&destination).unwrap(), b"first");
+        assert_eq!(fs::read(&old_name).unwrap(), b"second");
     }
     #[test]
     fn lexical_paths_are_portable_and_strict() {
@@ -192,7 +249,7 @@ mod tests {
     }
     #[test]
     fn atomic_replacement_preserves_old_inode_and_cleans_failures() {
-        let dir = Temp::new();
+        let dir = crate::test_support::TempDir::new("store");
         let path = dir.0.join("sheet.json");
         fs::write(&path, b"old complete content").unwrap();
         let mut old_handle = fs::File::open(&path).unwrap();
@@ -225,11 +282,88 @@ mod tests {
         );
     }
     #[test]
+    fn publication_is_exclusive_and_cleans_success_and_failure() {
+        let dir = crate::test_support::TempDir::new("store");
+        let path = dir.0.join("image.png");
+        publish_new(&path, b"complete PNG").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"complete PNG");
+        assert!(matches!(
+            publish_new(&path, b"replacement"),
+            Err(StoreError::Io(e)) if e.kind() == std::io::ErrorKind::AlreadyExists
+        ));
+        assert_eq!(fs::read(&path).unwrap(), b"complete PNG");
+        let directory = dir.0.join("directory.png");
+        fs::create_dir(&directory).unwrap();
+        assert!(matches!(
+            publish_new(&directory, b"replacement"),
+            Err(StoreError::Io(e)) if e.kind() == std::io::ErrorKind::AlreadyExists
+        ));
+        assert!(directory.is_dir());
+        assert!(publish_new(&dir.0.join("missing/image.png"), b"no parent").is_err());
+        assert!(!dir.0.join("missing").exists());
+        assert_eq!(fs::read_dir(&dir.0).unwrap().count(), 2);
+    }
+    #[cfg(unix)]
+    #[test]
+    fn publication_refuses_live_and_dangling_symlink_names() {
+        let dir = crate::test_support::TempDir::new("store");
+        let outside = crate::test_support::TempDir::new("store");
+        let target = outside.0.join("target.png");
+        fs::write(&target, b"original").unwrap();
+        for (name, target) in [
+            ("live.png", target.clone()),
+            ("dangling.png", outside.0.join("missing.png")),
+        ] {
+            let link = dir.0.join(name);
+            std::os::unix::fs::symlink(&target, &link).unwrap();
+            assert!(matches!(
+                publish_new(&link, b"replacement"),
+                Err(StoreError::Io(e)) if e.kind() == std::io::ErrorKind::AlreadyExists
+            ));
+            assert_eq!(fs::read_link(&link).unwrap(), target);
+        }
+        assert_eq!(fs::read(&target).unwrap(), b"original");
+        assert_eq!(fs::read_dir(&dir.0).unwrap().count(), 2);
+        assert_eq!(fs::read_dir(&outside.0).unwrap().count(), 1);
+    }
+    #[test]
+    fn concurrent_publication_has_one_winner_and_keeps_its_complete_bytes() {
+        let dir = crate::test_support::TempDir::new("store");
+        let path = dir.0.join("image.png");
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let writers: Vec<_> = (0..2)
+            .map(|i| {
+                let path = path.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    let bytes = vec![i; 16_384];
+                    barrier.wait();
+                    (bytes.clone(), publish_new(&path, &bytes))
+                })
+            })
+            .collect();
+        let results: Vec<_> = writers.into_iter().map(|w| w.join().unwrap()).collect();
+        let winners: Vec<_> = results
+            .iter()
+            .filter(|(_, result)| result.is_ok())
+            .collect();
+        assert_eq!(winners.len(), 1);
+        assert_eq!(fs::read(&path).unwrap(), winners[0].0);
+        assert!(results.iter().any(|(_, result)| matches!(
+            result,
+            Err(StoreError::Io(e)) if e.kind() == std::io::ErrorKind::AlreadyExists
+        )));
+        assert_eq!(fs::read_dir(&dir.0).unwrap().count(), 1);
+    }
+    #[test]
     fn canonical_roundtrip_and_load() {
-        let dir = Temp::new();
+        let dir = crate::test_support::TempDir::new("store");
         let path = super::super::example::write_example(&dir.0).unwrap();
         let loaded = load(&path).unwrap();
-        assert_eq!(loaded.image_path, dir.0.join("example.png"));
+        assert_eq!(
+            loaded.image_path,
+            dir.0.join("example.png").canonicalize().unwrap()
+        );
         assert_eq!(loaded.sheet, super::super::example().1);
         let json = to_json(&loaded.sheet);
         save(&path, &loaded.sheet).unwrap();
@@ -239,9 +373,109 @@ mod tests {
     }
     #[cfg(unix)]
     #[test]
+    fn image_directory_check_matches_loader_for_symlinks_and_missing_files() {
+        use std::os::unix::fs::symlink;
+        let dir = crate::test_support::TempDir::new("store");
+        let outside = crate::test_support::TempDir::new("store");
+        let image = dir.0.join("example.png");
+        let target = outside.0.join("out.png");
+        fs::write(&target, b"outside image").unwrap();
+        symlink(&target, &image).unwrap();
+        let sidecar = dir.0.join("example.sprites.json");
+        save(&sidecar, &super::super::example().1).unwrap();
+        let before = fs::read(&sidecar).unwrap();
+        assert!(matches!(
+            image_within_directory(&image, &dir.0),
+            Err(StoreError::UnsafeImagePath(path)) if path == image.to_string_lossy()
+        ));
+        assert!(matches!(
+            load(&sidecar),
+            Err(StoreError::UnsafeImagePath(_))
+        ));
+        assert_eq!(fs::read(&target).unwrap(), b"outside image");
+        assert_eq!(fs::read(&sidecar).unwrap(), before);
+        assert_eq!(fs::read_dir(&dir.0).unwrap().count(), 2);
+        assert_eq!(fs::read_dir(&outside.0).unwrap().count(), 1);
+
+        fs::remove_file(&image).unwrap();
+        fs::write(dir.0.join("local.png"), b"local image").unwrap();
+        symlink("local.png", &image).unwrap();
+        let checked = dir.0.join("local.png").canonicalize().unwrap();
+        assert_eq!(image_within_directory(&image, &dir.0).unwrap(), checked);
+        assert_eq!(load(&sidecar).unwrap().image_path, checked);
+        let alias = outside.0.join("directory");
+        symlink(&dir.0, &alias).unwrap();
+        assert_eq!(
+            image_within_directory(&alias.join("example.png"), &alias).unwrap(),
+            checked
+        );
+        assert_eq!(
+            load(&alias.join("example.sprites.json"))
+                .unwrap()
+                .image_path,
+            checked
+        );
+
+        fs::remove_file(&image).unwrap();
+        assert!(
+            matches!(image_within_directory(&image, &dir.0), Err(StoreError::Io(e)) if e.kind() == std::io::ErrorKind::NotFound)
+        );
+        load(&sidecar).unwrap();
+        symlink("missing.png", &image).unwrap();
+        assert!(
+            matches!(image_within_directory(&image, &dir.0), Err(StoreError::Io(e)) if e.kind() == std::io::ErrorKind::NotFound)
+        );
+        load(&sidecar).unwrap();
+    }
+    #[test]
+    fn image_directory_check_uses_current_directory_for_empty_parent() {
+        // Do not change the process cwd: other tests can run concurrently.
+        let relative = Path::new("Cargo.toml");
+        assert_eq!(relative.parent(), Some(Path::new("")));
+        assert!(relative.is_file());
+        assert_eq!(
+            image_within_directory(relative, relative.parent().unwrap()).unwrap(),
+            relative.canonicalize().unwrap()
+        );
+        assert!(
+            matches!(image_within_directory(Path::new("missing-image.png"), Path::new("")), Err(StoreError::Io(e)) if e.kind() == std::io::ErrorKind::NotFound)
+        );
+    }
+    #[cfg(unix)]
+    #[test]
+    fn checked_image_paths_keep_the_resolved_target_after_alias_replacement() {
+        use std::os::unix::fs::symlink;
+        let dir = crate::test_support::TempDir::new("store");
+        let outside = crate::test_support::TempDir::new("store");
+        let local = dir.0.join("local.png");
+        let foreign = outside.0.join("foreign.png");
+        fs::write(&local, b"checked local image").unwrap();
+        fs::write(&foreign, b"foreign image").unwrap();
+        let alias = dir.0.join("example.png");
+        symlink(&local, &alias).unwrap();
+        let sidecar = dir.0.join("example.sprites.json");
+        save(&sidecar, &super::super::example().1).unwrap();
+        let checked = image_within_directory(&alias, &dir.0).unwrap();
+        let loaded = load(&sidecar).unwrap();
+        fs::remove_file(&alias).unwrap();
+        symlink(&foreign, &alias).unwrap();
+        assert_eq!(checked, local.canonicalize().unwrap());
+        assert_eq!(loaded.image_path, checked);
+        assert_eq!(fs::read(&checked).unwrap(), b"checked local image");
+        assert_eq!(
+            fs::read(&loaded.image_path).unwrap(),
+            b"checked local image"
+        );
+        assert!(matches!(
+            load(&sidecar),
+            Err(StoreError::UnsafeImagePath(_))
+        ));
+    }
+    #[cfg(unix)]
+    #[test]
     fn existing_image_symlink_cannot_escape_sidecar_directory() {
-        let dir = Temp::new();
-        let outside = Temp::new();
+        let dir = crate::test_support::TempDir::new("store");
+        let outside = crate::test_support::TempDir::new("store");
         fs::write(outside.0.join("out.png"), b"image").unwrap();
         std::os::unix::fs::symlink(outside.0.join("out.png"), dir.0.join("example.png")).unwrap();
         let path = dir.0.join("example.sprites.json");

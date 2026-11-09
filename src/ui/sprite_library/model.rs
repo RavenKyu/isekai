@@ -160,16 +160,7 @@ pub fn open_sheet(
         image.apply_key_color(key);
     }
     let dirty = sidecar.is_none();
-    let meta = sidecar.unwrap_or_else(|| {
-        SpriteSheet::new_for(
-            name,
-            Grid {
-                tile: 16,
-                offset: [0, 0],
-                spacing: 0,
-            },
-        )
-    });
+    let meta = sidecar.unwrap_or_else(|| SpriteSheet::new_for(name, Grid::DEFAULT));
     if meta.image != name {
         return Err(format!(
             "sidecar image {:?} does not match opened file {name:?}",
@@ -236,6 +227,7 @@ mod tests {
         assert!(dirty);
         assert_eq!(new.image, "example.PNG");
         assert_eq!(new.grid.tile, 16);
+        assert_eq!((new.grid.offset, new.grid.spacing), ([0, 0], 0));
         assert!(
             !open_sheet(Path::new("example.png"), &bytes, None, Some(meta))
                 .unwrap()
@@ -245,16 +237,16 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn assets_skip_hidden_entries_and_symlinks() {
-        let root = std::env::temp_dir().join(format!("rn-assets-{}", std::process::id()));
+        let temp = crate::test_support::TempDir::new("assets");
+        let root = &temp.0;
         std::fs::create_dir_all(root.join("sub")).unwrap();
         std::fs::write(root.join("sub/a.PNG"), b"").unwrap();
         std::fs::write(root.join(".hidden.png"), b"").unwrap();
         std::os::unix::fs::symlink(root.join("sub"), root.join("loop")).unwrap();
-        assert_eq!(list_assets(&root).unwrap(), vec![root.join("sub/a.PNG")]);
+        assert_eq!(list_assets(root).unwrap(), vec![root.join("sub/a.PNG")]);
         assert_eq!(
             list_assets(&root.join("missing")).unwrap(),
             Vec::<PathBuf>::new()
         );
-        std::fs::remove_dir_all(root).unwrap();
     }
 }

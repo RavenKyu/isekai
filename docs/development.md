@@ -24,7 +24,7 @@ dev도 처음에는 검은 창이다. 물리 백틱 키(scancode `Grave`, 보통
 `View` 메뉴의 `Frame stats`, `Dear ImGui Demo`, `Dear ImGui Metrics`는 창 상태와
 연결된 체크 항목이다. 처음에는 stats만 열려 있고 Demo와 Metrics는 닫혀 있다.
 네이티브 dev의 `Assets > Sprite Library`는 PNG 시트 편집·추출 창이다.
-[스프라이트 사용법](sprites.md#편집기-사용)에 가져오기·저장 순서와 동기 Guess의 지연을 설명한다.
+[스프라이트 사용법](sprites.md#편집기-사용)에서 가져오기·저장 순서와 Guess의 진행 표시·취소를 설명한다.
 닫기 버튼이나 메뉴로 각 창을 여닫을 수 있으며, 도구 전체를 숨겼다 열어도 각 창의 열림 상태는 유지된다.
 
 키를 길게 누를 때의 반복 입력은 토글하지 않는다. Ctrl·Alt·GUI 조합 키도 무시하며 Shift 조합은 허용한다.
@@ -60,6 +60,7 @@ GL 컨텍스트가 없으면 실패로 처리하며 검사 생략이나 성공�
 
 | 파일 | 역할 |
 | --- | --- |
+| `src/test_support.rs` | `cfg(test)` 전용 공유 도우미: 임시 디렉터리, 숨은 SDL·GL 창 픽스처, 정확한 테스트 경로로 자식 프로세스를 다시 실행하고 종료 성공과 `1 passed`를 확인하는 래퍼. |
 | `src/main.rs` | 네이티브 반복 루프와 Emscripten RAF callback 드라이버. feature에 따라 스모크 기대 모드를 정하고 `App::frame`을 호출한다. |
 | `src/app.rs` | SDL·GL 소유, 이벤트 처리, 화면 지우기, 스모크 키 주입/도착 관측과 framebuffer 측정, 종료. |
 | `src/dev.rs` | dev 전용 renderer·platform·ImGui 소유, 모든 이벤트 전달, 백틱 토글 판정과 프레임 렌더링. |
@@ -80,8 +81,9 @@ GL 컨텍스트와 창보다 먼저 해제된다. dev 안에서는 편집기 텍
 초기화 실패 때도 renderer를 먼저 종료한다. 네이티브 드라이버는 `App::shutdown`을 호출한다.
 웹은 힙의 `App`을 페이지 수명 동안 유지하고 스모크 완료 시 루프만 취소해 마지막
 canvas를 남긴다. 텍스처 업로드·Drop·외부 ID 해제는 GL 테스트가 검사한다.
+네이티브 GL readback 검사는 `SpriteQuad`의 회전·반전 방향도 본다. 측정하지 않는 범위는 [스프라이트 검사](sprites.md#검사)에 있다.
 App 필드 순서나 전체 shutdown 순서가 바뀌는 변이를 잡는 자동 검사는 없다.
-그 순서는 리뷰에서 코드로 확인해야 하며 전체 수명 계측은 rn-rj8j의 작업 범위다.
+그 순서는 리뷰에서 코드로 확인해야 하며 전체 수명 계측은 isk-rj8j의 작업 범위다.
 
 ## 평소 검사 순서
 
@@ -128,6 +130,10 @@ scripts/check-no-imgui.sh --release
 버전 교체 및 인자 보존을 검사한다. 실제 SDK·웹 검사를 대신하지 않는다.
 [웹 스모크](web.md#웹-스모크)로 이어 간다. 회귀 검사를 바꿀 때는
 [실패하는 변이로 약속을 확인하는 교훈](lessons/verify-promises-with-mutations.md)을 따른다.
+파일 열기·저장 경로를 바꿀 때는 [검증한 경로 해석 결과를 그대로 사용하는 규칙](lessons/use-the-path-that-was-validated.md)도 확인한다.
+ImGui 검사에는 [기본 실행과 ignored 실행을 모두 자식으로 격리하는 규칙](lessons/isolate-imgui-tests-at-every-entry.md)을 적용한다.
+성공 경로 검사에서는 [fixture의 전제조건](lessons/prepare-valid-fixtures-for-success-paths.md)을 먼저 맞춘다.
+파일 재열기 방식을 바꿀 때는 [쓰기 경로와 파일 식별 기준](lessons/inspect-write-paths-when-deduplicating-open-files.md)도 함께 확인한다.
 
 ## 스모크 출력 계약
 
@@ -177,4 +183,4 @@ rn-smoke: ok frames=<N> vtx=<M> lit=<K>
 - `sheet ... exceeds GL_MAX_TEXTURE_SIZE ...`: 이미지 크기가 GL 한계를 넘는다. 시트를 작게 나누거나 지원 가능한 환경에서 연다.
 - `missing required tool`: 오류에 표시된 Xvfb, Python, timeout, nm 등을 준비한다.
 
-Decided in: rn-35g9, rn-7w7b, rn-fcuz
+Decided in: isk-35g9, isk-7w7b, isk-fcuz, isk-hk1c

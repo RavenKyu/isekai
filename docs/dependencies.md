@@ -116,4 +116,4 @@ Rust의 `-fwasm-exceptions`와 Emscripten 기본 `WASM_LEGACY_EXCEPTIONS` 조합
    실측 Rust/LLVM·emcc 버전, 성공한 설정, 크기와 검사 결과를 트래커에 기록한다.
    [CI 상태](README.md#더-읽기와-ci-상태)의 원격 미실행과 로컬 성공을 구분한다.
 
-Decided in: rn-35g9, rn-7w7b, rn-fcuz
+Decided in: isk-35g9, isk-7w7b, isk-fcuz

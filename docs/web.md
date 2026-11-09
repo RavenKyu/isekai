@@ -163,4 +163,4 @@ stderr에 출력되는 `evidence:` 경로는 `target/smoke-web.<임의값>/`다.
 | `dev tools did not open within 5s`·`smoke key probe did not arrive within 5s` | evidence와 준비 속성, canvas 포커스, CDP 키가 SDL에 도착하는지 확인한다. 고정 sleep이나 앱 내부의 강제 표시로 우회하지 않는다. |
 | `missing smoke result`·DevTools timeout | 결과 줄이 없는지, 앱이 초기화·RAF·렌더 중 멈췄는지 증거 로그를 본다. 페이지가 응답하지 않아 DevTools도 멈추면 DOM과 스크린샷은 남지 않고 `chrome.log`와 `server.log`만 남는다. CLI `--dump-dom`만으로 완료 시점을 추정하지 않는다. |
 
-Decided in: rn-35g9, rn-7w7b, rn-fcuz
+Decided in: isk-35g9, isk-7w7b, isk-fcuz

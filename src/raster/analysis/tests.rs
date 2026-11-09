@@ -61,11 +61,7 @@ fn alpha_key_and_hex_are_exact() {
 
 #[test]
 fn tile_bounds_and_alpha_only_emptiness() {
-    let grid = Grid {
-        tile: 16,
-        offset: [0, 0],
-        spacing: 0,
-    };
+    let grid = Grid::DEFAULT;
     let mut image = solid(256, 64, [9, 8, 7, 0]);
     assert!(image.tile(&grid, 15, 3).is_some());
     assert!(image.tile(&grid, 16, 3).is_none());
@@ -82,11 +78,14 @@ fn dedupe_is_normalized_ordered_and_spacing_aware() {
         let (image, grid) = tiled(&tiles, 4, 2, &[0, 1, 0, 2, 1, 0, 2, 2], [3, 5], spacing);
         let result = dedupe(&image, &grid);
         assert_eq!(result.unique, tiles);
-        assert_eq!(result.map, [0, 1, 0, 2, 1, 0, 2, 2]);
+        assert_eq!(
+            result.map,
+            [0, 1, 0, 2, 1, 0, 2, 2].map(|i| (i, Transform::IDENTITY))
+        );
         assert_eq!(result.counts, [3, 2, 3]);
         assert_eq!(rebuild_matches(&image, &grid, &result), Ok(()));
         let mut wrong = result.clone();
-        wrong.map[2] = 1;
+        wrong.map[2] = (1, Transform::IDENTITY);
         assert_eq!(rebuild_matches(&image, &grid, &wrong), Err(vec![(2, 0)]));
         let mut wrong = result.clone();
         wrong.unique[0].set_pixel(0, 0, [9; 4]);
@@ -95,7 +94,7 @@ fn dedupe_is_normalized_ordered_and_spacing_aware() {
             Err(vec![(0, 0), (2, 0), (1, 1)])
         );
         let mut wrong = result.clone();
-        wrong.map[0] = usize::MAX;
+        wrong.map[0] = (usize::MAX, Transform::IDENTITY);
         assert_eq!(rebuild_matches(&image, &grid, &wrong), Err(vec![(0, 0)]));
     }
     let (image, grid) = tiled(
@@ -108,7 +107,7 @@ fn dedupe_is_normalized_ordered_and_spacing_aware() {
     );
     let result = dedupe(&image, &grid);
     assert_eq!(result.unique, vec![solid(2, 2, [0; 4])]);
-    assert_eq!(result.map, [0, 0]);
+    assert_eq!(result.map, [(0, Transform::IDENTITY); 2]);
     assert_eq!(result.counts, [2]);
 }
 
@@ -281,11 +280,7 @@ fn objects_use_eight_neighbors_background_and_sorted_bounds() {
 
 #[test]
 fn snap_clips_to_cells_and_skips_gaps_and_leftovers() {
-    let grid = Grid {
-        tile: 16,
-        offset: [0, 0],
-        spacing: 0,
-    };
+    let grid = Grid::DEFAULT;
     assert_eq!(
         ObjectBox {
             x: 17,
@@ -434,11 +429,7 @@ fn local_assets_report() {
             continue;
         };
         let image = RgbaImage::from_png(&bytes).unwrap();
-        let grid = Grid {
-            tile: 16,
-            offset: [0, 0],
-            spacing: 0,
-        };
+        let grid = Grid::DEFAULT;
         let cells = grid.cells(image.width, image.height);
         if path.starts_with(root.join("assets/splites/cave")) {
             assert!([(256, 64), (256, 144)].contains(&(image.width, image.height)));
@@ -466,4 +457,221 @@ fn local_assets_report() {
             );
         }
     }
+}
+
+#[test]
+fn guess_work_counts_only_valid_offsets_and_progress_reaches_the_total() {
+    // 5x6: tile=2 allows 2 x 2 offsets; tile=3 has fewer than two columns.
+    let image = RgbaImage::new(5, 6);
+    assert_eq!(guess_grid_work(&image, &[0, 2, 3, u32::MAX], true), 4);
+    assert_eq!(guess_grid_work(&image, &[2, 3], false), 1);
+    assert_eq!(guess_grid_work(&RgbaImage::new(6, 7), &[3], true), 2);
+    for width in 0..12 {
+        for height in 0..12 {
+            let image = RgbaImage::new(width, height);
+            for search in [false, true] {
+                let candidates = [0, 1, 2, 3, 5, 8];
+                let mut expected = 0;
+                for tile in candidates {
+                    for oy in 0..if search { tile } else { 1 } {
+                        for ox in 0..if search { tile } else { 1 } {
+                            let cells = Grid {
+                                tile,
+                                offset: [ox, oy],
+                                spacing: 0,
+                            }
+                            .cells(width, height);
+                            expected += u64::from(cells.cols >= 2 && cells.rows >= 2);
+                        }
+                    }
+                }
+                assert_eq!(guess_grid_work(&image, &candidates, search), expected);
+            }
+        }
+    }
+    let ticks = std::cell::RefCell::new(Vec::new());
+    let result = guess_grid_with(
+        &image,
+        &[0, 2, 3],
+        true,
+        &|done, total| ticks.borrow_mut().push((done, total)),
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+    assert_eq!(*ticks.borrow(), [(0, 4), (1, 4), (2, 4), (3, 4), (4, 4)]);
+    assert_eq!(result, guess_grid(&image, &[0, 2, 3], true));
+    assert_eq!(
+        result.scores,
+        vec![GridScore {
+            tile: 2,
+            offset: (0, 0),
+            unique: 1,
+            total: 6,
+            ratio: 1.0 / 6.0,
+        }]
+    );
+    assert_eq!(guess_grid_work(&RgbaImage::new(0, 0), &[2], true), 0);
+}
+
+#[test]
+fn guess_cancellation_discards_partial_scores() {
+    let image = RgbaImage::new(12, 12);
+    let cancel = AtomicBool::new(true);
+    assert!(guess_grid_with(&image, &[2], true, &|_, _| {}, &cancel).is_none());
+    cancel.store(false, Ordering::Relaxed);
+    let visited = std::cell::Cell::new(0);
+    let result = guess_grid_with(
+        &image,
+        &[2, 3],
+        true,
+        &|done, _| {
+            visited.set(done);
+            if done == 1 {
+                cancel.store(true, Ordering::Relaxed);
+            }
+        },
+        &cancel,
+    );
+    assert!(result.is_none());
+    assert_eq!(visited.get(), 1);
+}
+
+#[test]
+fn dedupe_groups_eight_transforms_and_rebuild_checks_them() {
+    let tile = patterned_tiles().remove(0);
+    let variants: Vec<_> = Transform::ALL
+        .into_iter()
+        .map(|t| tile.transformed(t))
+        .collect();
+    let (image, grid) = tiled(&variants, 8, 1, &[0, 1, 2, 3, 4, 5, 6, 7], [0, 0], 0);
+    let mut grouped = dedupe_with(&image, &grid, true);
+    assert_eq!(grouped.unique, vec![tile]);
+    assert_eq!(grouped.map, Transform::ALL.map(|t| (0, t)));
+    assert_eq!(rebuild_matches(&image, &grid, &grouped), Ok(()));
+    grouped.map[1].1 = Transform::IDENTITY;
+    assert_eq!(rebuild_matches(&image, &grid, &grouped), Err(vec![(1, 0)]));
+    let plain = dedupe_with(&image, &grid, false);
+    assert_eq!(plain.unique.len(), 8);
+    assert_eq!(
+        plain.map,
+        (0..8).map(|i| (i, Transform::IDENTITY)).collect::<Vec<_>>()
+    );
+    let (image, grid) = tiled(&[solid(2, 2, [1, 2, 3, 255])], 2, 1, &[0, 0], [0, 0], 0);
+    assert_eq!(
+        dedupe_with(&image, &grid, true).map,
+        [(0, Transform::IDENTITY); 2]
+    );
+}
+
+#[test]
+fn analysis_progress_and_cancellation_match_wrappers() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let image = RgbaImage::new(6, 7);
+    let grid = Grid {
+        tile: 2,
+        offset: [0, 0],
+        spacing: 0,
+    };
+    let cancel = AtomicBool::new(false);
+    let calls = std::cell::RefCell::new(Vec::new());
+    assert_eq!(find_objects_work(&image), 7);
+    let objects = find_objects_with(
+        &image,
+        Background::Transparent,
+        1,
+        &|d, t| calls.borrow_mut().push((d, t)),
+        &cancel,
+    )
+    .unwrap();
+    assert_eq!(objects, find_objects(&image, Background::Transparent, 1));
+    assert_eq!(calls.borrow().first(), Some(&(0, 7)));
+    assert_eq!(calls.borrow().last(), Some(&(7, 7)));
+    assert_eq!(dedupe_work(&image, &grid), 9);
+    calls.borrow_mut().clear();
+    let d = dedupe_progress(
+        &image,
+        &grid,
+        true,
+        &|d, t| calls.borrow_mut().push((d, t)),
+        &cancel,
+    )
+    .unwrap();
+    assert_eq!(d, dedupe_with(&image, &grid, true));
+    assert_eq!(calls.borrow().first(), Some(&(0, 9)));
+    assert_eq!(calls.borrow().last(), Some(&(9, 9)));
+    calls.borrow_mut().clear();
+    assert_eq!(
+        rebuild_matches_with(
+            &image,
+            &grid,
+            &d,
+            &|d, t| calls.borrow_mut().push((d, t)),
+            &cancel
+        ),
+        Some(rebuild_matches(&image, &grid, &d))
+    );
+    assert_eq!(calls.borrow().first(), Some(&(0, 9)));
+    assert_eq!(calls.borrow().last(), Some(&(9, 9)));
+
+    // Cancelled after the first cell or row, each loop has to stop right there rather
+    // than run to its end and drop the result only at the final check.
+    fn stops_after_first_step(run: impl Fn(&dyn Fn(u64, u64), &AtomicBool) -> bool) -> bool {
+        let cancel = AtomicBool::new(false);
+        let last = std::cell::Cell::new(0);
+        let progress = |done, _| {
+            last.set(done);
+            if done == 1 {
+                cancel.store(true, Ordering::Relaxed);
+            }
+        };
+        run(&progress, &cancel) && last.get() == 1
+    }
+    assert!(stops_after_first_step(|progress, cancel| {
+        dedupe_progress(&image, &grid, false, progress, cancel).is_none()
+    }));
+    assert!(stops_after_first_step(|progress, cancel| {
+        rebuild_matches_with(&image, &grid, &d, progress, cancel).is_none()
+    }));
+    assert!(stops_after_first_step(|progress, cancel| {
+        find_objects_with(&image, Background::Transparent, 1, progress, cancel).is_none()
+    }));
+
+    cancel.store(true, Ordering::Relaxed);
+    assert!(dedupe_progress(&image, &grid, false, &|_, _| {}, &cancel).is_none());
+    assert!(rebuild_matches_with(&image, &grid, &d, &|_, _| {}, &cancel).is_none());
+    assert!(find_objects_with(&image, Background::Transparent, 1, &|_, _| {}, &cancel).is_none());
+}
+
+#[test]
+fn flood_fill_cancels_inside_a_large_object() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    };
+    use std::time::Duration;
+    let mut image = RgbaImage::new(2048, 2048);
+    image.fill_rect(0, 0, 2048, 2048, [1, 2, 3, 255]);
+    let cancel = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&cancel);
+    let (started, ready) = mpsc::channel();
+    let (finished, result) = mpsc::channel();
+    std::thread::spawn(move || {
+        let value = find_objects_with(
+            &image,
+            Background::Transparent,
+            1,
+            &|done, _| {
+                if done == 0 {
+                    let _ = started.send(());
+                }
+            },
+            &flag,
+        );
+        let _ = finished.send(value);
+    });
+    ready.recv_timeout(Duration::from_secs(1)).unwrap();
+    std::thread::sleep(Duration::from_millis(30));
+    cancel.store(true, Ordering::Relaxed);
+    assert_eq!(result.recv_timeout(Duration::from_secs(1)).unwrap(), None);
 }

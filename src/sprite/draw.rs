@@ -8,11 +8,11 @@ const HEADER: &str = "#version 300 es\nprecision mediump float;\n";
 const VERT_BODY: &str = r#"
 layout(location = 0) in vec2 a_pos;
 uniform vec4 u_dest;
-uniform vec4 u_uv;
+uniform vec2 u_uv[4];
 out vec2 v_uv;
 void main() {
     gl_Position = vec4(u_dest.xy + a_pos * u_dest.zw, 0.0, 1.0);
-    v_uv = mix(u_uv.xy, u_uv.zw, a_pos);
+    v_uv = u_uv[gl_VertexID];
 }
 "#;
 const FRAG_BODY: &str = r#"
@@ -94,7 +94,7 @@ impl SpriteQuad {
                 vao,
                 vbo,
                 u_dest: gl.get_uniform_location(program, "u_dest"),
-                u_uv: gl.get_uniform_location(program, "u_uv"),
+                u_uv: gl.get_uniform_location(program, "u_uv[0]"),
                 u_tex: gl.get_uniform_location(program, "u_tex"),
             };
             let vertices: [f32; 8] = [0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0];
@@ -114,7 +114,12 @@ impl SpriteQuad {
         }
     }
 
-    pub fn draw(&self, texture: glow::Texture, dest: [f32; 4], uv: [f32; 4]) -> Result<(), String> {
+    pub fn draw(
+        &self,
+        texture: glow::Texture,
+        dest: [f32; 4],
+        corners: [[f32; 2]; 4],
+    ) -> Result<(), String> {
         let gl = &self.gl;
         // SAFETY: frame restored this owner's context; texture and buffers are live.
         unsafe {
@@ -130,7 +135,7 @@ impl SpriteQuad {
             gl.use_program(Some(self.program));
             gl.bind_vertex_array(Some(self.vao));
             gl.uniform_4_f32(self.u_dest.as_ref(), dest[0], dest[1], dest[2], dest[3]);
-            gl.uniform_4_f32(self.u_uv.as_ref(), uv[0], uv[1], uv[2], uv[3]);
+            gl.uniform_2_f32_slice(self.u_uv.as_ref(), corners.as_flattened());
             gl.uniform_1_i32(self.u_tex.as_ref(), 0);
             gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
             gl.disable(glow::BLEND);
@@ -153,6 +158,147 @@ impl Drop for SpriteQuad {
             self.gl.delete_buffer(self.vbo);
             self.gl.delete_vertex_array(self.vao);
             self.gl.delete_program(self.program);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        raster::RgbaImage,
+        sprite::{Transform, texture::SheetTexture},
+    };
+
+    #[test]
+    #[ignore = "requires a display; run under Xvfb"]
+    fn transformed_pixels_match_gpu_readback() {
+        // SDL initialization belongs to one OS thread per process. The texture
+        // test initializes SDL in this harness, so only our child may create it.
+        if !crate::test_support::in_child_process(
+            "sprite::draw::tests::transformed_pixels_match_gpu_readback",
+            Some("RN_SPRITE_QUAD_GL_CHILD"),
+            true,
+            None,
+        ) {
+            return;
+        }
+
+        const N: u32 = 4;
+        let mut image = RgbaImage::new(N, N);
+        // Red labels are 1..=16 in screen row order; every texel is distinct,
+        // nonblack and opaque so SpriteQuad's blending preserves exact bytes.
+        for y in 0..N {
+            for x in 0..N {
+                image.set_pixel(
+                    x,
+                    y,
+                    [
+                        (1 + y * N + x) as u8,
+                        40 + 60 * x as u8,
+                        40 + 60 * y as u8,
+                        255,
+                    ],
+                );
+            }
+        }
+        let variants: std::collections::HashSet<_> = Transform::ALL
+            .into_iter()
+            .map(|t| image.transformed(t).pixels)
+            .collect();
+        assert_eq!(variants.len(), 8, "fixture must distinguish all transforms");
+
+        // Declaration order keeps SDL/window/context alive through every GL
+        // object drop, including assertion unwinding. No other thread uses GL.
+        let fixture = crate::test_support::HiddenGl::new("sprite quad readback test");
+        let gl = std::rc::Rc::clone(&fixture.gl);
+        let sheet = SheetTexture::upload(&gl, &image).unwrap();
+        let quad = SpriteQuad::new(&gl).unwrap();
+
+        // SAFETY: all calls use the current context on this thread. The FBO's
+        // separate renderbuffer cannot feed back into the sampled sheet texture.
+        unsafe {
+            let target = gl.create_renderbuffer().unwrap();
+            gl.bind_renderbuffer(glow::RENDERBUFFER, Some(target));
+            gl.renderbuffer_storage(glow::RENDERBUFFER, glow::RGBA8, N as i32, N as i32);
+            gl.bind_renderbuffer(glow::RENDERBUFFER, None);
+            let fbo = gl.create_framebuffer().unwrap();
+            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(fbo));
+            gl.framebuffer_renderbuffer(
+                glow::FRAMEBUFFER,
+                glow::COLOR_ATTACHMENT0,
+                glow::RENDERBUFFER,
+                Some(target),
+            );
+            assert_eq!(
+                gl.check_framebuffer_status(glow::FRAMEBUFFER),
+                glow::FRAMEBUFFER_COMPLETE
+            );
+            gl.viewport(0, 0, N as i32, N as i32);
+            gl.clear_color(0.0, 0.0, 0.0, 1.0);
+            gl.bind_buffer(glow::PIXEL_PACK_BUFFER, None);
+            gl.pixel_store_i32(glow::PACK_ALIGNMENT, 1);
+            assert_eq!(gl.get_error(), glow::NO_ERROR, "FBO setup");
+
+            for transform in Transform::ALL {
+                gl.clear(glow::COLOR_BUFFER_BIT);
+                // Same sign convention as Playback::draw: a_pos.y=0 is the
+                // screen top, hence negative dest height. Pixel centers align
+                // with texel centers at this 1:1 size (NEAREST sheet filtering).
+                quad.draw(
+                    sheet.raw(),
+                    [-1.0, 1.0, 2.0, -2.0],
+                    transform.uv_corners([0.0, 0.0], [1.0, 1.0]),
+                )
+                .unwrap();
+                let mut pixels = vec![0; (N * N * 4) as usize];
+                gl.read_pixels(
+                    0,
+                    0,
+                    N as i32,
+                    N as i32,
+                    glow::RGBA,
+                    glow::UNSIGNED_BYTE,
+                    glow::PixelPackData::Slice(Some(&mut pixels)),
+                );
+                assert_eq!(gl.get_error(), glow::NO_ERROR, "readback {transform:?}");
+                let expected = image.transformed(transform);
+                for row in 0..N {
+                    for x in 0..N {
+                        let offset = ((row * N + x) * 4) as usize;
+                        // GL row zero is the screen bottom, while transformed
+                        // images start at the top: explicitly reverse y.
+                        assert_eq!(
+                            pixels[offset..offset + 4],
+                            expected.pixel(x, N - 1 - row),
+                            "{transform:?}, readback ({x}, {row})"
+                        );
+                    }
+                }
+
+                // Independent handwritten oracles, not derived from source()
+                // or uv_corners(). Input screen rows are [1 2 3 4] through
+                // [13 14 15 16]. Clockwise 90 has top row [13 9 5 1]; flipping
+                // first then rotating has top row [16 12 8 4]. These literals
+                // list GL readback rows, bottom first, and catch a shared CPU/UV
+                // mistake such as swapping source()'s 90 and 270 branches.
+                let handwritten = match (transform.flip_x(), transform.rotation()) {
+                    (false, 90) => Some([16, 12, 8, 4, 15, 11, 7, 3, 14, 10, 6, 2, 13, 9, 5, 1]),
+                    (true, 90) => Some([13, 9, 5, 1, 14, 10, 6, 2, 15, 11, 7, 3, 16, 12, 8, 4]),
+                    _ => None,
+                };
+                if let Some(labels) = handwritten {
+                    let actual: Vec<_> = pixels.as_chunks::<4>().0.iter().map(|p| p[0]).collect();
+                    assert_eq!(actual, labels, "handwritten {transform:?}");
+                }
+            }
+
+            gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+            gl.delete_framebuffer(fbo);
+            gl.delete_renderbuffer(target);
+            drop(quad);
+            drop(sheet);
+            assert_eq!(gl.get_error(), glow::NO_ERROR, "GL cleanup");
         }
     }
 }

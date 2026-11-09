@@ -1,30 +1,35 @@
-use super::{OpenSheet, SheetSource, SpriteLibrary, view};
+use super::log;
+use super::{Action, OpenSheet, SheetEditor, SheetSource, view};
 use crate::{
-    raster::{self, Dedupe, RgbaImage},
+    raster::{self, Dedupe},
     sprite::{
         Grid, SpriteSheet,
         store::{self, StoreError},
+        tilemap::{self, Cell, TileMap},
     },
 };
 use dear_imgui_rs::{TextureId, Ui};
 use std::{
-    cell::RefCell,
     fs, io,
     path::{Component, Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
+    sync::atomic::AtomicBool,
 };
-
-thread_local! { static STATE: RefCell<ExtractState> = RefCell::new(ExtractState::default()); }
 
 struct Analysis {
     dedupe: Dedupe,
     rebuild: Result<(), Vec<(u32, u32)>>,
+    grouped: bool,
 }
 impl Analysis {
-    fn new(image: &RgbaImage, grid: &Grid) -> Self {
-        let dedupe = raster::dedupe(image, grid);
+    #[cfg(test)]
+    fn new(image: &raster::RgbaImage, grid: &Grid, grouped: bool) -> Self {
+        let dedupe = raster::dedupe_with(image, grid, grouped);
         let rebuild = raster::rebuild_matches(image, grid, &dedupe);
-        Self { dedupe, rebuild }
+        Self {
+            dedupe,
+            rebuild,
+            grouped,
+        }
     }
     fn report(&self) -> String {
         let d = &self.dedupe;
@@ -43,16 +48,24 @@ impl Analysis {
             d.rows,
             u64::from(d.cols) * u64::from(d.rows),
             d.unique.len()
-        )
+        ) + if self.grouped {
+            " (rotations/flips grouped)"
+        } else {
+            ""
+        }
     }
 }
-struct ExtractState {
+pub(super) struct ExtractState {
     source: Option<(TextureId, String)>,
     grid: Option<Grid>,
     columns: u32,
+    group_transforms: bool,
     output: String,
     analysis: Option<Analysis>,
     written: Option<PathBuf>,
+    job: Option<super::job::Job<Analysis>>,
+    job_grid: Option<Grid>,
+    job_grouped: bool,
 }
 impl Default for ExtractState {
     fn default() -> Self {
@@ -60,16 +73,23 @@ impl Default for ExtractState {
             source: None,
             grid: None,
             columns: raster::DEFAULT_SHEET_COLUMNS,
+            group_transforms: false,
             output: String::new(),
             analysis: None,
             written: None,
+            job: None,
+            job_grid: None,
+            job_grouped: false,
         }
     }
 }
 impl ExtractState {
-    fn sync(&mut self, sheet: &OpenSheet, checkout: &Path) {
+    /// Returns whether a running Analyze was dropped along with the old result.
+    fn sync(&mut self, sheet: &OpenSheet, checkout: &Path) -> bool {
+        let running = self.job.is_some();
         let source = (sheet.imgui_id, source_stem(&sheet.source));
         if self.source.as_ref() != Some(&source) {
+            self.job = None;
             self.output = default_output(&sheet.source, checkout)
                 .to_string_lossy()
                 .into_owned();
@@ -78,20 +98,66 @@ impl ExtractState {
             self.source = Some(source);
         }
         if self.grid != Some(sheet.meta.grid) {
+            self.job = None;
             self.analysis = None;
             self.written = None;
             self.grid = Some(sheet.meta.grid);
         }
+        running && self.job.is_none()
+    }
+    fn cancel_job(&mut self, log: &mut log::SheetLog) {
+        if self.job.take().is_some() {
+            log::append(log, "Analyze cancelled".into());
+        }
+    }
+    fn set_group_transforms(&mut self, grouped: bool) {
+        if self.group_transforms != grouped {
+            self.group_transforms = grouped;
+            self.invalidate();
+        }
+    }
+    pub(super) fn invalidate(&mut self) {
+        self.analysis = None;
+        self.written = None;
+        self.job = None;
     }
 }
 
-pub(super) fn invalidate() {
-    STATE.with(|state| {
-        let mut state = state.borrow_mut();
-        state.analysis = None;
-        state.written = None;
-    });
+impl SheetEditor {
+    pub(super) fn cancel_analysis(&mut self) {
+        self.extract.cancel_job(&mut self.log);
+    }
+    pub(super) fn poll_analysis(&mut self) {
+        if self.extract.job.is_some()
+            && (self.extract.job_grid != Some(self.sheet.meta.grid)
+                || self.extract.job_grouped != self.extract.group_transforms)
+        {
+            self.cancel_analysis();
+            self.extract.invalidate();
+            return;
+        }
+        let Some(job) = &mut self.extract.job else {
+            return;
+        };
+        match job.poll() {
+            Ok(Some(analysis)) => {
+                self.extract.job = None;
+                self.log(format!("Analyze completed (100%): {}", analysis.report()));
+                self.extract.analysis = Some(analysis);
+            }
+            Ok(None) => {
+                if let Some(percent) = job.next_step() {
+                    self.log(format!("Analyzing... {percent}%"));
+                }
+            }
+            Err(error) => {
+                self.extract.job = None;
+                self.log(error);
+            }
+        }
+    }
 }
+
 pub(super) fn source_stem(source: &SheetSource) -> String {
     match source {
         SheetSource::File(path) => path
@@ -101,14 +167,15 @@ pub(super) fn source_stem(source: &SheetSource) -> String {
         SheetSource::Memory { name } => name.clone(),
     }
 }
+const LOCAL_ASSETS: &str = "assets/splites";
+pub(super) fn default_directory(source: &SheetSource, checkout: &Path) -> PathBuf {
+    checkout.join(LOCAL_ASSETS).join(source_stem(source))
+}
 pub(super) fn default_output(source: &SheetSource, checkout: &Path) -> PathBuf {
     let stem = source_stem(source);
-    checkout
-        .join("assets/splites")
-        .join(&stem)
-        .join(format!("{stem}-tileset.png"))
+    default_directory(source, checkout).join(format!("{stem}-tileset.png"))
 }
-fn absolute_output(path: &Path, checkout: &Path) -> Result<PathBuf, StoreError> {
+pub(super) fn absolute_output(path: &Path, checkout: &Path) -> Result<PathBuf, StoreError> {
     if path.components().any(|c| matches!(c, Component::ParentDir)) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -130,12 +197,43 @@ fn absolute_output(path: &Path, checkout: &Path) -> Result<PathBuf, StoreError> 
     }
     Ok(path)
 }
-pub(super) fn inside_local_assets(path: &Path, checkout: &Path) -> bool {
-    absolute_output(path, checkout)
-        .is_ok_and(|path| path.starts_with(checkout.join("assets/splites")))
+/// Refuses a write over a PNG any editor holds: its window would keep the old
+/// image, and Load of that path only focuses it. A symlink or alias resolves first.
+pub(super) fn refuse_open_output(output: &Path, open_files: &[PathBuf]) -> Result<(), String> {
+    let resolved = output
+        .canonicalize()
+        .unwrap_or_else(|_| output.to_path_buf());
+    if open_files.contains(&resolved) {
+        return Err(format!(
+            "image {} is already open; choose another image path",
+            output.display()
+        )
+        .replace(['\n', '\r'], " "));
+    }
+    Ok(())
 }
-pub(super) fn ensure_output_dir(path: &Path, checkout: &Path) -> Result<PathBuf, StoreError> {
-    let output = absolute_output(path, checkout)?;
+/// Validates an output and checks open editors without creating directories.
+pub(super) fn checked_output(
+    path: &Path,
+    checkout: &Path,
+    open_files: &[PathBuf],
+) -> Result<PathBuf, String> {
+    let output = absolute_output(path, checkout).map_err(|e| e.to_string())?;
+    refuse_open_output(&output, open_files)?;
+    Ok(output)
+}
+pub(super) fn inside_local_assets(path: &Path, checkout: &Path) -> bool {
+    absolute_output(path, checkout).is_ok_and(|path| path.starts_with(checkout.join(LOCAL_ASSETS)))
+}
+/// Prepares the parent of an already validated, absolute output path.
+pub(super) fn create_output_dir(output: &Path, checkout: &Path) -> Result<(), StoreError> {
+    debug_assert!(
+        output.is_absolute()
+            && !output
+                .components()
+                .any(|c| matches!(c, Component::ParentDir)),
+        "create_output_dir takes an output from absolute_output"
+    );
     let parent = output
         .parent()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "output needs a parent"))?;
@@ -165,7 +263,7 @@ pub(super) fn ensure_output_dir(path: &Path, checkout: &Path) -> Result<PathBuf,
         }
     }
     if !parent.is_dir() {
-        if !inside_local_assets(&output, checkout) {
+        if !output.starts_with(checkout.join(LOCAL_ASSETS)) {
             return Err(io::Error::new(
                 io::ErrorKind::NotFound,
                 "output directory does not exist; only assets/splites directories are created",
@@ -174,7 +272,7 @@ pub(super) fn ensure_output_dir(path: &Path, checkout: &Path) -> Result<PathBuf,
         }
         fs::create_dir_all(parent)?;
     }
-    Ok(output)
+    Ok(())
 }
 pub(super) fn path_note(path: &Path, checkout: &Path) -> &'static str {
     if path.starts_with(checkout) && !inside_local_assets(path, checkout) {
@@ -189,6 +287,8 @@ struct ExtractPlan {
     checkout: PathBuf,
     png: Vec<u8>,
     sidecar_path: PathBuf,
+    map_path: PathBuf,
+    map_json: String,
     sheet: SpriteSheet,
     report: String,
 }
@@ -198,6 +298,7 @@ fn plan_from_analysis(
     columns: u32,
     output: &Path,
     checkout: &Path,
+    source_stem: &str,
 ) -> Result<ExtractPlan, String> {
     if analysis.dedupe.unique.is_empty() {
         return Err("no full grid cells to extract".into());
@@ -220,7 +321,33 @@ fn plan_from_analysis(
     sheet
         .validate_bounds(image.width, image.height)
         .map_err(|e| e.join("; "))?;
+    let map_path = tilemap::map_path_for(&output, source_stem);
+    if map_path.parent() != output.parent()
+        || !store::image_path_is_safe(&format!("{source_stem}.map.json"))
+    {
+        return Err("invalid source name for map file".into());
+    }
+    let map = TileMap {
+        version: 1,
+        tileset: name.to_owned(),
+        tile: grid.tile,
+        cols: analysis.dedupe.cols,
+        rows: analysis.dedupe.rows,
+        cells: analysis
+            .dedupe
+            .map
+            .iter()
+            .map(|&(index, transform)| Cell {
+                index,
+                flip_x: transform.flip_x(),
+                rotation: transform.rotation(),
+            })
+            .collect(),
+    };
+    map.validate_against(image.width, image.height)?;
     Ok(ExtractPlan {
+        map_path,
+        map_json: tilemap::to_json(&map),
         sidecar_path: store::sidecar_for(&output),
         sheet,
         output,
@@ -231,179 +358,211 @@ fn plan_from_analysis(
 }
 #[cfg(test)]
 fn plan_extract(
-    image: &RgbaImage,
+    image: &raster::RgbaImage,
     grid: &Grid,
     columns: u32,
     output: &Path,
     checkout: &Path,
 ) -> Result<ExtractPlan, String> {
-    plan_from_analysis(&Analysis::new(image, grid), grid, columns, output, checkout)
+    plan_from_analysis(
+        &Analysis::new(image, grid, false),
+        grid,
+        columns,
+        output,
+        checkout,
+        "map",
+    )
 }
 
-static NEXT_STAGE: AtomicU64 = AtomicU64::new(0);
-struct Staged(PathBuf);
-impl Drop for Staged {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.0);
-    }
-}
 fn save_sidecar_new(path: &Path, sheet: &SpriteSheet) -> Result<(), StoreError> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "sidecar needs a parent"))?;
-    let name = path.file_name().unwrap();
-    let stage = loop {
-        let mut name = name.to_os_string();
-        name.push(format!(
-            ".tmp-sidecar-{}-{}",
-            std::process::id(),
-            NEXT_STAGE.fetch_add(1, Ordering::Relaxed)
-        ));
-        let candidate = parent.join(name);
-        match fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&candidate)
-        {
-            Ok(file) => {
-                drop(file);
-                break Staged(candidate);
-            }
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
-            Err(e) => return Err(e.into()),
+    sheet.validate().map_err(StoreError::Invalid)?;
+    store::publish_new(path, store::to_json(sheet).as_bytes())
+}
+fn write_plan(plan: &ExtractPlan, open_files: &[PathBuf]) -> Result<String, String> {
+    let output = checked_output(&plan.output, &plan.checkout, open_files)?;
+    create_output_dir(&output, &plan.checkout).map_err(|e| e.to_string())?;
+    store::write_atomic(&output, &plan.png).map_err(|e| format!("PNG not written: {e}"))?;
+    // PNG and map are regenerated artifacts, replaced even when edited metadata exists.
+    // The three files are not a transaction: after any JSON error the PNG remains.
+    let sidecar = match save_sidecar_new(&plan.sidecar_path, &plan.sheet) {
+        Ok(()) => format!("sidecar written: {}", plan.sidecar_path.display()),
+        Err(error) if matches!(&error,StoreError::Io(e) if e.kind()==io::ErrorKind::AlreadyExists) => {
+            "sidecar not written: sidecar exists; remove it first".into()
+        }
+        Err(error) => format!("sidecar not written: {error}"),
+    };
+    let map_write = match fs::symlink_metadata(&plan.map_path) {
+        Ok(meta) if meta.file_type().is_symlink() => Err("map output is a symlink".to_string()),
+        Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e.to_string()),
+        _ => {
+            store::write_atomic(&plan.map_path, plan.map_json.as_bytes()).map_err(|e| e.to_string())
         }
     };
-    store::save(&stage.0, sheet)?;
-    // Hard-link publication is atomic and refuses an existing destination. Unlike
-    // rename, it cannot overwrite metadata created between existence check/save.
-    fs::hard_link(&stage.0, path)?;
-    Ok(())
-}
-fn write_plan(plan: &ExtractPlan) -> Result<String, String> {
-    let output = ensure_output_dir(&plan.output, &plan.checkout).map_err(|e| e.to_string())?;
-    store::write_atomic(&output, &plan.png).map_err(|e| format!("PNG not written: {e}"))?;
-    // PNG is a regenerated artifact and is replaced even when edited metadata exists.
-    // These two files are not a transaction: after any JSON error the PNG remains.
-    if let Err(error) = save_sidecar_new(&plan.sidecar_path, &plan.sheet) {
-        let reason = if matches!(&error,StoreError::Io(e) if e.kind()==io::ErrorKind::AlreadyExists)
-        {
-            "sidecar exists; remove it first".into()
-        } else {
-            error.to_string()
-        };
-        return Err(format!(
-            "PNG written: {}; sidecar not written: {reason}{}",
-            output.display(),
-            path_note(&output, &plan.checkout)
-        ));
-    }
-    Ok(format!(
-        "Wrote {} and {}{}",
+    let map = match map_write {
+        Ok(()) => format!("map written: {}", plan.map_path.display()),
+        Err(error) => format!("map not written: {error}"),
+    };
+    let message = format!(
+        "PNG written: {}; {sidecar}; {map}{}",
         output.display(),
-        plan.sidecar_path.display(),
         path_note(&output, &plan.checkout)
-    ))
+    );
+    if sidecar.starts_with("sidecar not") || map.starts_with("map not") {
+        Err(message)
+    } else {
+        Ok(message)
+    }
 }
 
-pub(super) fn tab(library: &mut SpriteLibrary, ui: &Ui) {
+fn analysis_work(image: &raster::RgbaImage, grid: &Grid) -> u64 {
+    raster::dedupe_work(image, grid).saturating_mul(2)
+}
+/// Dedupe, then the rebuild check, reported as one run of `analysis_work` steps:
+/// the rebuild pass continues from where dedupe stopped instead of restarting at 0.
+fn analyze(
+    image: &raster::RgbaImage,
+    grid: &Grid,
+    grouped: bool,
+    progress: &dyn Fn(u64, u64),
+    cancel: &AtomicBool,
+) -> Option<Analysis> {
+    let work = raster::dedupe_work(image, grid);
+    let total = analysis_work(image, grid);
+    let dedupe = raster::dedupe_progress(
+        image,
+        grid,
+        grouped,
+        &|done, _| progress(done, total),
+        cancel,
+    )?;
+    let rebuild = raster::rebuild_matches_with(
+        image,
+        grid,
+        &dedupe,
+        &|done, _| progress(work + done, total),
+        cancel,
+    )?;
+    Some(Analysis {
+        dedupe,
+        rebuild,
+        grouped,
+    })
+}
+fn start_analysis(state: &mut ExtractState, sheet: &OpenSheet, log: &mut log::SheetLog) {
+    if state.job.is_some() {
+        return;
+    }
+    let image = sheet.image.clone();
+    let grid = sheet.meta.grid;
+    let grouped = state.group_transforms;
+    match super::job::Job::start(
+        "sprite-analyze",
+        "Analyze",
+        analysis_work(&image, &grid),
+        move |progress, cancel| analyze(&image, &grid, grouped, progress, cancel),
+    ) {
+        Ok(job) => {
+            state.analysis = None;
+            state.written = None;
+            state.job_grid = Some(grid);
+            state.job_grouped = grouped;
+            state.job = Some(job);
+            log::append(log, "Analyze started (0%)".into());
+        }
+        Err(error) => log::append(log, error),
+    }
+}
+
+pub(super) fn tab(editor: &mut SheetEditor, ui: &Ui, open_files: &[PathBuf]) {
     let Some(_tab) = ui.tab_item("Extract") else {
         return;
     };
-    let Some(sheet) = &library.sheet else { return };
+    let SheetEditor {
+        sheet,
+        extract: state,
+        log,
+        pending,
+        ..
+    } = editor;
     let checkout = match std::env::current_dir() {
         Ok(path) => path,
         Err(e) => {
-            library.status = e.to_string();
+            log::append(log, e.to_string());
             return;
         }
     };
-    STATE.with(|state| {
-        let mut state = state.borrow_mut();
-        state.sync(sheet, &checkout);
-        let mut changed = view::input_u32(ui, "Columns", &mut state.columns, 1);
-        changed |= ui.input_text("Output", &mut state.output).build();
-        if changed {
-            state.written = None;
+    if state.sync(sheet, &checkout) {
+        log::append(log, "Analyze cancelled".into());
+    }
+    let mut changed = view::input_u32(ui, "Columns", &mut state.columns, 1);
+    changed |= ui.input_text("Output", &mut state.output).build();
+    if changed {
+        state.written = None;
+    }
+    let mut grouped = state.group_transforms;
+    if ui.checkbox("Group rotations/flips", &mut grouped) {
+        state.cancel_job(log);
+        state.set_group_transforms(grouped);
+    }
+    if let Some(job) = &state.job {
+        if view::job_progress(ui, job.fraction(), "Analyzing", "Cancel Analyze") {
+            state.cancel_job(log);
         }
-        if ui.button("Analyze") {
-            // Synchronous, explicit action. Large sheets pause this dev tool.
-            state.analysis = Some(Analysis::new(&sheet.image, &sheet.meta.grid));
-            state.written = None;
+    } else if ui.button("Analyze") {
+        start_analysis(state, sheet, log);
+    }
+    if let Some(analysis) = &state.analysis {
+        let report = analysis.report();
+        if analysis.rebuild.is_err() {
+            ui.text_colored([1.0, 0.3, 0.3, 1.0], &report);
+        } else {
+            ui.text_wrapped(&report);
         }
-        if let Some(analysis) = &state.analysis {
-            let report = analysis.report();
-            if analysis.rebuild.is_err() {
-                ui.text_colored([1.0, 0.3, 0.3, 1.0], &report);
-            } else {
-                ui.text_wrapped(&report);
-            }
-        }
-        let ready = state
+    }
+    let ready = state.job.is_none()
+        && state
             .analysis
             .as_ref()
             .is_some_and(|a| !a.dedupe.unique.is_empty());
-        {
-            let _disabled = ui.begin_disabled_with_cond(!ready);
-            if ui.button("Write tileset") && ready {
-                state.written = None;
-                let analysis = state.analysis.as_ref().unwrap();
-                match plan_from_analysis(
-                    analysis,
-                    &sheet.meta.grid,
-                    state.columns,
-                    Path::new(&state.output),
-                    &checkout,
-                )
-                .and_then(|plan| {
-                    write_plan(&plan).map(|message| format!("{message}; {}", plan.report))
-                }) {
-                    Ok(message) => {
-                        library.status = message;
-                        state.written = absolute_output(Path::new(&state.output), &checkout).ok();
-                    }
-                    Err(error) => library.status = error,
+    {
+        let _disabled = ui.begin_disabled_with_cond(!ready);
+        if ui.button("Write tileset") && ready {
+            state.written = None;
+            let analysis = state.analysis.as_ref().unwrap();
+            match plan_from_analysis(
+                analysis,
+                &sheet.meta.grid,
+                state.columns,
+                Path::new(&state.output),
+                &checkout,
+                &source_stem(&sheet.source),
+            )
+            .and_then(|plan| {
+                write_plan(&plan, open_files).map(|message| format!("{message}; {}", plan.report))
+            }) {
+                Ok(message) => {
+                    log::append(log, message);
+                    state.written = absolute_output(Path::new(&state.output), &checkout).ok();
                 }
+                Err(error) => log::append(log, error),
             }
         }
-        if let Some(path) = &state.written
-            && ui.button("Open result")
-        {
-            library.pending.push(super::Action::Load(path.clone()));
-        }
-    });
+    }
+    if let Some(path) = &state.written
+        && ui.button("Open result")
+    {
+        pending.push(Action::Load(path.clone()));
+    }
 }
 
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
+    use crate::raster::RgbaImage;
     use std::io::Read;
-    pub(crate) struct Temp(pub PathBuf);
-    impl Temp {
-        pub(crate) fn new() -> Self {
-            let path = std::env::temp_dir().join(format!(
-                "rn-extract-{}-{}",
-                std::process::id(),
-                NEXT_STAGE.fetch_add(1, Ordering::Relaxed)
-            ));
-            fs::create_dir(&path).unwrap();
-            Self(path)
-        }
-    }
-    impl Drop for Temp {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
     pub(crate) fn memory_sheet() -> OpenSheet {
         let (image, _) = crate::sprite::example();
-        let meta = SpriteSheet::new_for(
-            "map.png",
-            Grid {
-                tile: 16,
-                offset: [0, 0],
-                spacing: 0,
-            },
-        );
+        let meta = SpriteSheet::new_for("map.png", Grid::DEFAULT);
         OpenSheet {
             source: SheetSource::Memory { name: "map".into() },
             image,
@@ -429,7 +588,7 @@ pub(super) mod tests {
         }
         (image, grid)
     }
-    fn assert_no_temps(root: &Path) {
+    pub(crate) fn assert_no_temps(root: &Path) {
         for entry in fs::read_dir(root).unwrap() {
             let entry = entry.unwrap();
             assert!(
@@ -444,20 +603,13 @@ pub(super) mod tests {
     }
     #[test]
     fn extraction_plan_has_unique_tiles_empty_metadata_and_diagnostics() {
-        let temp = Temp::new();
+        let temp = crate::test_support::TempDir::new("extract");
         for (spacing, offset) in [(0, [0, 0]), (1, [2, 0])] {
             let (image, grid) = map(spacing, offset);
             let plan = plan_extract(&image, &grid, 16, &temp.0.join("map.png"), &temp.0).unwrap();
             let png = RgbaImage::from_png(&plan.png).unwrap();
             assert_eq!((png.width, png.height), (48, 16));
-            assert_eq!(
-                plan.sheet.grid,
-                Grid {
-                    tile: 16,
-                    offset: [0, 0],
-                    spacing: 0
-                }
-            );
+            assert_eq!(plan.sheet.grid, Grid::DEFAULT);
             assert_eq!(plan.sheet.image, "map.png");
             assert!(
                 plan.sheet.tiles.is_empty()
@@ -469,19 +621,15 @@ pub(super) mod tests {
                 png,
                 raster::build_sheet(&raster::dedupe(&image, &grid).unique, 16, 16)
             );
-            let mut analysis = Analysis::new(&image, &grid);
-            analysis.dedupe.map[0] = 1;
+            let mut analysis = Analysis::new(&image, &grid, false);
+            analysis.dedupe.map[0] = (1, crate::sprite::Transform::IDENTITY);
             analysis.rebuild = raster::rebuild_matches(&image, &grid, &analysis.dedupe);
             assert!(analysis.report().contains("1 cells differ (first 0,0)"));
         }
         assert!(
             plan_extract(
                 &RgbaImage::new(7, 7),
-                &Grid {
-                    tile: 16,
-                    offset: [0, 0],
-                    spacing: 0
-                },
+                &Grid::DEFAULT,
                 16,
                 &temp.0.join("map.png"),
                 &temp.0
@@ -500,8 +648,84 @@ pub(super) mod tests {
         );
     }
     #[test]
+    fn grouped_map_rebuilds_all_eight_variants() {
+        let temp = crate::test_support::TempDir::new("extract");
+        let mut tile = RgbaImage::new(2, 2);
+        for y in 0..2 {
+            for x in 0..2 {
+                tile.set_pixel(x, y, [(1 + x + 2 * y) as u8, 0, 0, 255]);
+            }
+        }
+        let mut image = RgbaImage::new(16, 2);
+        for (index, transform) in crate::sprite::Transform::ALL.into_iter().enumerate() {
+            let variant = tile.transformed(transform);
+            for y in 0..2 {
+                for x in 0..2 {
+                    image.set_pixel(index as u32 * 2 + x, y, variant.pixel(x, y));
+                }
+            }
+        }
+        let grid = Grid {
+            tile: 2,
+            offset: [0, 0],
+            spacing: 0,
+        };
+        let analysis = Analysis::new(&image, &grid, true);
+        let plan = plan_from_analysis(
+            &analysis,
+            &grid,
+            16,
+            &temp.0.join("tiles.png"),
+            &temp.0,
+            "map",
+        )
+        .unwrap();
+        write_plan(&plan, &[]).unwrap();
+        let map = tilemap::parse(&fs::read_to_string(&plan.map_path).unwrap()).unwrap();
+        assert_eq!(
+            map.rebuild(&RgbaImage::from_png(&plan.png).unwrap())
+                .unwrap(),
+            image
+        );
+    }
+    #[cfg(unix)]
+    #[test]
+    fn map_destination_symlink_is_refused() {
+        let temp = crate::test_support::TempDir::new("extract");
+        let (image, grid) = map(0, [0, 0]);
+        let plan = plan_extract(&image, &grid, 16, &temp.0.join("tiles.png"), &temp.0).unwrap();
+        let target = temp.0.join("untouched");
+        fs::write(&target, b"untouched").unwrap();
+        std::os::unix::fs::symlink(&target, &plan.map_path).unwrap();
+        let error = write_plan(&plan, &[]).unwrap_err();
+        assert!(error.contains("map not written: map output is a symlink"));
+        assert_eq!(fs::read(target).unwrap(), b"untouched");
+        assert_no_temps(&temp.0);
+    }
+    #[cfg(debug_assertions)]
+    #[test]
+    fn output_directory_requires_a_validated_absolute_path() {
+        let temp = crate::test_support::TempDir::new("output-precondition");
+        for output in [
+            temp.0.join("assets/splites/../../escaped/out.png"),
+            PathBuf::from("assets/splites/new/out.png"),
+        ] {
+            let panic = std::panic::catch_unwind(|| create_output_dir(&output, &temp.0))
+                .expect_err(
+                    "unchecked output must trip the precondition before creating directories",
+                );
+            let message = panic
+                .downcast_ref::<String>()
+                .map(String::as_str)
+                .or_else(|| panic.downcast_ref::<&str>().copied())
+                .unwrap();
+            assert!(message.contains("create_output_dir takes an output from absolute_output"));
+            assert_eq!(fs::read_dir(&temp.0).unwrap().count(), 0);
+        }
+    }
+    #[test]
     fn defaults_and_output_directory_boundaries() {
-        let temp = Temp::new();
+        let temp = crate::test_support::TempDir::new("extract");
         let file = SheetSource::File("/x/map-01.png".into());
         let memory = SheetSource::Memory {
             name: "224070-region-1".into(),
@@ -529,7 +753,7 @@ pub(super) mod tests {
             &temp.0.join("assets/splites-other/out.png"),
             &temp.0
         ));
-        ensure_output_dir(&output, &temp.0).unwrap();
+        create_output_dir(&output, &temp.0).unwrap();
         assert!(output.parent().unwrap().is_dir());
         for directory in [
             temp.0.join("other"),
@@ -539,32 +763,78 @@ pub(super) mod tests {
                 .join(format!("rn-extract-forbidden-{}", std::process::id())),
         ] {
             assert!(!directory.exists());
-            assert!(ensure_output_dir(&directory.join("out.png"), &temp.0).is_err());
+            assert!(create_output_dir(&directory.join("out.png"), &temp.0).is_err());
             assert!(!directory.exists());
         }
-        assert!(ensure_output_dir(&temp.0.join("out.png"), &temp.0).is_ok());
+        assert!(create_output_dir(&temp.0.join("out.png"), &temp.0).is_ok());
         assert!(
             path_note(&temp.0.join("out.png"), &temp.0).contains("inside the repo and not ignored")
         );
         assert_eq!(path_note(&output, &temp.0), "");
         #[cfg(unix)]
         {
-            let external = Temp::new();
+            let external = crate::test_support::TempDir::new("extract");
             std::os::unix::fs::symlink(&external.0, temp.0.join("assets/splites/link")).unwrap();
             assert!(
-                ensure_output_dir(&temp.0.join("assets/splites/link/new/out.png"), &temp.0)
+                create_output_dir(&temp.0.join("assets/splites/link/new/out.png"), &temp.0)
                     .is_err()
             );
             assert!(!external.0.join("new").exists());
         }
     }
     #[test]
+    fn opened_output_is_refused_before_any_disk_changes() {
+        let temp = crate::test_support::TempDir::new("extract");
+        let (image, grid) = map(0, [0, 0]);
+        let source = temp.0.join("original.png");
+        fs::write(&source, image.to_png().unwrap()).unwrap();
+        let original = fs::read(&source).unwrap();
+        let open_files = [source.canonicalize().unwrap()];
+        let mut outputs = vec![source.clone()];
+        #[cfg(unix)]
+        {
+            let alias = temp.0.join("alias.png");
+            std::os::unix::fs::symlink(&source, &alias).unwrap();
+            outputs.push(alias);
+        }
+        let entries = fs::read_dir(&temp.0).unwrap().count();
+        for output in outputs {
+            let plan = plan_extract(&image, &grid, 16, &output, &temp.0).unwrap();
+            let error = write_plan(&plan, &open_files).unwrap_err();
+            assert!(error.contains("already open"), "{error}");
+            assert!(error.is_ascii() && !error.contains(['\r', '\n']));
+            assert_eq!(fs::read(&source).unwrap(), original);
+            assert!(!plan.sidecar_path.exists());
+            assert_eq!(fs::read_dir(&temp.0).unwrap().count(), entries);
+            assert_no_temps(&temp.0);
+        }
+        // A still-open editor may hold a path whose PNG has since disappeared.
+        // The refusal must happen before create_output_dir creates this parent.
+        let missing = temp.0.join("assets/splites/missing/result.png");
+        let plan = plan_extract(&image, &grid, 16, &missing, &temp.0).unwrap();
+        assert!(
+            write_plan(&plan, std::slice::from_ref(&missing))
+                .unwrap_err()
+                .contains("already open")
+        );
+        assert!(!temp.0.join("assets").exists());
+        assert_eq!(fs::read_dir(&temp.0).unwrap().count(), entries);
+        // Once no editor holds that path, the same new output is writable.
+        write_plan(&plan, &[]).unwrap();
+        assert_eq!(fs::read(&missing).unwrap(), plan.png);
+        assert_no_temps(&temp.0);
+    }
+    #[test]
     fn writes_are_atomic_png_replaced_sidecar_preserved_and_temps_cleaned() {
-        let temp = Temp::new();
+        let temp = crate::test_support::TempDir::new("extract");
         let (mut image, grid) = map(1, [2, 0]);
         let output = temp.0.join("assets/splites/map/tiles.png");
         let first = plan_extract(&image, &grid, 16, &output, &temp.0).unwrap();
-        write_plan(&first).unwrap();
+        write_plan(&first, &[]).unwrap();
+        assert_eq!(first.map_path, output.with_file_name("map.map.json"));
+        let stored_map = tilemap::parse(&fs::read_to_string(&first.map_path).unwrap()).unwrap();
+        let tileset = RgbaImage::from_png(&fs::read(&output).unwrap()).unwrap();
+        assert_eq!(stored_map.rebuild(&tileset).unwrap(), map(0, [0, 0]).0);
         let saved = store::load(&first.sidecar_path).unwrap();
         assert_eq!(saved.sheet, first.sheet);
         assert_eq!(
@@ -575,12 +845,25 @@ pub(super) mod tests {
         let mut old_inode = fs::File::open(&output).unwrap();
         image.set_pixel(2, 0, [200, 100, 50, 255]);
         let second = plan_extract(&image, &grid, 16, &output, &temp.0).unwrap();
-        let error = write_plan(&second).unwrap_err();
+        // A PNG open in an editor is left alone, bytes and sidecar included.
+        let open = [output.canonicalize().unwrap()];
+        assert!(
+            write_plan(&second, &open)
+                .unwrap_err()
+                .contains("already open")
+        );
+        assert_eq!(fs::read(&output).unwrap(), first.png);
+        let error = write_plan(&second, &[]).unwrap_err();
         assert!(
             error.contains("PNG written:") && error.contains("sidecar exists; remove it first"),
             "{error}"
         );
         assert_eq!(fs::read(&first.sidecar_path).unwrap(), original_json);
+        assert_eq!(
+            fs::read_to_string(&second.map_path).unwrap(),
+            second.map_json
+        );
+        assert!(error.contains("map written:"));
         assert_eq!(fs::read(&output).unwrap(), second.png);
         let mut original_png = Vec::new();
         old_inode.read_to_end(&mut original_png).unwrap();
@@ -592,12 +875,28 @@ pub(super) mod tests {
         // A publication error after PNG success is reported explicitly and cleans staging files.
         fs::remove_file(&first.sidecar_path).unwrap();
         fs::create_dir(&first.sidecar_path).unwrap();
-        assert!(write_plan(&first).unwrap_err().contains("PNG written:"));
+        assert!(
+            write_plan(&first, &[])
+                .unwrap_err()
+                .contains("PNG written:")
+        );
         assert_no_temps(&temp.0);
     }
     #[test]
+    fn sidecar_publication_validates_before_creating_files() {
+        let temp = crate::test_support::TempDir::new("extract");
+        let path = temp.0.join("invalid.sprites.json");
+        let mut sheet = memory_sheet().meta;
+        sheet.grid.tile = 0;
+        assert!(matches!(
+            save_sidecar_new(&path, &sheet),
+            Err(StoreError::Invalid(_))
+        ));
+        assert_eq!(fs::read_dir(&temp.0).unwrap().count(), 0);
+    }
+    #[test]
     fn sidecar_publication_cannot_clobber_a_concurrent_writer() {
-        let temp = Temp::new();
+        let temp = crate::test_support::TempDir::new("extract");
         let path = temp.0.join("same.sprites.json");
         let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
         let workers: Vec<_> = (0..2)
@@ -605,14 +904,7 @@ pub(super) mod tests {
                 let path = path.clone();
                 let barrier = barrier.clone();
                 std::thread::spawn(move || {
-                    let sheet = SpriteSheet::new_for(
-                        &format!("image-{i}.png"),
-                        Grid {
-                            tile: 16,
-                            offset: [0, 0],
-                            spacing: 0,
-                        },
-                    );
+                    let sheet = SpriteSheet::new_for(&format!("image-{i}.png"), Grid::DEFAULT);
                     barrier.wait();
                     save_sidecar_new(&path, &sheet).is_ok()
                 })
@@ -629,25 +921,124 @@ pub(super) mod tests {
         assert_no_temps(&temp.0);
     }
     #[test]
+    fn analysis_worker_matches_synchronous_analysis() {
+        let mut editor = SheetEditor::new(1, memory_sheet());
+        let expected = Analysis::new(&editor.sheet.image, &editor.sheet.meta.grid, false);
+        start_analysis(&mut editor.extract, &editor.sheet, &mut editor.log);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while editor.extract.job.is_some() {
+            editor.poll_analysis();
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        let actual = editor.extract.analysis.unwrap();
+        assert_eq!(actual.dedupe, expected.dedupe);
+        assert_eq!(actual.rebuild, expected.rebuild);
+    }
+    #[test]
+    fn analysis_progress_runs_through_both_passes_once() {
+        let sheet = memory_sheet();
+        let (image, grid) = (&sheet.image, &sheet.meta.grid);
+        let cells = raster::dedupe_work(image, grid);
+        assert!(cells > 0);
+        assert_eq!(analysis_work(image, grid), 2 * cells);
+        let calls = std::cell::RefCell::new(Vec::new());
+        let progress = |done, total| calls.borrow_mut().push((done, total));
+        analyze(image, grid, false, &progress, &AtomicBool::new(false)).unwrap();
+        let calls = calls.into_inner();
+        assert_eq!(calls.first(), Some(&(0, 2 * cells)));
+        assert_eq!(calls.last(), Some(&(2 * cells, 2 * cells)));
+        // The rebuild pass must not start over from 0 (the bar would sit at 50%).
+        assert!(calls.windows(2).all(|pair| pair[0].0 <= pair[1].0));
+        assert!(calls.iter().all(|&(_, total)| total == 2 * cells));
+    }
+    #[test]
+    fn stale_analysis_is_discarded_after_grid_changes() {
+        let sheet = memory_sheet();
+        let mut editor = SheetEditor::new(1, sheet);
+        let grid = editor.sheet.meta.grid;
+        let image = editor.sheet.image.clone();
+        editor.extract.job_grid = Some(grid);
+        editor.extract.job = Some(
+            super::super::job::Job::start("test-analysis", "Analyze", 0, move |_, _| {
+                Some(Analysis::new(&image, &grid, false))
+            })
+            .unwrap(),
+        );
+        editor.sheet.meta.grid.offset = [1, 0];
+        editor.poll_analysis();
+        assert!(editor.extract.job.is_none());
+        assert!(editor.extract.analysis.is_none());
+    }
+    #[test]
+    fn renaming_the_source_reports_the_dropped_analysis() {
+        let temp = crate::test_support::TempDir::new("extract");
+        let mut sheet = memory_sheet();
+        let mut state = ExtractState::default();
+        assert!(!state.sync(&sheet, &temp.0));
+        state.job = Some(
+            super::super::job::Job::start("test-analysis", "Analyze", 0, |_, _| None::<Analysis>)
+                .unwrap(),
+        );
+        assert!(!state.sync(&sheet, &temp.0));
+        // Save image as under another name changes the stem the output follows.
+        sheet.source = SheetSource::Memory {
+            name: "renamed".into(),
+        };
+        assert!(state.sync(&sheet, &temp.0));
+        assert!(state.job.is_none());
+    }
+    #[test]
+    fn grouping_toggle_invalidates_results_and_is_reported() {
+        let sheet = memory_sheet();
+        let mut state = ExtractState::default();
+        assert!(!state.group_transforms);
+        state.analysis = Some(Analysis::new(&sheet.image, &sheet.meta.grid, false));
+        state.written = Some("old.png".into());
+        state.set_group_transforms(true);
+        assert!(state.analysis.is_none() && state.written.is_none());
+        assert!(
+            Analysis::new(&sheet.image, &sheet.meta.grid, true)
+                .report()
+                .contains("rotations/flips grouped")
+        );
+    }
+    #[test]
     fn grid_and_image_changes_invalidate_analysis_and_written_result() {
-        let temp = Temp::new();
+        let temp = crate::test_support::TempDir::new("extract");
         let mut sheet = memory_sheet();
         let mut state = ExtractState::default();
         state.sync(&sheet, &temp.0);
-        state.analysis = Some(Analysis::new(&sheet.image, &sheet.meta.grid));
+        state.analysis = Some(Analysis::new(
+            &sheet.image,
+            &sheet.meta.grid,
+            state.group_transforms,
+        ));
         state.written = Some("old.png".into());
         sheet.meta.grid.offset = [2, 0];
         state.sync(&sheet, &temp.0);
         assert!(state.analysis.is_none() && state.written.is_none());
-        state.analysis = Some(Analysis::new(&sheet.image, &sheet.meta.grid));
+        state.analysis = Some(Analysis::new(
+            &sheet.image,
+            &sheet.meta.grid,
+            state.group_transforms,
+        ));
         sheet.meta.grid.spacing = 1;
         state.sync(&sheet, &temp.0);
         assert!(state.analysis.is_none());
-        state.analysis = Some(Analysis::new(&sheet.image, &sheet.meta.grid));
+        state.analysis = Some(Analysis::new(
+            &sheet.image,
+            &sheet.meta.grid,
+            state.group_transforms,
+        ));
         sheet.meta.grid.tile = 8;
         state.sync(&sheet, &temp.0);
         assert!(state.analysis.is_none());
-        state.analysis = Some(Analysis::new(&sheet.image, &sheet.meta.grid));
+        state.analysis = Some(Analysis::new(
+            &sheet.image,
+            &sheet.meta.grid,
+            state.group_transforms,
+        ));
         sheet.imgui_id = TextureId::new(51);
         state.sync(&sheet, &temp.0);
         assert!(state.analysis.is_none());

@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "image": "example.png",
   "grid": {
     "tile": 16,

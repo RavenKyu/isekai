@@ -1,5 +1,5 @@
 use super::{
-    format::{Clip, ClipFrame, Shape, Sprite, SpriteSheet},
+    format::{Clip, ClipFrame, Part, Shape, Sprite, SpriteSheet},
     grid::Grid,
     store::{self, StoreError},
     timeline::Mode,
@@ -10,14 +10,7 @@ use std::path::{Path, PathBuf};
 pub const EXAMPLE_JSON: &str = include_str!("../../tests/fixtures/example.sprites.json");
 pub fn example() -> (RgbaImage, SpriteSheet) {
     let mut image = RgbaImage::new(64, 16);
-    let mut sheet = SpriteSheet::new_for(
-        "example.png",
-        Grid {
-            tile: 16,
-            offset: [0, 0],
-            spacing: 0,
-        },
-    );
+    let mut sheet = SpriteSheet::new_for("example.png", Grid::DEFAULT);
     for (col, (name, color)) in [
         ("a", [255, 64, 64, 255]),
         ("b", [64, 255, 64, 255]),
@@ -55,6 +48,40 @@ pub fn example() -> (RgbaImage, SpriteSheet) {
     });
     (image, sheet)
 }
+pub const EXAMPLE_TURNED_JSON: &str =
+    include_str!("../../tests/fixtures/example-turned.sprites.json");
+pub fn example_turned() -> (RgbaImage, SpriteSheet) {
+    let (image, mut sheet) = example();
+    sheet.sprites = vec![Sprite {
+        name: "turned".into(),
+        pivot: [16.0, 16.0],
+        shape: Shape::Set {
+            parts: [(false, 0), (false, 90), (true, 0), (true, 270)]
+                .into_iter()
+                .enumerate()
+                .map(|(i, (flip_x, rotation))| Part {
+                    col: i as u32,
+                    row: 0,
+                    dx: (i % 2) as i32 * 16,
+                    dy: (i / 2) as i32 * 16,
+                    flip_x,
+                    rotation,
+                })
+                .collect(),
+        },
+    }];
+    sheet.clips = vec![Clip {
+        name: "turned".into(),
+        mode: Mode::Loop,
+        tags: vec![],
+        props: Default::default(),
+        frames: vec![ClipFrame {
+            sprite: "turned".into(),
+            ms: 150,
+        }],
+    }];
+    (image, sheet)
+}
 pub fn write_example(dir: &Path) -> Result<PathBuf, StoreError> {
     let (image, _) = example();
     let bytes = image.to_png().map_err(|e| StoreError::Invalid(vec![e]))?;
@@ -66,6 +93,14 @@ pub fn write_example(dir: &Path) -> Result<PathBuf, StoreError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn turned_fixture_is_current() {
+        let (image, sheet) = example_turned();
+        assert_eq!(store::to_json(&sheet), EXAMPLE_TURNED_JSON);
+        assert_eq!(store::parse(EXAMPLE_TURNED_JSON).unwrap(), sheet);
+        assert_eq!(image, example().0);
+        sheet.validate_bounds(image.width, image.height).unwrap();
+    }
     #[test]
     fn code_generated_fixtures_are_current() {
         let (image, sheet) = example();
