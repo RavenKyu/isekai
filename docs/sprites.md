@@ -197,7 +197,7 @@ PNG 저장 후 `Save`로 메타를 따로 쓴다. 다른 편집 창이 열고 �
 5. `Extract`의 `Analyze`를 누른다. 완전 투명 픽셀의 RGB를 0으로 정규화한 뒤
    기본적으로 바이트가 같은 타일만 묶고 첫 등장 순서를 유지한다. `Group rotations/flips`는
    기본 꺼짐이며 켜면 회전·반전 8종도 묶는다. 대칭 타일은 변형 없음이 우선이다.
-   이 선택은 동기 분석을 느리게 하며 변경하면 이전 분석이 무효화된다. 완전 투명 타일도 하나의 고유 타일이다.
+   이 선택은 분석을 느리게 하며 변경하면 이전 분석이 무효화된다. 완전 투명 타일도 하나의 고유 타일이다.
    unique 수와 원래 격자 셀 영역의 `rebuild` 동일 여부를 확인한다. 자투리는 비교에서 제외한다.
    `Columns`(기본 16)와 `Output`을 정한다. 격자·이미지가 바뀌면 분석을 다시 해야 한다.
 6. `Write tileset`으로 PNG와 빈 메타의 사이드카, 맵 배치 파일을 쓴다. 기본 출력은
@@ -207,7 +207,7 @@ PNG 저장 후 `Save`로 메타를 따로 쓴다. 다른 편집 창이 열고 �
    `Open result`로 결과를 바로 열 수 있다. sprite·clip은 자동 생성하지 않으므로
    런타임 재생 전 편집기에서 sprite와 최소 하나의 clip을 작성한다.
 
-Find regions·Suggest from objects·Analyze는 버튼에서만 동기로 실행하며 큰 이미지에서는 화면이 멈출 수 있다.
+Find regions·Suggest from objects·Analyze는 백그라운드에서 실행되며 진행률과 Cancel을 표시한다. 실행 중 다른 입력과 창을 사용할 수 있다. Reload와 창 닫기는 작업을 취소하며, Analyze 중 격자나 묶기 설정이 바뀌면 이전 결과를 버린다.
 출력은 `.png`만 받는다. checkout의 `assets/splites/` 안에서는 없는 디렉터리를 만들지만,
 밖에서는 이미 존재하는 디렉터리만 쓸 수 있다. `..`와 심볼릭 링크를 거치는 출력 디렉터리는 거부한다.
 저장소 안이면서 이 ignore 폴더 밖이면 커밋 대상이 될 수 있다는 상태 줄을 표시한다.
@@ -346,9 +346,9 @@ map.csv, 맵 에디터·런타임 타일맵, 레이어 자동 분류, 개별 til
 ## 한계와 로컬 자산
 
 PNG만 지원하며 undo, 프레임 이벤트, 상태머신·타일맵 배치는 지원하지 않는다.
-Find regions·Suggest from objects·Analyze의 동기 실행과 앱 종료 시 미저장 변경 유실도 현재 한계다.
+앱 종료 시 미저장 변경 유실도 현재 한계다.
 사람의 원본 `/home/raven/Works/splites/`와 결과 `assets/splites/`는 로컬 전용이다.
 `/assets/splites/`는 gitignore에 있으며 이미지·결과 PNG·사이드카를 커밋하지 않는다.
 라이선스는 이 문서에서 단정하지 않는다. 자동 검사·웹 예제는 코드가 만든 이미지로만 동작한다.
 
-Decided in: rn-fcuz, rn-hk1c, rn-aw9h, rn-ut06
+Decided in: rn-fcuz, rn-hk1c, rn-aw9h, rn-ut06, rn-6ptr
