@@ -72,7 +72,7 @@ pub struct SheetEditor {
     pub show_grid: bool,
     pub guess: Option<GridGuess>,
     guess_job: Option<guess::GuessJob>,
-    pub log: Vec<String>,
+    pub log: log::SheetLog,
     log_view: log::LogView,
     guess_logged_percent: u32,
     /// Actions this editor queued; the library takes them after drawing.
@@ -397,7 +397,7 @@ impl SheetEditor {
             show_grid: true,
             guess: None,
             guess_job: None,
-            log: vec![],
+            log: Default::default(),
             log_view: Default::default(),
             guess_logged_percent: 0,
             pending: vec![],

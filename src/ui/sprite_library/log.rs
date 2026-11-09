@@ -18,7 +18,28 @@ fn timestamp() -> String {
     }
 }
 
-pub(super) fn append(lines: &mut Vec<String>, message: String) {
+#[derive(Clone, Default, PartialEq, Debug)]
+pub struct SheetLog {
+    lines: Vec<String>,
+    generation: u64,
+}
+
+impl std::ops::Deref for SheetLog {
+    type Target = [String];
+    fn deref(&self) -> &Self::Target {
+        &self.lines
+    }
+}
+
+impl SheetLog {
+    fn clear(&mut self) {
+        self.lines.clear();
+        self.generation = self.generation.wrapping_add(1);
+    }
+}
+
+pub(super) fn append(log: &mut SheetLog, message: String) {
+    let lines = &mut log.lines;
     let time = timestamp();
     // One timestamp per physical line; embedded NULs cannot truncate InputText.
     for line in message.replace('\0', " ").lines() {
@@ -27,18 +48,28 @@ pub(super) fn append(lines: &mut Vec<String>, message: String) {
     if lines.len() > LIMIT {
         lines.drain(..lines.len() - LIMIT);
     }
+    log.generation = log.generation.wrapping_add(1);
 }
 
 #[derive(Default)]
 pub(super) struct LogView {
     text: String,
+    seen: Option<u64>,
+    width: f32,
+    line_height: f32,
+    #[cfg(test)]
+    joins: usize,
+    #[cfg(test)]
+    measurements: usize,
     #[cfg(test)]
     metrics: [f32; 4],
     #[cfg(test)]
     clear_center: [f32; 2],
+    #[cfg(test)]
+    scroll_max_x: f32,
 }
 impl LogView {
-    pub fn draw(&mut self, lines: &mut Vec<String>, ui: &Ui) {
+    pub fn draw(&mut self, lines: &mut SheetLog, ui: &Ui) {
         ui.separator();
         ui.text("Log");
         ui.same_line();
@@ -51,9 +82,24 @@ impl LogView {
             let size = ui.item_rect_size();
             self.clear_center = [min[0] + size[0] * 0.5, min[1] + size[1] * 0.5];
         }
-        let text = lines.join("\n");
-        let changed = text != self.text;
-        self.text = text;
+        let changed = self.seen != Some(lines.generation);
+        if changed {
+            self.text = lines.join("\n");
+            self.seen = Some(lines.generation);
+            #[cfg(test)]
+            {
+                self.joins += 1;
+            }
+        }
+        let line_height = ui.text_line_height();
+        if changed || self.line_height != line_height {
+            self.width = ui.calc_text_size(&self.text)[0] + 16.0;
+            self.line_height = line_height;
+            #[cfg(test)]
+            {
+                self.measurements += 1;
+            }
+        }
         let _background = ui.push_style_color(StyleColor::ChildBg, [0.0, 0.0, 0.0, 1.0]);
         let _frame = ui.push_style_color(StyleColor::FrameBg, [0.0, 0.0, 0.0, 1.0]);
         let _hover = ui.push_style_color(StyleColor::FrameBgHovered, [0.0, 0.0, 0.0, 1.0]);
@@ -67,6 +113,7 @@ impl LogView {
                 let at_bottom = ui.scroll_y() >= ui.scroll_max_y() - 1.0;
                 #[cfg(test)]
                 {
+                    self.scroll_max_x = ui.scroll_max_x();
                     let pos = ui.window_pos();
                     let size = ui.window_size();
                     self.metrics = [
@@ -78,8 +125,7 @@ impl LogView {
                 }
                 // The outer child owns scrolling. A full-height input permits
                 // selecting/copying across lines without a second vertical scrollbar.
-                let width =
-                    (ui.calc_text_size(&self.text)[0] + 16.0).max(ui.content_region_avail()[0]);
+                let width = self.width.max(ui.content_region_avail()[0]);
                 let height = (lines.len().max(1) as f32 * ui.text_line_height()) + 16.0;
                 ui.input_text_multiline("##log text", &mut self.text, [width, height])
                     .read_only(true)
@@ -111,7 +157,7 @@ impl LogView {
         let clipboard = Rc::new(RefCell::new(String::new()));
         context.set_clipboard_backend(Clipboard(Rc::clone(&clipboard)));
         let view = RefCell::new(Self::default());
-        let lines = RefCell::new(Vec::new());
+        let lines = RefCell::new(SheetLog::default());
         let render = |context: &mut dear_imgui_rs::Context| {
             super::tests::vertices(context, consumer, |ui| {
                 ui.window("Log interactions")
@@ -124,6 +170,8 @@ impl LogView {
             append(&mut lines.borrow_mut(), format!("event {i}"));
         }
         render(context);
+        assert_eq!(view.borrow().joins, 1);
+        assert_eq!(view.borrow().measurements, 1);
         let [y, max, x, mouse_y] = view.borrow().metrics;
         assert!(
             max > 0.0 && y >= max - 1.0,
@@ -137,10 +185,29 @@ impl LogView {
         assert!(before < max - 1.0, "wheel scrolls the outer log child");
         append(&mut lines.borrow_mut(), "while reading older lines".into());
         render(context);
+        assert_eq!(view.borrow().joins, 2);
+        assert_eq!(view.borrow().measurements, 2);
         let after = view.borrow().metrics[0];
         assert!(
             (before - after).abs() < 1.0,
             "new log must keep reading position: {before} -> {after}"
+        );
+        append(
+            &mut lines.borrow_mut(),
+            "wide ".to_owned() + &"w".repeat(300),
+        );
+        render(context);
+        assert!(
+            view.borrow().scroll_max_x > 0.0,
+            "long lines grow the horizontal scroll range"
+        );
+        for i in 0..LIMIT {
+            append(&mut lines.borrow_mut(), format!("new {i}"));
+        }
+        render(context);
+        assert!(
+            !view.borrow().text.contains("event 0"),
+            "eviction refreshes cached text"
         );
         context
             .io_mut()
@@ -186,6 +253,10 @@ impl LogView {
             .add_mouse_button_event(MouseButton::Left, false);
         render(context);
         assert!(lines.borrow().is_empty(), "Clear empties only this log");
+        assert!(
+            view.borrow().text.is_empty(),
+            "Clear updates the cached text"
+        );
     }
 }
 
@@ -193,8 +264,29 @@ impl LogView {
 pub(super) mod tests {
     use super::*;
     #[test]
+    fn generation_tracks_all_mutations_including_eviction_and_clear() {
+        let mut log = SheetLog::default();
+        assert_eq!(log.generation, 0);
+        append(&mut log, "first".into());
+        assert_eq!(log.generation, 1);
+        for i in 1..LIMIT {
+            append(&mut log, format!("{i}"));
+        }
+        let before = log.generation;
+        let _ = log.len();
+        assert_eq!(log.generation, before);
+        append(&mut log, "eviction".into());
+        assert_eq!(log.generation, before + 1);
+        assert_eq!(log.len(), LIMIT);
+        assert!(!log[0].ends_with(" first"));
+        log.clear();
+        assert_eq!(log.generation, before + 2);
+        assert!(log.is_empty());
+    }
+
+    #[test]
     fn logs_keep_the_latest_500_timestamped_lines_and_normalize_control_characters() {
-        let mut lines = Vec::new();
+        let mut lines = SheetLog::default();
         for i in 0..LIMIT + 3 {
             append(&mut lines, format!("line {i}"));
         }
