@@ -72,16 +72,28 @@ pub fn load(sidecar: &Path) -> Result<Loaded, StoreError> {
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
     let image_path = parent.join(&sheet.image);
-    // Reject existing symlinks that would take a lexically safe image outside
-    // the sidecar directory. Missing images are diagnosed by the image reader.
-    match image_path.canonicalize() {
-        Ok(actual) if !actual.starts_with(parent.canonicalize()?) => {
-            return Err(StoreError::UnsafeImagePath(sheet.image));
-        }
-        Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error.into()),
-        _ => {}
-    }
+    image_within_directory(&image_path, parent).map_err(|error| match error {
+        StoreError::UnsafeImagePath(_) => StoreError::UnsafeImagePath(sheet.image.clone()),
+        other => other,
+    })?;
     Ok(Loaded { sheet, image_path })
+}
+/// Reject existing image symlinks that escape the given directory. Directory
+/// symlinks are allowed when both paths resolve within the same directory.
+/// Missing images remain the image reader's responsibility.
+pub fn image_within_directory(image: &Path, dir: &Path) -> Result<(), StoreError> {
+    let dir = if dir.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        dir
+    };
+    match image.canonicalize() {
+        Ok(actual) if !actual.starts_with(dir.canonicalize()?) => Err(StoreError::UnsafeImagePath(
+            image.to_string_lossy().into_owned(),
+        )),
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error.into()),
+        _ => Ok(()),
+    }
 }
 pub fn to_json(sheet: &SpriteSheet) -> String {
     let mut normalized = sheet.clone();
@@ -236,6 +248,58 @@ mod tests {
         assert_eq!(fs::read_to_string(path).unwrap(), json);
         assert_eq!(parse(&json).unwrap(), loaded.sheet);
         assert!(json.ends_with('\n') && !json.ends_with("\n\n"));
+    }
+    #[cfg(unix)]
+    #[test]
+    fn image_directory_check_matches_loader_for_symlinks_and_missing_files() {
+        use std::os::unix::fs::symlink;
+        let dir = Temp::new();
+        let outside = Temp::new();
+        let image = dir.0.join("example.png");
+        let target = outside.0.join("out.png");
+        fs::write(&target, b"outside image").unwrap();
+        symlink(&target, &image).unwrap();
+        let sidecar = dir.0.join("example.sprites.json");
+        save(&sidecar, &super::super::example().1).unwrap();
+        let before = fs::read(&sidecar).unwrap();
+        assert!(matches!(
+            image_within_directory(&image, &dir.0),
+            Err(StoreError::UnsafeImagePath(path)) if path == image.to_string_lossy()
+        ));
+        assert!(matches!(
+            load(&sidecar),
+            Err(StoreError::UnsafeImagePath(_))
+        ));
+        assert_eq!(fs::read(&target).unwrap(), b"outside image");
+        assert_eq!(fs::read(&sidecar).unwrap(), before);
+        assert_eq!(fs::read_dir(&dir.0).unwrap().count(), 2);
+        assert_eq!(fs::read_dir(&outside.0).unwrap().count(), 1);
+
+        fs::remove_file(&image).unwrap();
+        fs::write(dir.0.join("local.png"), b"local image").unwrap();
+        symlink("local.png", &image).unwrap();
+        image_within_directory(&image, &dir.0).unwrap();
+        load(&sidecar).unwrap();
+        let alias = outside.0.join("directory");
+        symlink(&dir.0, &alias).unwrap();
+        image_within_directory(&alias.join("example.png"), &alias).unwrap();
+        load(&alias.join("example.sprites.json")).unwrap();
+
+        fs::remove_file(&image).unwrap();
+        image_within_directory(&image, &dir.0).unwrap();
+        load(&sidecar).unwrap();
+        symlink("missing.png", &image).unwrap();
+        image_within_directory(&image, &dir.0).unwrap();
+        load(&sidecar).unwrap();
+    }
+    #[test]
+    fn image_directory_check_uses_current_directory_for_empty_parent() {
+        // Do not change the process cwd: other tests can run concurrently.
+        let relative = Path::new("Cargo.toml");
+        assert_eq!(relative.parent(), Some(Path::new("")));
+        assert!(relative.is_file());
+        image_within_directory(relative, relative.parent().unwrap()).unwrap();
+        image_within_directory(Path::new("missing-image.png"), Path::new("")).unwrap();
     }
     #[cfg(unix)]
     #[test]
