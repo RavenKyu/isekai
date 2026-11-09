@@ -604,3 +604,4 @@
 {"ts":"2026-11-09T15:07:56Z","id":"isk-5u3z","kind":"status","by":"Raven","by_email":"hong18s@gmail.com","from":"in_progress","to":"done","note":"docs/mockups/sheet-editor.html 커밋, sha256 2e49652f…c316c2 일치"}
 {"ts":"2026-11-09T15:07:56Z","id":"isk-79ss.73y","kind":"note","by":"Raven","by_email":"hong18s@gmail.com","text":"시안은 isk-5u3z에서 이미 docs/mockups/sheet-editor.html로 커밋됐다. 복사 단계는 건너뛴다."}
 {"ts":"2026-11-09T15:07:56Z","id":"isk-ijay","kind":"status","by":"Raven","by_email":"hong18s@gmail.com","from":"todo","to":"done","note":"닫음(사람 결정 2026-11-10): isk-79ss에서 타일 애니메이션을 형식 v3에서 빼기로 해 대상 기능이 없어졌다. 맵에서 애니메이션을 쓰는 일은 isk-9tfj·isk-fy7v에서 다룬다."}
+{"ts":"2026-11-09T15:09:12Z","id":"isk-jazt","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.4.0"}
