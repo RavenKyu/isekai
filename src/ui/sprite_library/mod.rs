@@ -362,6 +362,9 @@ impl SheetEditor {
         }
         Ok(())
     }
+    fn can_save(&self) -> bool {
+        self.sheet.dirty && matches!(self.sheet.source, SheetSource::File(_))
+    }
     fn save(&mut self) -> Result<String, String> {
         self.tile_draft.validate(&self.sheet.meta)?;
         self.clip_draft.validate()?;
@@ -431,11 +434,14 @@ impl SheetEditor {
         let sheet = &self.sheet;
         let memory = matches!(sheet.source, SheetSource::Memory { .. });
         {
-            let _disabled = ui.begin_disabled_with_cond(memory);
+            let _disabled = ui.begin_disabled_with_cond(!self.can_save());
             if ui.button("Save") {
                 self.pending.push(Action::Save(self.id));
             }
-            ui.same_line();
+        }
+        ui.same_line();
+        {
+            let _disabled = ui.begin_disabled_with_cond(memory);
             if ui.button("Reload image") {
                 self.pending.push(Action::Reload(self.id));
             }
@@ -664,6 +670,44 @@ mod tests {
                     spacing: 0
                 })
                 .is_err()
+        );
+    }
+    #[test]
+    fn save_state_tracks_edits_success_failure_and_memory_images() {
+        let temp = extract::tests::Temp::new();
+        let path = temp.0.join("example.png");
+        let (image, meta) = crate::sprite::example();
+        let bytes = image.to_png().unwrap();
+        let (_, _, dirty) = open_sheet(&path, &bytes, None, Some(meta.clone())).unwrap();
+        let mut sheet = fake_sheet();
+        sheet.source = SheetSource::File(path.clone());
+        sheet.dirty = dirty;
+        let mut editor = SheetEditor::new(0, sheet);
+        assert!(!editor.can_save());
+        let mut grid = editor.sheet.meta.grid;
+        grid.tile = 8;
+        editor.sheet.set_grid(grid).unwrap();
+        assert!(editor.can_save());
+        assert!(editor.window_title().contains(" *###"));
+        editor.save().unwrap();
+        assert!(!editor.can_save());
+        assert!(!editor.window_title().contains(" *###"));
+        assert_eq!(
+            store::load(&store::sidecar_for(&path)).unwrap().sheet.grid,
+            grid
+        );
+        editor.sheet.dirty = true;
+        editor.sheet.meta.grid.tile = 0;
+        assert!(editor.save().is_err());
+        assert!(editor.can_save(), "failed validation leaves Save enabled");
+        let (_, _, dirty) = open_sheet(&path, &bytes, None, None).unwrap();
+        assert!(dirty, "a PNG without a sidecar starts dirty");
+        editor.sheet.source = SheetSource::Memory {
+            name: "crop".into(),
+        };
+        assert!(
+            !editor.can_save(),
+            "memory images must be saved as PNG first"
         );
     }
     #[test]

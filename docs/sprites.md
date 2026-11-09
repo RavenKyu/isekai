@@ -143,7 +143,8 @@ Library 창을 닫아도 편집 창은 유지된다. 웹 dev에는 Assets 메뉴
    새 clip은 빈 프레임 목록으로 시작하므로 최소 하나를 추가해야 Save된다.
 9. `Preview`에서 clip, 타일 애니메이션, 정지 sprite를 고른다. `Play`/`Pause`, `Restart`,
    배율 1–8, 프레임 번호·경과 ms, pivot 십자를 확인한다. once는 마지막 프레임에 머문다.
-10. 헤더의 `*`는 변경 표시다. `Save`는 JSON을 저장한다. `Reload image`는 현재 메타를
+10. 창 제목의 `*`는 변경 표시다. `Save`는 변경이 있을 때만 켜지고 JSON 저장에 성공하면
+    다시 꺼진다. 사이드카가 없는 PNG는 열자마자 켜진다. `Reload image`는 현재 메타를
     유지하며 PNG만 다시 읽는다. 메타도 다시 읽으려면 저장 후 편집 창의 x로 닫고 PNG를 다시 Load한다.
     x는 변경이 있으면 `Discard`/`Cancel`로 확인한다. 앱 종료는 확인 없이 미저장 변경을 잃는다.
 
