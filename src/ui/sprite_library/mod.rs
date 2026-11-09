@@ -349,7 +349,7 @@ impl SpriteLibrary {
                 ui.begin_disabled_with_cond(!import_path_has_file_name(&self.path_input));
             if ui.button("Load") {
                 self.pending
-                    .push(Action::Load(PathBuf::from(&self.path_input)));
+                    .push(Action::Load(PathBuf::from(self.path_input.trim())));
             }
         }
         if ui.button("Browse...")
