@@ -55,12 +55,20 @@ impl SheetEditor {
                 log::append(&mut self.log, "Select tiles first".into());
             }
         }
-        if ui.button("Suggest from objects") {
-            self.suggestions = edit::suggestions(&sheet.image, &sheet.meta.grid);
-            if self.suggestions.is_empty() {
-                log::append(&mut self.log, "No object suggestions".into());
+        if let Some(job) = &self.suggest_job {
+            let fraction = job.fraction();
+            ui.progress_bar(fraction)
+                .size([240.0, 0.0])
+                .overlay_text(format!("Suggesting... {:.0}%", fraction * 100.0))
+                .build();
+            ui.same_line();
+            if ui.button("Cancel Suggest") {
+                self.cancel_suggest();
             }
+        } else if ui.button("Suggest from objects") {
+            self.start_suggest();
         }
+        let sheet = &mut self.sheet;
         for (i, rect) in self.suggestions.iter().enumerate() {
             let _id = ui.push_id(&format!("object-{i}"));
             ui.text(format!(
