@@ -24,7 +24,7 @@ dev도 처음에는 검은 창이다. 물리 백틱 키(scancode `Grave`, 보통
 `View` 메뉴의 `Frame stats`, `Dear ImGui Demo`, `Dear ImGui Metrics`는 창 상태와
 연결된 체크 항목이다. 처음에는 stats만 열려 있고 Demo와 Metrics는 닫혀 있다.
 네이티브 dev의 `Assets > Sprite Library`는 PNG 시트 편집·추출 창이다.
-[스프라이트 사용법](sprites.md#편집기-사용)에 가져오기·저장 순서와 Guess의 진행 표시·취소를 설명한다.
+[스프라이트 사용법](sprites.md#편집기-사용)에서 가져오기·저장 순서와 Guess의 진행 표시·취소를 설명한다.
 닫기 버튼이나 메뉴로 각 창을 여닫을 수 있으며, 도구 전체를 숨겼다 열어도 각 창의 열림 상태는 유지된다.
 
 키를 길게 누를 때의 반복 입력은 토글하지 않는다. Ctrl·Alt·GUI 조합 키도 무시하며 Shift 조합은 허용한다.
@@ -128,7 +128,7 @@ scripts/check-no-imgui.sh --release
 버전 교체 및 인자 보존을 검사한다. 실제 SDK·웹 검사를 대신하지 않는다.
 [웹 스모크](web.md#웹-스모크)로 이어 간다. 회귀 검사를 바꿀 때는
 [실패하는 변이로 약속을 확인하는 교훈](lessons/verify-promises-with-mutations.md)을 따른다.
-성공 경로 검사는 [fixture의 전제조건](lessons/prepare-valid-fixtures-for-success-paths.md)을 먼저 맞춘다.
+성공 경로 검사에서는 [fixture의 전제조건](lessons/prepare-valid-fixtures-for-success-paths.md)을 먼저 맞춘다.
 
 ## 스모크 출력 계약
 
