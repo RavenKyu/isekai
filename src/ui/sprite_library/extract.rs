@@ -1,7 +1,7 @@
 use super::log;
 use super::{Action, OpenSheet, SheetEditor, SheetSource, view};
 use crate::{
-    raster::{self, Dedupe, RgbaImage},
+    raster::{self, Dedupe},
     sprite::{
         Grid, SpriteSheet,
         store::{self, StoreError},
@@ -12,6 +12,7 @@ use dear_imgui_rs::{TextureId, Ui};
 use std::{
     fs, io,
     path::{Component, Path, PathBuf},
+    sync::atomic::AtomicBool,
 };
 
 struct Analysis {
@@ -20,7 +21,8 @@ struct Analysis {
     grouped: bool,
 }
 impl Analysis {
-    fn new(image: &RgbaImage, grid: &Grid, grouped: bool) -> Self {
+    #[cfg(test)]
+    fn new(image: &raster::RgbaImage, grid: &Grid, grouped: bool) -> Self {
         let dedupe = raster::dedupe_with(image, grid, grouped);
         let rebuild = raster::rebuild_matches(image, grid, &dedupe);
         Self {
@@ -61,6 +63,9 @@ pub(super) struct ExtractState {
     output: String,
     analysis: Option<Analysis>,
     written: Option<PathBuf>,
+    job: Option<super::job::Job<Analysis>>,
+    job_grid: Option<Grid>,
+    job_grouped: bool,
 }
 impl Default for ExtractState {
     fn default() -> Self {
@@ -72,13 +77,19 @@ impl Default for ExtractState {
             output: String::new(),
             analysis: None,
             written: None,
+            job: None,
+            job_grid: None,
+            job_grouped: false,
         }
     }
 }
 impl ExtractState {
-    fn sync(&mut self, sheet: &OpenSheet, checkout: &Path) {
+    /// Returns whether a running Analyze was dropped along with the old result.
+    fn sync(&mut self, sheet: &OpenSheet, checkout: &Path) -> bool {
+        let running = self.job.is_some();
         let source = (sheet.imgui_id, source_stem(&sheet.source));
         if self.source.as_ref() != Some(&source) {
+            self.job = None;
             self.output = default_output(&sheet.source, checkout)
                 .to_string_lossy()
                 .into_owned();
@@ -87,9 +98,16 @@ impl ExtractState {
             self.source = Some(source);
         }
         if self.grid != Some(sheet.meta.grid) {
+            self.job = None;
             self.analysis = None;
             self.written = None;
             self.grid = Some(sheet.meta.grid);
+        }
+        running && self.job.is_none()
+    }
+    fn cancel_job(&mut self, log: &mut log::SheetLog) {
+        if self.job.take().is_some() {
+            log::append(log, "Analyze cancelled".into());
         }
     }
     fn set_group_transforms(&mut self, grouped: bool) {
@@ -101,6 +119,42 @@ impl ExtractState {
     pub(super) fn invalidate(&mut self) {
         self.analysis = None;
         self.written = None;
+        self.job = None;
+    }
+}
+
+impl SheetEditor {
+    pub(super) fn cancel_analysis(&mut self) {
+        self.extract.cancel_job(&mut self.log);
+    }
+    pub(super) fn poll_analysis(&mut self) {
+        if self.extract.job.is_some()
+            && (self.extract.job_grid != Some(self.sheet.meta.grid)
+                || self.extract.job_grouped != self.extract.group_transforms)
+        {
+            self.cancel_analysis();
+            self.extract.invalidate();
+            return;
+        }
+        let Some(job) = &mut self.extract.job else {
+            return;
+        };
+        match job.poll() {
+            Ok(Some(analysis)) => {
+                self.extract.job = None;
+                self.log(format!("Analyze completed (100%): {}", analysis.report()));
+                self.extract.analysis = Some(analysis);
+            }
+            Ok(None) => {
+                if let Some(percent) = job.next_step() {
+                    self.log(format!("Analyzing... {percent}%"));
+                }
+            }
+            Err(error) => {
+                self.extract.job = None;
+                self.log(error);
+            }
+        }
     }
 }
 
@@ -287,7 +341,7 @@ fn plan_from_analysis(
 }
 #[cfg(test)]
 fn plan_extract(
-    image: &RgbaImage,
+    image: &raster::RgbaImage,
     grid: &Grid,
     columns: u32,
     output: &Path,
@@ -344,6 +398,65 @@ fn write_plan(plan: &ExtractPlan, open_files: &[PathBuf]) -> Result<String, Stri
     }
 }
 
+fn analysis_work(image: &raster::RgbaImage, grid: &Grid) -> u64 {
+    raster::dedupe_work(image, grid).saturating_mul(2)
+}
+/// Dedupe, then the rebuild check, reported as one run of `analysis_work` steps:
+/// the rebuild pass continues from where dedupe stopped instead of restarting at 0.
+fn analyze(
+    image: &raster::RgbaImage,
+    grid: &Grid,
+    grouped: bool,
+    progress: &dyn Fn(u64, u64),
+    cancel: &AtomicBool,
+) -> Option<Analysis> {
+    let work = raster::dedupe_work(image, grid);
+    let total = analysis_work(image, grid);
+    let dedupe = raster::dedupe_progress(
+        image,
+        grid,
+        grouped,
+        &|done, _| progress(done, total),
+        cancel,
+    )?;
+    let rebuild = raster::rebuild_matches_with(
+        image,
+        grid,
+        &dedupe,
+        &|done, _| progress(work + done, total),
+        cancel,
+    )?;
+    Some(Analysis {
+        dedupe,
+        rebuild,
+        grouped,
+    })
+}
+fn start_analysis(state: &mut ExtractState, sheet: &OpenSheet, log: &mut log::SheetLog) {
+    if state.job.is_some() {
+        return;
+    }
+    let image = sheet.image.clone();
+    let grid = sheet.meta.grid;
+    let grouped = state.group_transforms;
+    match super::job::Job::start(
+        "sprite-analyze",
+        "Analyze",
+        analysis_work(&image, &grid),
+        move |progress, cancel| analyze(&image, &grid, grouped, progress, cancel),
+    ) {
+        Ok(job) => {
+            state.analysis = None;
+            state.written = None;
+            state.job_grid = Some(grid);
+            state.job_grouped = grouped;
+            state.job = Some(job);
+            log::append(log, "Analyze started (0%)".into());
+        }
+        Err(error) => log::append(log, error),
+    }
+}
+
 pub(super) fn tab(editor: &mut SheetEditor, ui: &Ui, open_files: &[PathBuf]) {
     let Some(_tab) = ui.tab_item("Extract") else {
         return;
@@ -362,7 +475,9 @@ pub(super) fn tab(editor: &mut SheetEditor, ui: &Ui, open_files: &[PathBuf]) {
             return;
         }
     };
-    state.sync(sheet, &checkout);
+    if state.sync(sheet, &checkout) {
+        log::append(log, "Analyze cancelled".into());
+    }
     let mut changed = view::input_u32(ui, "Columns", &mut state.columns, 1);
     changed |= ui.input_text("Output", &mut state.output).build();
     if changed {
@@ -370,16 +485,15 @@ pub(super) fn tab(editor: &mut SheetEditor, ui: &Ui, open_files: &[PathBuf]) {
     }
     let mut grouped = state.group_transforms;
     if ui.checkbox("Group rotations/flips", &mut grouped) {
+        state.cancel_job(log);
         state.set_group_transforms(grouped);
     }
-    if ui.button("Analyze") {
-        // Synchronous, explicit action. Large sheets pause this dev tool.
-        state.analysis = Some(Analysis::new(
-            &sheet.image,
-            &sheet.meta.grid,
-            state.group_transforms,
-        ));
-        state.written = None;
+    if let Some(job) = &state.job {
+        if view::job_progress(ui, job.fraction(), "Analyzing", "Cancel Analyze") {
+            state.cancel_job(log);
+        }
+    } else if ui.button("Analyze") {
+        start_analysis(state, sheet, log);
     }
     if let Some(analysis) = &state.analysis {
         let report = analysis.report();
@@ -389,10 +503,11 @@ pub(super) fn tab(editor: &mut SheetEditor, ui: &Ui, open_files: &[PathBuf]) {
             ui.text_wrapped(&report);
         }
     }
-    let ready = state
-        .analysis
-        .as_ref()
-        .is_some_and(|a| !a.dedupe.unique.is_empty());
+    let ready = state.job.is_none()
+        && state
+            .analysis
+            .as_ref()
+            .is_some_and(|a| !a.dedupe.unique.is_empty());
     {
         let _disabled = ui.begin_disabled_with_cond(!ready);
         if ui.button("Write tileset") && ready {
@@ -427,6 +542,7 @@ pub(super) fn tab(editor: &mut SheetEditor, ui: &Ui, open_files: &[PathBuf]) {
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
+    use crate::raster::RgbaImage;
     use std::{
         io::Read,
         sync::atomic::{AtomicU64, Ordering},
@@ -812,6 +928,74 @@ pub(super) mod tests {
         );
         assert!(store::load(&path).is_ok());
         assert_no_temps(&temp.0);
+    }
+    #[test]
+    fn analysis_worker_matches_synchronous_analysis() {
+        let mut editor = SheetEditor::new(1, memory_sheet());
+        let expected = Analysis::new(&editor.sheet.image, &editor.sheet.meta.grid, false);
+        start_analysis(&mut editor.extract, &editor.sheet, &mut editor.log);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while editor.extract.job.is_some() {
+            editor.poll_analysis();
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        let actual = editor.extract.analysis.unwrap();
+        assert_eq!(actual.dedupe, expected.dedupe);
+        assert_eq!(actual.rebuild, expected.rebuild);
+    }
+    #[test]
+    fn analysis_progress_runs_through_both_passes_once() {
+        let sheet = memory_sheet();
+        let (image, grid) = (&sheet.image, &sheet.meta.grid);
+        let cells = raster::dedupe_work(image, grid);
+        assert!(cells > 0);
+        assert_eq!(analysis_work(image, grid), 2 * cells);
+        let calls = std::cell::RefCell::new(Vec::new());
+        let progress = |done, total| calls.borrow_mut().push((done, total));
+        analyze(image, grid, false, &progress, &AtomicBool::new(false)).unwrap();
+        let calls = calls.into_inner();
+        assert_eq!(calls.first(), Some(&(0, 2 * cells)));
+        assert_eq!(calls.last(), Some(&(2 * cells, 2 * cells)));
+        // The rebuild pass must not start over from 0 (the bar would sit at 50%).
+        assert!(calls.windows(2).all(|pair| pair[0].0 <= pair[1].0));
+        assert!(calls.iter().all(|&(_, total)| total == 2 * cells));
+    }
+    #[test]
+    fn stale_analysis_is_discarded_after_grid_changes() {
+        let sheet = memory_sheet();
+        let mut editor = SheetEditor::new(1, sheet);
+        let grid = editor.sheet.meta.grid;
+        let image = editor.sheet.image.clone();
+        editor.extract.job_grid = Some(grid);
+        editor.extract.job = Some(
+            super::super::job::Job::start("test-analysis", "Analyze", 0, move |_, _| {
+                Some(Analysis::new(&image, &grid, false))
+            })
+            .unwrap(),
+        );
+        editor.sheet.meta.grid.offset = [1, 0];
+        editor.poll_analysis();
+        assert!(editor.extract.job.is_none());
+        assert!(editor.extract.analysis.is_none());
+    }
+    #[test]
+    fn renaming_the_source_reports_the_dropped_analysis() {
+        let temp = Temp::new();
+        let mut sheet = memory_sheet();
+        let mut state = ExtractState::default();
+        assert!(!state.sync(&sheet, &temp.0));
+        state.job = Some(
+            super::super::job::Job::start("test-analysis", "Analyze", 0, |_, _| None::<Analysis>)
+                .unwrap(),
+        );
+        assert!(!state.sync(&sheet, &temp.0));
+        // Save image as under another name changes the stem the output follows.
+        sheet.source = SheetSource::Memory {
+            name: "renamed".into(),
+        };
+        assert!(state.sync(&sheet, &temp.0));
+        assert!(state.job.is_none());
     }
     #[test]
     fn grouping_toggle_invalidates_results_and_is_reported() {

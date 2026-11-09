@@ -205,6 +205,33 @@ pub fn dedupe(image: &RgbaImage, grid: &Grid) -> Dedupe {
 }
 
 pub fn dedupe_with(image: &RgbaImage, grid: &Grid, group_transforms: bool) -> Dedupe {
+    dedupe_progress(
+        image,
+        grid,
+        group_transforms,
+        &|_, _| {},
+        &AtomicBool::new(false),
+    )
+    .expect("uncancelled dedupe")
+}
+
+pub fn dedupe_work(image: &RgbaImage, grid: &Grid) -> u64 {
+    let cells = grid.cells(image.width, image.height);
+    u64::from(cells.cols) * u64::from(cells.rows)
+}
+pub fn dedupe_progress(
+    image: &RgbaImage,
+    grid: &Grid,
+    group_transforms: bool,
+    progress: &dyn Fn(u64, u64),
+    cancel: &AtomicBool,
+) -> Option<Dedupe> {
+    let total = dedupe_work(image, grid);
+    let mut done = 0;
+    progress(done, total);
+    if cancel.load(Ordering::Relaxed) {
+        return None;
+    }
     let cells = grid.cells(image.width, image.height);
     let mut result = Dedupe {
         unique: Vec::new(),
@@ -216,6 +243,9 @@ pub fn dedupe_with(image: &RgbaImage, grid: &Grid, group_transforms: bool) -> De
     let mut indices = HashMap::<Vec<u8>, (usize, Transform)>::new();
     for row in 0..cells.rows {
         for col in 0..cells.cols {
+            if cancel.load(Ordering::Relaxed) {
+                return None;
+            }
             let bytes = image.normalized_tile_bytes(grid, col, row);
             let entry = if let Some(&entry) = indices.get(&bytes) {
                 entry
@@ -242,9 +272,15 @@ pub fn dedupe_with(image: &RgbaImage, grid: &Grid, group_transforms: bool) -> De
             };
             result.map.push(entry);
             result.counts[entry.0] += 1;
+            done += 1;
+            progress(done, total);
         }
     }
-    result
+    if cancel.load(Ordering::Relaxed) {
+        None
+    } else {
+        Some(result)
+    }
 }
 
 pub fn build_sheet(unique: &[RgbaImage], tile: u32, columns: u32) -> RgbaImage {
@@ -273,10 +309,29 @@ pub fn rebuild_matches(
     grid: &Grid,
     dedupe: &Dedupe,
 ) -> Result<(), Vec<(u32, u32)>> {
+    rebuild_matches_with(image, grid, dedupe, &|_, _| {}, &AtomicBool::new(false))
+        .expect("uncancelled rebuild")
+}
+pub fn rebuild_matches_with(
+    image: &RgbaImage,
+    grid: &Grid,
+    dedupe: &Dedupe,
+    progress: &dyn Fn(u64, u64),
+    cancel: &AtomicBool,
+) -> Option<Result<(), Vec<(u32, u32)>>> {
+    let total = dedupe_work(image, grid);
+    let mut done = 0;
+    progress(done, total);
+    if cancel.load(Ordering::Relaxed) {
+        return None;
+    }
     let cells = grid.cells(image.width, image.height);
     let mut different = Vec::new();
     for row in 0..cells.rows {
         for col in 0..cells.cols {
+            if cancel.load(Ordering::Relaxed) {
+                return None;
+            }
             let index = row as usize * cells.cols as usize + col as usize;
             let expected = image.normalized_tile_bytes(grid, col, row);
             let actual = dedupe
@@ -293,12 +348,16 @@ pub fn rebuild_matches(
             {
                 different.push((col, row));
             }
+            done += 1;
+            progress(done, total);
         }
     }
-    if different.is_empty() {
-        Ok(())
+    if cancel.load(Ordering::Relaxed) {
+        None
+    } else if different.is_empty() {
+        Some(Ok(()))
     } else {
-        Err(different)
+        Some(Err(different))
     }
 }
 
@@ -325,17 +384,55 @@ pub struct CellRect {
 
 /// Linear flood fill with an explicit stack; call on demand, not during every draw.
 pub fn find_objects(image: &RgbaImage, background: Background, min_size: u32) -> Vec<ObjectBox> {
+    find_objects_with(
+        image,
+        background,
+        min_size,
+        &|_, _| {},
+        &AtomicBool::new(false),
+    )
+    .expect("uncancelled object search")
+}
+pub fn find_objects_work(image: &RgbaImage) -> u64 {
+    u64::from(image.height)
+}
+pub fn find_objects_with(
+    image: &RgbaImage,
+    background: Background,
+    min_size: u32,
+    progress: &dyn Fn(u64, u64),
+    cancel: &AtomicBool,
+) -> Option<Vec<ObjectBox>> {
+    let total = find_objects_work(image);
+    progress(0, total);
+    if cancel.load(Ordering::Relaxed) {
+        return None;
+    }
     let Some(len) = (image.width as usize).checked_mul(image.height as usize) else {
-        return Vec::new();
+        return Some(Vec::new());
     };
     if len == 0 {
-        return Vec::new();
+        progress(total, total);
+        return Some(Vec::new());
     }
     let background = match background {
-        Background::Auto if image.pixels.as_chunks::<4>().0.iter().any(|p| p[3] == 0) => {
-            Background::Transparent
+        Background::Auto => {
+            let mut transparent = false;
+            for row in image.pixels.chunks((image.width as usize) * 4) {
+                if cancel.load(Ordering::Relaxed) {
+                    return None;
+                }
+                if row.as_chunks::<4>().0.iter().any(|p| p[3] == 0) {
+                    transparent = true;
+                    break;
+                }
+            }
+            if transparent {
+                Background::Transparent
+            } else {
+                Background::Color(image.pixel(0, 0))
+            }
         }
-        Background::Auto => Background::Color(image.pixel(0, 0)),
         other => other,
     };
     let foreground = |x, y| match background {
@@ -347,6 +444,9 @@ pub fn find_objects(image: &RgbaImage, background: Background, min_size: u32) ->
     let mut objects = Vec::new();
     let mut stack = Vec::new();
     for y in 0..image.height {
+        if cancel.load(Ordering::Relaxed) {
+            return None;
+        }
         for x in 0..image.width {
             let i = y as usize * image.width as usize + x as usize;
             if visited[i] {
@@ -359,6 +459,9 @@ pub fn find_objects(image: &RgbaImage, background: Background, min_size: u32) ->
             let (mut left, mut top, mut right, mut bottom) = (x, y, x, y);
             stack.push((x, y));
             while let Some((px, py)) = stack.pop() {
+                if cancel.load(Ordering::Relaxed) {
+                    return None;
+                }
                 left = left.min(px);
                 top = top.min(py);
                 right = right.max(px);
@@ -385,9 +488,14 @@ pub fn find_objects(image: &RgbaImage, background: Background, min_size: u32) ->
                 objects.push(object);
             }
         }
+        progress(u64::from(y) + 1, total);
     }
     objects.sort_by_key(|b| (b.y, b.x));
-    objects
+    if cancel.load(Ordering::Relaxed) {
+        None
+    } else {
+        Some(objects)
+    }
 }
 
 impl ObjectBox {

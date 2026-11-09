@@ -574,3 +574,116 @@ fn dedupe_groups_eight_transforms_and_rebuild_checks_them() {
         [(0, Transform::IDENTITY); 2]
     );
 }
+
+#[test]
+fn analysis_progress_and_cancellation_match_wrappers() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let image = RgbaImage::new(6, 7);
+    let grid = Grid {
+        tile: 2,
+        offset: [0, 0],
+        spacing: 0,
+    };
+    let cancel = AtomicBool::new(false);
+    let calls = std::cell::RefCell::new(Vec::new());
+    assert_eq!(find_objects_work(&image), 7);
+    let objects = find_objects_with(
+        &image,
+        Background::Transparent,
+        1,
+        &|d, t| calls.borrow_mut().push((d, t)),
+        &cancel,
+    )
+    .unwrap();
+    assert_eq!(objects, find_objects(&image, Background::Transparent, 1));
+    assert_eq!(calls.borrow().first(), Some(&(0, 7)));
+    assert_eq!(calls.borrow().last(), Some(&(7, 7)));
+    assert_eq!(dedupe_work(&image, &grid), 9);
+    calls.borrow_mut().clear();
+    let d = dedupe_progress(
+        &image,
+        &grid,
+        true,
+        &|d, t| calls.borrow_mut().push((d, t)),
+        &cancel,
+    )
+    .unwrap();
+    assert_eq!(d, dedupe_with(&image, &grid, true));
+    assert_eq!(calls.borrow().first(), Some(&(0, 9)));
+    assert_eq!(calls.borrow().last(), Some(&(9, 9)));
+    calls.borrow_mut().clear();
+    assert_eq!(
+        rebuild_matches_with(
+            &image,
+            &grid,
+            &d,
+            &|d, t| calls.borrow_mut().push((d, t)),
+            &cancel
+        ),
+        Some(rebuild_matches(&image, &grid, &d))
+    );
+    assert_eq!(calls.borrow().first(), Some(&(0, 9)));
+    assert_eq!(calls.borrow().last(), Some(&(9, 9)));
+
+    // Cancelled after the first cell or row, each loop has to stop right there rather
+    // than run to its end and drop the result only at the final check.
+    fn stops_after_first_step(run: impl Fn(&dyn Fn(u64, u64), &AtomicBool) -> bool) -> bool {
+        let cancel = AtomicBool::new(false);
+        let last = std::cell::Cell::new(0);
+        let progress = |done, _| {
+            last.set(done);
+            if done == 1 {
+                cancel.store(true, Ordering::Relaxed);
+            }
+        };
+        run(&progress, &cancel) && last.get() == 1
+    }
+    assert!(stops_after_first_step(|progress, cancel| {
+        dedupe_progress(&image, &grid, false, progress, cancel).is_none()
+    }));
+    assert!(stops_after_first_step(|progress, cancel| {
+        rebuild_matches_with(&image, &grid, &d, progress, cancel).is_none()
+    }));
+    assert!(stops_after_first_step(|progress, cancel| {
+        find_objects_with(&image, Background::Transparent, 1, progress, cancel).is_none()
+    }));
+
+    cancel.store(true, Ordering::Relaxed);
+    assert!(dedupe_progress(&image, &grid, false, &|_, _| {}, &cancel).is_none());
+    assert!(rebuild_matches_with(&image, &grid, &d, &|_, _| {}, &cancel).is_none());
+    assert!(find_objects_with(&image, Background::Transparent, 1, &|_, _| {}, &cancel).is_none());
+}
+
+#[test]
+fn flood_fill_cancels_inside_a_large_object() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    };
+    use std::time::Duration;
+    let mut image = RgbaImage::new(2048, 2048);
+    image.fill_rect(0, 0, 2048, 2048, [1, 2, 3, 255]);
+    let cancel = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&cancel);
+    let (started, ready) = mpsc::channel();
+    let (finished, result) = mpsc::channel();
+    std::thread::spawn(move || {
+        let value = find_objects_with(
+            &image,
+            Background::Transparent,
+            1,
+            &|done, _| {
+                if done == 0 {
+                    let _ = started.send(());
+                }
+            },
+            &flag,
+        );
+        let _ = finished.send(value);
+    });
+    ready.recv_timeout(Duration::from_secs(1)).unwrap();
+    std::thread::sleep(Duration::from_millis(30));
+    cancel.store(true, Ordering::Relaxed);
+    assert_eq!(result.recv_timeout(Duration::from_secs(1)).unwrap(), None);
+}
