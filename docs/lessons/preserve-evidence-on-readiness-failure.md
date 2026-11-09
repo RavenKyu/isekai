@@ -13,6 +13,6 @@
 - 브라우저가 응답하는 동안에는 준비 실패도 공통 증거 수집 경로를 거친 뒤 실패를 반환한다.
 - 준비 전에 실패 줄을 쓰는 페이지와 준비 신호 없이 멈춘 페이지를 각각 실행해 결과·시간 상한·증거 파일을 확인한다. DevTools 자체가 멈춰 수집할 수 없는 경우는 구분해 기록한다.
 
-Decided in: rn-7w7b
+Decided in: isk-7w7b
 
-Learned in: rn-7w7b.wg3
+Learned in: isk-7w7b.wg3

@@ -10,4 +10,4 @@
 - 같은 파일인지 비교하는 기준은 공유 helper로 모으고, 기존 출력의 별칭은 비교 전에 정규화한다. 저장 성공 후 editor가 보유하는 경로도 이후 Load와 같은 기준을 쓴다.
 - 두 editor가 같은 파일을 다룰 때와 symlink 별칭을 쓸 때, 거부된 쓰기가 PNG와 메타 바이트를 바꾸지 않는지 검사한다.
 
-Learned in: rn-hk1c.xrm
+Learned in: isk-hk1c.xrm

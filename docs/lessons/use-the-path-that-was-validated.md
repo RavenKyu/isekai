@@ -13,4 +13,4 @@
 - 입력 alias를 바꾼 뒤에도 반환한 경로가 검증한 대상을 읽는지 검사하고, 입력 alias를 그대로 반환하는 변이가 실패하는지 확인한다.
 - canonical 경로를 반환하는 검사는 파일 핸들 기반의 완전한 TOCTOU 방지가 아니다. 검증 뒤 실제 대상 자체를 교체하는 경우까지 검증했다고 보고하지 않는다.
 
-Learned in: rn-aw9h.gtj
+Learned in: isk-aw9h.gtj

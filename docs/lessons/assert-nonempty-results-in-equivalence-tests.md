@@ -13,4 +13,4 @@
 - Choose fixture inputs that produce a meaningful result and assert that precondition before comparing the worker result with the synchronous result.
 - When testing cancellation, make the cancelled result observably different from the result already installed.
 
-Decided in: rn-6ptr
+Decided in: isk-6ptr

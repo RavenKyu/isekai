@@ -122,4 +122,4 @@ dev·비dev 검사와 재생 스모크는 통합 브랜치에서 로컬로 확�
 이 에픽의 원격 CI는 미실행이며 origin push도 하지 않았다.
 CI도 로컬과 같은 스모크 스크립트를 쓰고 웹 비dev 빌드에 `--play` 검사를 추가한다.
 
-Decided in: rn-35g9, rn-7w7b, rn-fcuz
+Decided in: isk-35g9, isk-7w7b, isk-fcuz

@@ -13,6 +13,6 @@
 - 저장하지 않는 계약이라면 해당 경로를 공통 초기화 함수에서 명시적으로 끄고 앱과 테스트가 그 함수를 함께 사용한다.
 - 파일 이름이 비활성인지 관찰하는 단언을 두고 비활성화 코드를 제거했을 때 실패하는지 확인한다.
 
-Decided in: rn-7w7b
+Decided in: isk-7w7b
 
-Learned in: rn-7w7b.wg3
+Learned in: isk-7w7b.wg3

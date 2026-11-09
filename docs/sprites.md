@@ -386,4 +386,4 @@ PNG만 지원하며 undo, 프레임 이벤트, 상태머신·타일맵 배치는
 `/assets/splites/`는 gitignore에 있으며 이미지·결과 PNG·사이드카를 커밋하지 않는다.
 라이선스는 이 문서에서 단정하지 않는다. 자동 검사·웹 예제는 코드가 만든 이미지로만 동작한다.
 
-Decided in: rn-fcuz, rn-hk1c, rn-aw9h, rn-ut06, rn-6ptr, rn-8v66, rn-y594, rn-utmw
+Decided in: isk-fcuz, isk-hk1c, isk-aw9h, isk-ut06, isk-6ptr, isk-8v66, isk-y594, isk-utmw

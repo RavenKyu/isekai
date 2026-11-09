@@ -83,7 +83,7 @@ GL 컨텍스트와 창보다 먼저 해제된다. dev 안에서는 편집기 텍
 canvas를 남긴다. 텍스처 업로드·Drop·외부 ID 해제는 GL 테스트가 검사한다.
 네이티브 GL readback 검사는 `SpriteQuad`의 회전·반전 방향도 본다. 측정하지 않는 범위는 [스프라이트 검사](sprites.md#검사)에 있다.
 App 필드 순서나 전체 shutdown 순서가 바뀌는 변이를 잡는 자동 검사는 없다.
-그 순서는 리뷰에서 코드로 확인해야 하며 전체 수명 계측은 rn-rj8j의 작업 범위다.
+그 순서는 리뷰에서 코드로 확인해야 하며 전체 수명 계측은 isk-rj8j의 작업 범위다.
 
 ## 평소 검사 순서
 
@@ -183,4 +183,4 @@ rn-smoke: ok frames=<N> vtx=<M> lit=<K>
 - `sheet ... exceeds GL_MAX_TEXTURE_SIZE ...`: 이미지 크기가 GL 한계를 넘는다. 시트를 작게 나누거나 지원 가능한 환경에서 연다.
 - `missing required tool`: 오류에 표시된 Xvfb, Python, timeout, nm 등을 준비한다.
 
-Decided in: rn-35g9, rn-7w7b, rn-fcuz, rn-hk1c
+Decided in: isk-35g9, isk-7w7b, isk-fcuz, isk-hk1c
