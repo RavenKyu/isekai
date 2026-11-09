@@ -85,6 +85,8 @@ pub struct SpriteLibrary {
     pub pending: Vec<Action>,
     assets_scanned: bool,
     next_id: SheetId,
+    #[cfg(test)]
+    import_controls: tests::ImportControls,
 }
 impl Default for SpriteLibrary {
     fn default() -> Self {
@@ -99,6 +101,8 @@ impl Default for SpriteLibrary {
             pending: vec![],
             assets_scanned: false,
             next_id: 0,
+            #[cfg(test)]
+            import_controls: Default::default(),
         }
     }
 }
@@ -311,6 +315,10 @@ impl SpriteLibrary {
             + style.item_spacing()[0];
         ui.set_next_item_width((ui.content_region_avail()[0] - reserved_width).max(1.0));
         ui.input_text("PNG path", &mut self.path_input).build();
+        #[cfg(test)]
+        {
+            self.import_controls.input = tests::ImportItem::last(ui);
+        }
         ui.same_line();
         {
             let _disabled =
@@ -318,6 +326,10 @@ impl SpriteLibrary {
             if ui.button("Load") {
                 self.pending
                     .push(Action::Load(PathBuf::from(self.path_input.trim())));
+            }
+            #[cfg(test)]
+            {
+                self.import_controls.load = tests::ImportItem::last(ui);
             }
         }
         if ui.button("Browse...")
@@ -327,9 +339,18 @@ impl SpriteLibrary {
         {
             self.pending.push(Action::Load(path));
         }
+        #[cfg(test)]
+        {
+            self.import_controls.browse = tests::ImportItem::last(ui);
+        }
         ui.same_line();
         if ui.button("Refresh assets/") {
             self.refresh_assets();
+        }
+        #[cfg(test)]
+        {
+            self.import_controls.refresh = tests::ImportItem::last(ui);
+            self.import_controls.asset = None;
         }
         ui.checkbox("Key color", &mut self.use_key);
         ui.same_line();
@@ -340,6 +361,10 @@ impl SpriteLibrary {
                 for path in &self.assets {
                     if ui.selectable(path.to_string_lossy()) {
                         self.pending.push(Action::Load(path.clone()));
+                    }
+                    #[cfg(test)]
+                    {
+                        self.import_controls.asset = Some(tests::ImportItem::last(ui));
                     }
                 }
             });
@@ -729,6 +754,206 @@ mod tests {
         BackendFlags, Context,
         render::{SynchronousRendererConsumer, TextureOp},
     };
+
+    // Observe the actual submitted items, rather than repeating import_panel's
+    // layout or enabled condition in a test-only copy of the UI.
+    #[derive(Clone, Copy, Debug, Default)]
+    pub(super) struct ImportItem {
+        min: [f32; 2],
+        max: [f32; 2],
+        disabled: bool,
+    }
+    impl ImportItem {
+        pub(super) fn last(ui: &Ui) -> Self {
+            use dear_imgui_rs::sys;
+            Self {
+                min: ui.item_rect_min(),
+                max: ui.item_rect_max(),
+                // SAFETY: called immediately after a widget in an active frame
+                // on the subprocess's sole ImGui owning thread.
+                disabled: unsafe { sys::igGetItemFlags() & sys::ImGuiItemFlags_Disabled != 0 },
+            }
+        }
+        fn center(self) -> [f32; 2] {
+            [
+                (self.min[0] + self.max[0]) * 0.5,
+                (self.min[1] + self.max[1]) * 0.5,
+            ]
+        }
+    }
+    #[derive(Clone, Copy, Default)]
+    pub(super) struct ImportControls {
+        pub input: ImportItem,
+        pub load: ImportItem,
+        pub browse: ImportItem,
+        pub refresh: ImportItem,
+        pub asset: Option<ImportItem>,
+    }
+
+    #[test]
+    fn import_panel_in_its_own_process() {
+        let fixture = std::env::temp_dir().join(format!(
+            "rn-import-panel-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(fixture.join("assets")).unwrap();
+        // Refresh only lists the name; no PNG decoding, GL or local assets.
+        std::fs::write(fixture.join("assets/from-refresh.png"), []).unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .current_dir(&fixture)
+            .args([
+                "--exact",
+                "ui::sprite_library::tests::import_panel_clicks_and_layout",
+                "--ignored",
+            ])
+            .output();
+        std::fs::remove_dir_all(fixture).unwrap();
+        let output = output.unwrap();
+        assert!(
+            output.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    #[ignore = "run by import_panel_in_its_own_process with isolated assets fixture"]
+    fn import_panel_clicks_and_layout() {
+        use std::cell::{Cell, RefCell};
+        let (mut context, consumer) = context();
+        let library = RefCell::new(SpriteLibrary::default());
+        let content_right = Cell::new(0.0);
+        for width in [320.0, 620.0, 900.0] {
+            let render = |context: &mut Context| {
+                vertices(context, &consumer, |ui| {
+                    ui.window("Import panel regression")
+                        .position([20.0, 20.0], Condition::Always)
+                        .size([width, 260.0], Condition::Always)
+                        .build(|| {
+                            content_right
+                                .set(ui.cursor_screen_pos()[0] + ui.content_region_avail()[0]);
+                            library.borrow_mut().import_panel(ui);
+                        });
+                });
+            };
+            let click = |context: &mut Context, point| {
+                context.io_mut().add_mouse_pos_event(point);
+                render(context);
+                context
+                    .io_mut()
+                    .add_mouse_button_event(dear_imgui_rs::MouseButton::Left, true);
+                render(context);
+                context
+                    .io_mut()
+                    .add_mouse_button_event(dear_imgui_rs::MouseButton::Left, false);
+                render(context);
+            };
+            for (input, expected) in [
+                ("", None),
+                ("  ", None),
+                ("\t\n", None),
+                ("/", None),
+                (".", None),
+                ("..", None),
+                ("assets/", None),
+                (" assets/ \t", None),
+                ("assets/.", None),
+                ("/tmp/a.png/.", None),
+                ("assets/..", None),
+                ("a.png", Some("a.png")),
+                ("assets/a.png", Some("assets/a.png")),
+                ("/tmp/a.png", Some("/tmp/a.png")),
+                ("  assets/a.png \t", Some("assets/a.png")),
+            ] {
+                library.borrow_mut().path_input = input.into();
+                library.borrow_mut().assets = vec!["from-list.png".into()];
+                render(&mut context);
+                let items = library.borrow().import_controls;
+                assert_eq!(
+                    items.load.disabled,
+                    expected.is_none(),
+                    "Load disabled: {input:?}, width={width}"
+                );
+                for (name, item) in [
+                    ("PNG path", items.input),
+                    ("Browse", items.browse),
+                    ("Refresh", items.refresh),
+                    ("asset", items.asset.expect("fixture asset was submitted")),
+                ] {
+                    assert!(!item.disabled, "{name} disabled: {input:?}, width={width}");
+                }
+                assert_eq!(
+                    items.input.min[1], items.load.min[1],
+                    "Load shares input row"
+                );
+                assert!(
+                    items.load.min[0] > items.input.max[0],
+                    "Load follows path label"
+                );
+                assert!(
+                    items.load.max[0] <= content_right.get() + 1.0,
+                    "Load fits content: {:?}, right={}, width={width}",
+                    items.load,
+                    content_right.get()
+                );
+                assert!(
+                    items.browse.min[1] > items.load.max[1],
+                    "Browse is on next row"
+                );
+                assert_eq!(
+                    items.browse.min[1], items.refresh.min[1],
+                    "Refresh shares Browse row"
+                );
+                assert!(
+                    items.refresh.min[0] > items.browse.max[0],
+                    "Refresh follows Browse"
+                );
+
+                click(&mut context, items.load.center());
+                let pending = std::mem::take(&mut library.borrow_mut().pending);
+                match expected {
+                    None => assert!(pending.is_empty(), "disabled Load queued: {input:?}"),
+                    Some(path) => assert!(
+                        matches!(&pending[..], [Action::Load(actual)] if actual == &PathBuf::from(path)),
+                        "Load queues exactly one trimmed path: {input:?}, width={width}"
+                    ),
+                }
+            }
+            // A disabled Load must leave the following row and child list usable.
+            // Do not click Browse: that would open a native OS file dialog.
+            library.borrow_mut().path_input.clear();
+            render(&mut context);
+            let refresh = library.borrow().import_controls.refresh.center();
+            click(&mut context, refresh);
+            assert_eq!(
+                library.borrow().assets,
+                [std::env::current_dir()
+                    .unwrap()
+                    .join("assets/from-refresh.png")],
+                "Refresh really scans the isolated fixture while Load is disabled"
+            );
+            assert!(library.borrow().pending.is_empty());
+            let asset = library.borrow().import_controls.asset.unwrap().center();
+            click(&mut context, asset);
+            let pending = std::mem::take(&mut library.borrow_mut().pending);
+            assert!(
+                matches!(&pending[..], [Action::Load(path)] if path == &library.borrow().assets[0]),
+                "asset selection queues its own path while Load is disabled"
+            );
+        }
+        context
+            .prepare_renderer_texture_reset(&consumer)
+            .unwrap()
+            .commit();
+        drop(consumer);
+        context.poll_snapshot_completions().unwrap();
+    }
+
     #[test]
     fn import_path_requires_a_file_name() {
         for path in [
