@@ -202,6 +202,7 @@ Find regions·Suggest from objects·Analyze는 버튼에서만 동기로 실행�
 파일을 덮지 않도록 배타적으로 게시한다. 둘은 하나의 트랜잭션이 아니다.
 배타 게시에는 하드 링크를 지원하는 파일시스템이 필요하다. FAT/exFAT나 하드 링크를 지원하지 않는
 일부 네트워크 마운트에서는 `Save image as`와 타일셋 JSON 게시가 IO 오류로 실패한다.
+`Write tileset`은 이때도 PNG를 이미 교체했고 `PNG written: ...; sidecar not written: sprite file IO: ...`를 표시한다.
 이때는 하드 링크를 지원하는 저장 위치를 사용한다. 다른 방식으로 자동 전환하지 않는다.
 기존 사이드카 때문에 JSON 저장이 거부돼도 PNG는 이미 새 내용일 수 있다.
 `PNG written: ...; sidecar not written: sidecar exists; remove it first`가 그 상태다.
