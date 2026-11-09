@@ -27,6 +27,7 @@ pub(super) struct RegionsState {
     save_path: String,
     batch_dir: String,
     batch_job: Option<CropJob>,
+    find_job: Option<super::job::Job<Vec<ObjectBox>>>,
 }
 impl Default for RegionsState {
     fn default() -> Self {
@@ -40,6 +41,7 @@ impl Default for RegionsState {
             save_path: String::new(),
             batch_dir: String::new(),
             batch_job: None,
+            find_job: None,
         }
     }
 }
@@ -51,6 +53,11 @@ impl RegionsState {
             self.selected = None;
             self.save_path.clear();
             self.batch_dir.clear();
+        }
+    }
+    fn cancel_find(&mut self, log: &mut log::SheetLog) {
+        if self.find_job.take().is_some() {
+            log::append(log, "Find regions cancelled".into());
         }
     }
     fn background(&self) -> Result<Background, String> {
@@ -205,6 +212,34 @@ impl Drop for CropJob {
     }
 }
 impl SheetEditor {
+    pub(super) fn cancel_find(&mut self) {
+        self.regions.cancel_find(&mut self.log);
+    }
+    pub(super) fn poll_find(&mut self) {
+        let Some(job) = &mut self.regions.find_job else {
+            return;
+        };
+        match job.poll() {
+            Ok(Some(objects)) => {
+                self.regions.find_job = None;
+                self.regions.candidates = objects;
+                self.regions.selected = None;
+                self.log(format!(
+                    "Find regions completed (100%): {} region candidates (not saved)",
+                    self.regions.candidates.len()
+                ));
+            }
+            Ok(None) => {
+                if let Some(percent) = job.next_step() {
+                    self.log(format!("Finding regions... {percent}%"));
+                }
+            }
+            Err(error) => {
+                self.regions.find_job = None;
+                self.log(error);
+            }
+        }
+    }
     pub(super) fn cancel_batch(&mut self) {
         let Some(job) = &self.regions.batch_job else {
             return;
@@ -399,6 +434,33 @@ pub(super) fn sheet_view(editor: &mut SheetEditor, ui: &Ui, mut overlays: Vec<Ov
     overlays.extend(regions);
     editor.sheet_view(ui, &overlays);
 }
+fn start_find(state: &mut RegionsState, sheet: &OpenSheet, log: &mut log::SheetLog) {
+    if state.find_job.is_some() {
+        return;
+    }
+    match state.background() {
+        Ok(background) => {
+            let image = sheet.image.clone();
+            let total = raster::find_objects_work(&image);
+            let min_size = state.min_size;
+            match super::job::Job::start(
+                "sprite-find-regions",
+                "Find regions",
+                total,
+                move |progress, cancel| {
+                    raster::find_objects_with(&image, background, min_size, progress, cancel)
+                },
+            ) {
+                Ok(job) => {
+                    state.find_job = Some(job);
+                    log::append(log, "Find regions started (0%)".into());
+                }
+                Err(error) => log::append(log, error),
+            }
+        }
+        Err(e) => log::append(log, e),
+    }
+}
 pub(super) fn tab(editor: &mut SheetEditor, ui: &Ui, open_files: &[PathBuf]) {
     let Some(_tab) = ui.tab_item("Regions") else {
         return;
@@ -411,29 +473,26 @@ pub(super) fn tab(editor: &mut SheetEditor, ui: &Ui, open_files: &[PathBuf]) {
         ..
     } = editor;
     state.sync(sheet);
-    ui.combo_simple_string(
+    let mut changed = ui.combo_simple_string(
         "Background",
         &mut state.background,
         &["Auto", "Transparent", "Color"],
     );
     if state.background == 2 {
-        ui.input_text("Background RGB hex", &mut state.color)
+        changed |= ui
+            .input_text("Background RGB hex", &mut state.color)
             .build();
     }
-    view::input_u32(ui, "Min size", &mut state.min_size, 1);
-    if ui.button("Find regions") {
-        match state.background() {
-            Ok(background) => {
-                // Large images pause the editor; invoke only on this button.
-                state.candidates = raster::find_objects(&sheet.image, background, state.min_size);
-                state.selected = None;
-                log::append(
-                    log,
-                    format!("{} region candidates (not saved)", state.candidates.len()),
-                );
-            }
-            Err(e) => log::append(log, e),
+    changed |= view::input_u32(ui, "Min size", &mut state.min_size, 1);
+    if changed {
+        state.cancel_find(log);
+    }
+    if let Some(job) = &state.find_job {
+        if view::job_progress(ui, job.fraction(), "Finding", "Cancel Find regions") {
+            state.cancel_find(log);
         }
+    } else if ui.button("Find regions") {
+        start_find(state, sheet, log);
     }
     ui.child_window("Region candidates")
         .size([0.0, 80.0])
@@ -815,6 +874,34 @@ mod tests {
                     .all(|e| !e.unwrap().file_name().to_string_lossy().contains(".tmp-"))
             );
         }
+    }
+    #[test]
+    fn find_worker_matches_synchronous_and_cancel_discards_results() {
+        let mut editor = SheetEditor::new(1, super::super::extract::tests::memory_sheet());
+        // The default Min size (32) finds nothing in this 64 x 16 sheet; an empty list
+        // would match whatever the worker returned.
+        editor.regions.min_size = raster::DEFAULT_MIN_OBJECT_SIZE;
+        let expected = raster::find_objects(
+            &editor.sheet.image,
+            Background::Auto,
+            editor.regions.min_size,
+        );
+        assert!(!expected.is_empty());
+        start_find(&mut editor.regions, &editor.sheet, &mut editor.log);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while editor.regions.find_job.is_some() {
+            editor.poll_find();
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        assert_eq!(editor.regions.candidates, expected);
+        // This run would find nothing, so its result, if applied, would show.
+        editor.regions.min_size = 1000;
+        start_find(&mut editor.regions, &editor.sheet, &mut editor.log);
+        editor.cancel_find();
+        assert!(editor.regions.find_job.is_none());
+        editor.poll_find();
+        assert_eq!(editor.regions.candidates, expected);
     }
     #[test]
     fn regions_are_proposals_and_crop_is_a_queued_image() {

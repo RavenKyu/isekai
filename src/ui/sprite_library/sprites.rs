@@ -1,7 +1,7 @@
 use super::log;
 use super::{
     SheetEditor, edit,
-    view::{Overlay, input_u32},
+    view::{Overlay, input_u32, job_progress},
 };
 use crate::sprite::format::{Part, Shape};
 use dear_imgui_rs::Ui;
@@ -55,12 +55,14 @@ impl SheetEditor {
                 log::append(&mut self.log, "Select tiles first".into());
             }
         }
-        if ui.button("Suggest from objects") {
-            self.suggestions = edit::suggestions(&sheet.image, &sheet.meta.grid);
-            if self.suggestions.is_empty() {
-                log::append(&mut self.log, "No object suggestions".into());
+        if let Some(job) = &self.suggest_job {
+            if job_progress(ui, job.fraction(), "Suggesting", "Cancel Suggest") {
+                self.cancel_suggest();
             }
+        } else if ui.button("Suggest from objects") {
+            self.start_suggest();
         }
+        let sheet = &mut self.sheet;
         for (i, rect) in self.suggestions.iter().enumerate() {
             let _id = ui.push_id(&format!("object-{i}"));
             ui.text(format!(
