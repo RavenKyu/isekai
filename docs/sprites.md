@@ -223,6 +223,7 @@ Find regions·Suggest from objects·Analyze는 버튼에서만 동기로 실행�
 배타 게시에는 하드 링크를 지원하는 파일시스템이 필요하다. FAT/exFAT나 하드 링크를 지원하지 않는
 일부 네트워크 마운트에서는 `Save image as`와 타일셋 JSON 게시가 IO 오류로 실패한다.
 `Write tileset`은 이때도 PNG를 이미 교체했고 `PNG written: ...; sidecar not written: sprite file IO: ...`를 표시한다.
+하드 링크 생성이 실패하면 게시하려던 새 대상 파일은 생기지 않고 임시 파일은 지워진다.
 이때는 하드 링크를 지원하는 저장 위치를 사용한다. 다른 방식으로 자동 전환하지 않는다.
 기존 사이드카 때문에 JSON 저장이 거부돼도 PNG는 이미 새 내용일 수 있다.
 `PNG written: ...; sidecar not written: sidecar exists; remove it first`가 그 상태다.
@@ -356,4 +357,4 @@ Find regions·Suggest from objects·Analyze의 동기 실행과 앱 종료 시 �
 `/assets/splites/`는 gitignore에 있으며 이미지·결과 PNG·사이드카를 커밋하지 않는다.
 라이선스는 이 문서에서 단정하지 않는다. 자동 검사·웹 예제는 코드가 만든 이미지로만 동작한다.
 
-Decided in: rn-fcuz, rn-hk1c, rn-aw9h, rn-ut06
+Decided in: rn-fcuz, rn-hk1c, rn-aw9h, rn-ut06, rn-8v66
