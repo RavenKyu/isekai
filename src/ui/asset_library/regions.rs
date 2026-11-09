@@ -457,10 +457,7 @@ fn start_find(state: &mut RegionsState, sheet: &OpenSheet, log: &mut log::SheetL
         Err(e) => log::append(log, e),
     }
 }
-pub(super) fn tab(editor: &mut SheetEditor, ui: &Ui, open_files: &[PathBuf]) {
-    let Some(_tab) = ui.tab_item("Regions") else {
-        return;
-    };
+pub(super) fn section(editor: &mut SheetEditor, ui: &Ui, open_files: &[PathBuf]) {
     let SheetEditor {
         sheet,
         regions: state,
@@ -589,7 +586,7 @@ mod tests {
             };
             2
         ];
-        let dir = temp.0.join("assets/splites/map");
+        let dir = temp.0.join("assets/sprites/map");
         std::fs::create_dir_all(&dir).unwrap();
         let sidecar = store::sidecar_for(&dir.join("map-region-2.png"));
         std::fs::write(&sidecar, b"existing").unwrap();
@@ -603,7 +600,7 @@ mod tests {
             plan_batch(
                 &boxes,
                 "map",
-                &temp.0.join("assets/splites/../bad"),
+                &temp.0.join("assets/sprites/../bad"),
                 &temp.0,
                 &[]
             )
@@ -611,7 +608,7 @@ mod tests {
         );
         #[cfg(unix)]
         {
-            let link = temp.0.join("assets/splites/link");
+            let link = temp.0.join("assets/sprites/link");
             std::os::unix::fs::symlink(&temp.0, &link).unwrap();
             assert!(plan_batch(&boxes, "map", &link.join("new"), &temp.0, &[]).is_err());
             assert!(!temp.0.join("new").exists());
@@ -637,7 +634,7 @@ mod tests {
             };
             2
         ];
-        let dir = temp.0.join("assets/splites/new");
+        let dir = temp.0.join("assets/sprites/new");
         let open_files = [dir.join("map-region-1.png"), dir.join("map-region-2.png")];
         let entries = std::fs::read_dir(&temp.0).unwrap().count();
         let error = plan_batch(&boxes, "map", &dir, &temp.0, &open_files).unwrap_err();
@@ -668,13 +665,13 @@ mod tests {
             };
             2
         ];
-        let dir = temp.0.join("assets/splites/map");
+        let dir = temp.0.join("assets/sprites/map");
         std::fs::create_dir_all(&dir).unwrap();
         let open = dir.join("map-region-2.png");
         std::fs::write(&open, b"open png").unwrap();
         let open_files = [open.canonicalize().unwrap()];
         // The relative form resolves to the same file as the canonical open path.
-        for dir in [dir.clone(), PathBuf::from("assets/splites/map")] {
+        for dir in [dir.clone(), PathBuf::from("assets/sprites/map")] {
             let error = plan_batch(&boxes, "map", &dir, &temp.0, &open_files).unwrap_err();
             assert!(error.contains("map-region-2.png"), "{error}");
         }
@@ -780,7 +777,7 @@ mod tests {
         let targets = plan_batch(
             &[bbox, bbox],
             "map",
-            &temp.0.join("assets/splites/map"),
+            &temp.0.join("assets/sprites/map"),
             &temp.0,
             &[],
         )
@@ -812,7 +809,7 @@ mod tests {
         let targets = plan_batch(
             &[bbox, bbox],
             "map",
-            &temp.0.join("assets/splites/map"),
+            &temp.0.join("assets/sprites/map"),
             &temp.0,
             &[],
         )
@@ -870,7 +867,7 @@ mod tests {
         let targets = plan_batch(
             &boxes,
             "map",
-            &temp.0.join("assets/splites/map"),
+            &temp.0.join("assets/sprites/map"),
             &temp.0,
             &[],
         )
@@ -998,7 +995,7 @@ mod tests {
         // Both the default wrapper and bulk --ignored runs must enter a fresh
         // process before creating ImGui's single-thread-owned context.
         if !crate::test_support::in_child_process(
-            "ui::sprite_library::regions::tests::memory_save_button_preserves_state_on_refusal",
+            "ui::asset_library::regions::tests::memory_save_button_preserves_state_on_refusal",
             Some("RN_MEMORY_SAVE_CHILD"),
             true,
             None,
@@ -1102,7 +1099,7 @@ mod tests {
     fn save_memory_refuses_open_output_before_creating_directories() {
         let temp = crate::test_support::TempDir::new("save-memory");
         let mut sheet = super::super::extract::tests::memory_sheet();
-        let output = temp.0.join("assets/splites/new/new.png");
+        let output = temp.0.join("assets/sprites/new/new.png");
         let SheetSource::Memory { name } = &sheet.source else {
             panic!("expected a memory image");
         };
@@ -1139,7 +1136,7 @@ mod tests {
         let temp = crate::test_support::TempDir::new("extract");
         let mut sheet = super::super::extract::tests::memory_sheet();
         let output = default_image_output(&sheet.source, &temp.0);
-        assert_eq!(output, temp.0.join("assets/splites/map/map.png"));
+        assert_eq!(output, temp.0.join("assets/sprites/map/map.png"));
         assert!(save_memory(&mut sheet, &output.with_extension("jpg"), &temp.0, &[]).is_err());
         assert!(matches!(sheet.source, SheetSource::Memory { .. }));
         std::fs::create_dir_all(output.parent().unwrap()).unwrap();

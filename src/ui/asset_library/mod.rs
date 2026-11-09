@@ -1,4 +1,5 @@
-mod clips;
+mod animations;
+mod canvas;
 mod edit;
 mod extract;
 mod guess;
@@ -6,9 +7,10 @@ mod job;
 mod log;
 mod model;
 mod preview;
+mod props;
 mod regions;
 mod sprites;
-mod tiles;
+mod tileset;
 mod view;
 pub use model::*;
 
@@ -17,7 +19,7 @@ use crate::{
     sprite::{Grid, SpriteSheet, store, texture::SheetTexture},
 };
 use dear_imgui_glow::{ExternalTextureId, GlowRenderer};
-use dear_imgui_rs::{Condition, TextureId, Ui};
+use dear_imgui_rs::{Condition, TabItemOptions, TabItemPlacement, TextureId, TreeNodeFlags, Ui};
 use std::{
     path::{Path, PathBuf},
     rc::Rc,
@@ -56,6 +58,13 @@ pub struct OpenSheet {
 }
 /// Identifies one open sheet so queued actions reach the editor that asked.
 pub type SheetId = u64;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TileDrag {
+    sheet: SheetId,
+    col: u32,
+    row: u32,
+}
+const TILE_DRAG: &str = "RN_SHEET_TILE";
 pub enum Action {
     Load(PathBuf),
     Reload(SheetId),
@@ -67,10 +76,21 @@ pub enum Action {
         grid: Grid,
     },
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+enum EditorTab {
+    #[default]
+    Tileset,
+    Sprites,
+    Animations,
+    Import,
+}
+
 /// Everything needed to edit one sheet. The library owns a list of these.
 pub struct SheetEditor {
     pub id: SheetId,
     pub sheet: OpenSheet,
+    now: fn() -> u64,
+    active_tab: EditorTab,
     focus_requested: bool,
     confirm_close: bool,
     #[cfg(test)]
@@ -79,6 +99,16 @@ pub struct SheetEditor {
     tile_name_input: [f32; 2],
     #[cfg(test)]
     sprite_name_input: [f32; 2],
+    #[cfg(test)]
+    sprite_new_input: [f32; 2],
+    #[cfg(test)]
+    sprite_blank_input: [f32; 2],
+    #[cfg(test)]
+    animation_new_input: [f32; 2],
+    #[cfg(test)]
+    frame_add_input: [f32; 2],
+    #[cfg(test)]
+    frame_remove_input: [f32; 2],
     pub zoom: u32,
     pub show_grid: bool,
     pub guess: Option<GridGuess>,
@@ -89,17 +119,21 @@ pub struct SheetEditor {
     pub pending: Vec<Action>,
     /// Where Save image as wrote the memory image, for the library's PNG path field.
     saved_path: Option<PathBuf>,
-    tile_draft: tiles::TileDraft,
-    selected_sprite: Option<String>,
-    selected_clip: Option<String>,
-    suggestions: Vec<raster::CellRect>,
-    suggest_job: Option<job::Job<Vec<raster::ObjectBox>>>,
-    clip_draft: clips::ClipDraft,
+    tile_draft: tileset::TileDraft,
+    selected_sprite: Option<u64>,
+    sprite_props_target: Option<u64>,
+    sprite_props: props::PropsDraft,
+    drag_origin: Option<TileDrag>,
+    canvas_cache: Option<(u64, crate::sprite::format::Shape, Grid, canvas::Canvas)>,
+    #[cfg(test)]
+    sheet_image_origin: [f32; 2],
+    selected_animation: Option<u64>,
+    animation_draft: animations::AnimationDraft,
     preview: preview::PreviewState,
     regions: regions::RegionsState,
     extract: extract::ExtractState,
 }
-pub struct SpriteLibrary {
+pub struct AssetLibrary {
     pub open: bool,
     pub path_input: String,
     pub status: String,
@@ -113,7 +147,7 @@ pub struct SpriteLibrary {
     #[cfg(test)]
     import_controls: tests::ImportControls,
 }
-impl Default for SpriteLibrary {
+impl Default for AssetLibrary {
     fn default() -> Self {
         Self {
             open: false,
@@ -131,7 +165,7 @@ impl Default for SpriteLibrary {
         }
     }
 }
-impl SpriteLibrary {
+impl AssetLibrary {
     pub fn queue_drop(&mut self, path: PathBuf) {
         self.open = true;
         self.pending.push(Action::Load(path));
@@ -140,7 +174,6 @@ impl SpriteLibrary {
         for editor in &mut self.sheets {
             editor.poll_guess();
             editor.poll_find();
-            editor.poll_suggest();
             editor.poll_analysis();
             editor.poll_batch();
         }
@@ -194,16 +227,7 @@ impl SpriteLibrary {
                     LoadStep::Focused => return Ok(()),
                     LoadStep::Open(path) => path,
                 };
-                let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
-                let sidecar = store::sidecar_for(&path);
-                // try_exists propagates permission errors rather than treating them
-                // as a new sidecar and risking an accidental overwrite.
-                let meta = if sidecar.try_exists().map_err(|e| e.to_string())? {
-                    Some(store::load(&sidecar).map_err(|e| e.to_string())?.sheet)
-                } else {
-                    None
-                };
-                let (image, meta, dirty) = open_sheet(&path, &bytes, self.key()?, meta)?;
+                let (image, meta, dirty, dropped) = read_sheet(&path, self.key()?)?;
                 let opened = OpenSheet::prepare(
                     SheetSource::File(path.clone()),
                     image,
@@ -212,7 +236,7 @@ impl SpriteLibrary {
                     gl,
                     renderer,
                 )?;
-                self.install(opened);
+                self.install_with_warning(opened, &dropped);
                 self.path_input = path.to_string_lossy().into_owned();
                 self.status = format!("Opened {}", path.display());
             }
@@ -280,6 +304,15 @@ impl SpriteLibrary {
         }
         self.sheets.push(editor);
     }
+    fn install_with_warning(&mut self, opened: OpenSheet, dropped: &[(u32, u32)]) {
+        self.install(opened);
+        if let Some(warning) = store::dropped_tile_animation_warning(dropped) {
+            self.sheets
+                .last_mut()
+                .expect("installed editor")
+                .log(warning);
+        }
+    }
     /// Releases one sheet's texture and drops its editor. On error the editor stays.
     pub fn close(&mut self, id: SheetId, renderer: &mut GlowRenderer) -> Result<(), String> {
         let Some(index) = self.sheets.iter().position(|e| e.id == id) else {
@@ -302,7 +335,7 @@ impl SpriteLibrary {
                 self.assets_scanned = true;
             }
             let mut open = self.open;
-            ui.window("Sprite Library")
+            ui.window("Asset Library")
                 .opened(&mut open)
                 .size([620.0, 260.0], Condition::FirstUseEver)
                 .position([140.0, 40.0], Condition::FirstUseEver)
@@ -335,9 +368,17 @@ impl SpriteLibrary {
         }
     }
     fn refresh_assets(&mut self) {
-        match std::env::current_dir().map(|p| p.join("assets")) {
-            Ok(root) => match list_assets(&root) {
-                Ok(files) => self.assets = files,
+        match std::env::current_dir() {
+            Ok(root) => match list_assets(&root.join("assets")) {
+                Ok(files) => {
+                    self.assets = files;
+                    // The first scan runs after a dropped file's Load, so keep that result.
+                    match old_output_folder_hint(&root) {
+                        Some(hint) => self.status = hint,
+                        None if self.status == OLD_OUTPUT_FOLDER_HINT => self.status.clear(),
+                        None => {}
+                    }
+                }
                 Err(error) => {
                     self.assets.clear();
                     self.status = error;
@@ -415,6 +456,13 @@ impl SheetEditor {
         Self {
             id,
             sheet,
+            now: || {
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs()
+            },
+            active_tab: EditorTab::default(),
             focus_requested: true,
             confirm_close: false,
             #[cfg(test)]
@@ -423,6 +471,16 @@ impl SheetEditor {
             tile_name_input: [0.0; 2],
             #[cfg(test)]
             sprite_name_input: [0.0; 2],
+            #[cfg(test)]
+            sprite_new_input: [0.0; 2],
+            #[cfg(test)]
+            sprite_blank_input: [0.0; 2],
+            #[cfg(test)]
+            animation_new_input: [0.0; 2],
+            #[cfg(test)]
+            frame_add_input: [0.0; 2],
+            #[cfg(test)]
+            frame_remove_input: [0.0; 2],
             zoom: 2,
             show_grid: true,
             guess: None,
@@ -433,10 +491,14 @@ impl SheetEditor {
             saved_path: None,
             tile_draft: Default::default(),
             selected_sprite: None,
-            selected_clip: None,
-            suggestions: Vec::new(),
-            suggest_job: None,
-            clip_draft: Default::default(),
+            sprite_props_target: None,
+            sprite_props: Default::default(),
+            drag_origin: None,
+            canvas_cache: None,
+            #[cfg(test)]
+            sheet_image_origin: [0.0; 2],
+            selected_animation: None,
+            animation_draft: Default::default(),
             preview: Default::default(),
             regions: Default::default(),
             extract: Default::default(),
@@ -457,14 +519,15 @@ impl SheetEditor {
         }
         self.cancel_guess();
         self.cancel_find();
-        self.cancel_suggest();
         self.cancel_analysis();
         self.cancel_batch();
         self.sheet = opened;
         self.selected_sprite = None;
-        self.selected_clip = None;
-        self.suggestions.clear();
-        self.clip_draft = Default::default();
+        self.sprite_props_target = None;
+        self.sprite_props = Default::default();
+        self.canvas_cache = None;
+        self.selected_animation = None;
+        self.animation_draft = Default::default();
         self.preview = Default::default();
         self.guess = None;
         self.tile_draft = Default::default();
@@ -484,7 +547,10 @@ impl SheetEditor {
     }
     fn save(&mut self) -> Result<String, String> {
         self.tile_draft.validate(&self.sheet.meta)?;
-        self.clip_draft.validate()?;
+        if self.sprite_props_target.is_some() {
+            self.sprite_props.validate()?;
+        }
+        self.animation_draft.validate()?;
         let sheet = &mut self.sheet;
         let SheetSource::File(path) = &sheet.source else {
             return Err("save the image first".into());
@@ -506,7 +572,7 @@ impl SheetEditor {
             SheetSource::Memory { name } => name.as_str().into(),
         };
         format!(
-            "{name}{}###sheet-{}",
+            "{name}{} - Sheet Editor###sheet-{}",
             if self.sheet.dirty { " *" } else { "" },
             self.id
         )
@@ -524,7 +590,7 @@ impl SheetEditor {
         let mut window = ui
             .window(self.window_title())
             .opened(&mut open)
-            .size([1000.0, 700.0], Condition::FirstUseEver)
+            .size([1280.0, 760.0], Condition::FirstUseEver)
             .position(
                 [
                     180.0 + (self.id % 8) as f32 * 28.0,
@@ -604,90 +670,73 @@ impl SheetEditor {
             },
         );
         self.grid_panel(ui);
-        let overlays = self.sprite_overlays();
-        regions::sheet_view(self, ui, overlays);
-        if let Some(_tabs) = ui.tab_bar("Sprite library tabs") {
-            if let Some(_tab) = ui.tab_item("Tiles") {
-                self.tiles_tab(ui);
-            }
-            if let Some(_tab) = ui.tab_item("Sprites") {
-                self.sprites_tab(ui);
-            }
-            if let Some(_tab) = ui.tab_item("Clips") {
-                self.clips_tab(ui);
-            }
-            if let Some(_tab) = ui.tab_item("Preview") {
-                self.preview_tab(ui, now_ms);
-            }
-            regions::tab(self, ui, open_files);
-            extract::tab(self, ui, open_files);
-        }
+        let available = ui.content_region_avail()[0];
+        let side = 300.0_f32.min((available * 0.3).max(120.0));
+        let sheet_width = ((available - side - 20.0) * 0.5).max(100.0);
+        let middle_width = (available - side - sheet_width - 20.0).max(100.0);
+        ui.child_window("Sheet column")
+            .size([sheet_width, 0.0])
+            .build(ui, || {
+                ui.text("Sheet");
+                ui.text_disabled(if self.active_tab == EditorTab::Sprites {
+                    "Drag tiles onto the canvas. Shift: range, Ctrl: toggle"
+                } else {
+                    "Click: select  Shift: range  Ctrl: toggle"
+                });
+                let overlays = self.sprite_overlays();
+                regions::sheet_view(self, ui, overlays);
+            });
+        ui.same_line();
+        ui.child_window("Editor tabs column")
+            .size([middle_width, 0.0])
+            .build(ui, || {
+                if let Some(_tabs) = ui.tab_bar("Sheet editor tabs") {
+                    if let Some(_tab) = ui.tab_item("Tileset") {
+                        self.active_tab = EditorTab::Tileset;
+                        self.tileset_tab(ui);
+                    }
+                    if let Some(_tab) = ui.tab_item(format!(
+                        "Sprites ({})###sprites",
+                        self.sheet.meta.sprites.len()
+                    )) {
+                        self.active_tab = EditorTab::Sprites;
+                        self.sprites_tab(ui);
+                    }
+                    if let Some(_tab) = ui.tab_item(format!(
+                        "Animations ({})###animations",
+                        self.sheet.meta.animations.len()
+                    )) {
+                        self.active_tab = EditorTab::Animations;
+                        self.animations_tab(ui, now_ms);
+                    }
+                    if let Some(_tab) = ui.tab_item_with_flags(
+                        "Import",
+                        None,
+                        TabItemOptions::new().placement(TabItemPlacement::Trailing),
+                    ) {
+                        self.active_tab = EditorTab::Import;
+                        if ui.collapsing_header("Regions", TreeNodeFlags::empty()) {
+                            ui.text_wrapped("Cut regions out of a large picture into new PNGs.");
+                            regions::section(self, ui, open_files);
+                        }
+                        if ui.collapsing_header("Extract tileset", TreeNodeFlags::empty()) {
+                            ui.text_wrapped(
+                                "Turn a map picture into a tileset PNG and a .map.json.",
+                            );
+                            extract::section(self, ui, open_files);
+                        }
+                    }
+                }
+            });
+        ui.same_line();
+        ui.child_window("Preview column")
+            .size([0.0, 0.0])
+            .build(ui, || {
+                self.preview_panel(ui, now_ms);
+            });
     }
     fn log(&mut self, message: impl Into<String>) {
         log::append(&mut self.log, message.into());
-    }
-    fn start_suggest(&mut self) {
-        if self.suggest_job.is_some() {
-            return;
-        }
-        let image = self.sheet.image.clone();
-        let total = raster::find_objects_work(&image);
-        match job::Job::start(
-            "sprite-suggest",
-            "Suggest",
-            total,
-            move |progress, cancel| {
-                raster::find_objects_with(
-                    &image,
-                    raster::Background::Auto,
-                    raster::DEFAULT_MIN_OBJECT_SIZE,
-                    progress,
-                    cancel,
-                )
-            },
-        ) {
-            Ok(job) => {
-                self.suggest_job = Some(job);
-                self.log("Suggest started (0%)");
-            }
-            Err(error) => self.log(error),
-        }
-    }
-    fn cancel_suggest(&mut self) {
-        if self.suggest_job.take().is_some() {
-            self.log("Suggest cancelled");
-        }
-    }
-    fn poll_suggest(&mut self) {
-        let Some(job) = &mut self.suggest_job else {
-            return;
-        };
-        match job.poll() {
-            Ok(Some(objects)) => {
-                self.suggest_job = None;
-                self.suggestions = edit::snap_objects(
-                    &objects,
-                    &self.sheet.meta.grid,
-                    self.sheet.image.width,
-                    self.sheet.image.height,
-                );
-                self.log("Suggest completed (100%)");
-                if self.suggestions.is_empty() {
-                    self.log("No object suggestions");
-                } else {
-                    self.log(format!("{} object suggestions", self.suggestions.len()));
-                }
-            }
-            Ok(None) => {
-                if let Some(percent) = job.next_step() {
-                    self.log(format!("Suggesting... {percent}%"));
-                }
-            }
-            Err(error) => {
-                self.suggest_job = None;
-                self.log(error);
-            }
-        }
     }
     fn start_guess(&mut self) {
         if self.guess_job.is_some() {
@@ -816,7 +865,7 @@ impl OpenSheet {
         let mut candidate = self.meta.clone();
         candidate.grid = grid;
         candidate
-            .validate_bounds(self.image.width, self.image.height)
+            .validate_edit_bounds(self.image.width, self.image.height)
             .map_err(|e| e.join("; "))?;
         self.meta = candidate;
         self.selection = Selection::default();
@@ -831,7 +880,8 @@ impl OpenSheet {
         gl: &Rc<glow::Context>,
         renderer: &mut GlowRenderer,
     ) -> Result<Self, String> {
-        meta.validate_bounds(image.width, image.height)
+        // Like open_sheet: Reload keeps in-progress edits, which Save alone must complete.
+        meta.validate_edit_bounds(image.width, image.height)
             .map_err(|e| e.join("; "))?;
         let texture = SheetTexture::upload(gl, &image)?;
         let external = renderer
@@ -868,7 +918,7 @@ mod tests {
         if std::env::var_os(CHILD).is_none() {
             let fixture = crate::test_support::TempDir::new("extract");
             crate::test_support::in_child_process(
-                "ui::sprite_library::tests::load_path_rules_in_their_own_process",
+                "ui::asset_library::tests::load_path_rules_in_their_own_process",
                 Some(CHILD),
                 false,
                 Some(&fixture.0),
@@ -1026,7 +1076,7 @@ mod tests {
             // Refresh only lists the name; no PNG decoding, GL or local assets.
             std::fs::write(fixture.0.join("assets/from-refresh.png"), []).unwrap();
             crate::test_support::in_child_process(
-                "ui::sprite_library::tests::import_panel_clicks_and_layout",
+                "ui::asset_library::tests::import_panel_clicks_and_layout",
                 Some(CHILD),
                 true,
                 Some(&fixture.0),
@@ -1034,7 +1084,7 @@ mod tests {
             return;
         }
         let (mut context, consumer) = context();
-        let library = RefCell::new(SpriteLibrary::default());
+        let library = RefCell::new(AssetLibrary::default());
         let content_right = Cell::new(0.0);
         for width in [320.0, 620.0, 900.0] {
             let render = |context: &mut Context| {
@@ -1177,7 +1227,7 @@ mod tests {
             fs::read_dir(&temp.0).unwrap().count(),
             fs::read_dir(&outside.0).unwrap().count(),
         );
-        let mut library = SpriteLibrary {
+        let mut library = AssetLibrary {
             path_input: "keep this user input".into(),
             status: "before preparation".into(),
             ..Default::default()
@@ -1186,7 +1236,7 @@ mod tests {
         sheet.source = SheetSource::File(first.canonicalize().unwrap());
         library.install(sheet);
         library.sheets[0].focus_requested = false;
-        let snapshot = |library: &SpriteLibrary| {
+        let snapshot = |library: &AssetLibrary| {
             (
                 library.next_id,
                 library.path_input.clone(),
@@ -1271,7 +1321,7 @@ mod tests {
     }
     pub(super) fn context() -> (Context, SynchronousRendererConsumer) {
         let mut context = crate::dev::context().unwrap();
-        context.io_mut().set_display_size([1400.0, 900.0]);
+        context.io_mut().set_display_size([2000.0, 1100.0]);
         context.io_mut().set_delta_time(1.0 / 60.0);
         context
             .io_mut()
@@ -1325,7 +1375,7 @@ mod tests {
             let mut sheet = fake_sheet();
             sheet.meta.tiles.clear();
             sheet.meta.sprites.clear();
-            sheet.meta.clips.clear();
+            sheet.meta.animations[0].frames.clear();
             sheet.selection.apply(Some((0, 0)), false, false);
             sheet
         };
@@ -1340,7 +1390,7 @@ mod tests {
                     ui.window(format!("Tile input test {id}"))
                         .position([40.0, y], Condition::Always)
                         .size([900.0, 220.0], Condition::Always)
-                        .build(|| target.borrow_mut().tiles_tab(ui));
+                        .build(|| target.borrow_mut().tileset_tab(ui));
                 }
             });
         };
@@ -1363,31 +1413,434 @@ mod tests {
         assert!(other.log.is_empty(), "other sheets have independent logs");
         assert!(other.sheet.meta.tiles.is_empty() && !other.sheet.dirty);
     }
+    fn check_tile_properties_and_marker(
+        context: &mut Context,
+        consumer: &SynchronousRendererConsumer,
+    ) {
+        use std::cell::RefCell;
+        let editor = RefCell::new(SheetEditor::new(23, fake_sheet()));
+        editor
+            .borrow_mut()
+            .sheet
+            .selection
+            .apply(Some((0, 0)), false, false);
+        let render = |context: &mut Context| {
+            vertices(context, consumer, |ui| {
+                ui.window("Tile props test")
+                    .position([40.0, 40.0], Condition::Always)
+                    .size([700.0, 400.0], Condition::Always)
+                    .build(|| editor.borrow_mut().tileset_tab(ui));
+            });
+        };
+        render(context);
+        let add = editor.borrow().tile_draft.props.add_button.unwrap();
+        click(context, render, add);
+        let key = editor.borrow().tile_draft.props.key_input.unwrap();
+        type_into(context, render, key, "abc");
+        assert_eq!(editor.borrow().tile_draft.props.rows[0].0, "abc");
+        assert_eq!(
+            editor.borrow().sheet.meta.tiles[0]
+                .props
+                .get("abc")
+                .map(String::as_str),
+            Some("")
+        );
+        editor.borrow_mut().tile_name_input = [0.0; 2];
+        editor
+            .borrow_mut()
+            .sheet
+            .selection
+            .apply(Some((1, 0)), false, true);
+        render(context);
+        assert_eq!(editor.borrow().tile_name_input, [0.0; 2]);
+        let marked = RefCell::new(SheetEditor::new(24, fake_sheet()));
+        marked.borrow_mut().show_grid = false;
+        let draw = |context: &mut Context| {
+            vertices(context, consumer, |ui| {
+                ui.window("Marker test")
+                    .position([40.0, 40.0], Condition::Always)
+                    .size([400.0, 300.0], Condition::Always)
+                    .build(|| marked.borrow_mut().sheet_view(ui, &[]));
+            })
+        };
+        draw(context);
+        let without = draw(context);
+        marked
+            .borrow_mut()
+            .sheet
+            .meta
+            .tiles
+            .push(crate::sprite::format::TileMeta {
+                col: 0,
+                row: 0,
+                name: Some("marked".into()),
+                tags: vec![],
+                props: Default::default(),
+            });
+        let with = draw(context);
+        assert!(with >= without + 4, "{without} {with}");
+    }
+    fn check_sprite_list_and_creation(
+        context: &mut Context,
+        consumer: &SynchronousRendererConsumer,
+    ) {
+        use std::cell::RefCell;
+        let mut sheet = fake_sheet();
+        sheet.image = RgbaImage::new(160, 64);
+        let editor = RefCell::new(SheetEditor::new(25, sheet));
+        editor.borrow_mut().now = || 777;
+        let render = |context: &mut Context| {
+            vertices(context, consumer, |ui| {
+                ui.window("Sprite create test")
+                    .position([40.0, 40.0], Condition::Always)
+                    .size([900.0, 600.0], Condition::Always)
+                    .build(|| editor.borrow_mut().sprites_tab(ui));
+            });
+        };
+        render(context);
+        let button = editor.borrow().sprite_new_input;
+        let count = editor.borrow().sheet.meta.sprites.len();
+        click(context, render, button);
+        assert_eq!(editor.borrow().sheet.meta.sprites.len(), count);
+        assert!(editor.borrow().log.is_empty());
+        {
+            let mut e = editor.borrow_mut();
+            e.sheet.selection.cells = [(1, 2), (3, 3)].into_iter().collect();
+        }
+        click(context, render, button);
+        {
+            let e = editor.borrow();
+            let sprite = e.sheet.meta.sprites.last().unwrap();
+            assert_eq!(sprite.pivot, [24.0, 32.0]);
+            assert!(matches!(
+                sprite.shape,
+                crate::sprite::format::Shape::Set { canvas: [3, 2], .. }
+            ));
+            assert_eq!(sprite.modified, Some(777));
+        }
+        {
+            let mut e = editor.borrow_mut();
+            e.sheet.selection.cells = [(0, 0), (8, 0)].into_iter().collect();
+        }
+        click(context, render, button);
+        assert_eq!(editor.borrow().sheet.meta.sprites.len(), count + 1);
+        assert!(
+            editor
+                .borrow()
+                .log
+                .iter()
+                .any(|s| s.contains("at most 8 x 8"))
+        );
+        render(context);
+        let add = editor.borrow().sprite_props.add_button.unwrap();
+        click(context, render, add);
+        let key = editor.borrow().sprite_props.key_input.unwrap();
+        type_into(context, render, key, "key");
+        let value = editor.borrow().sprite_props.value_input.unwrap();
+        type_into(context, render, value, "value");
+        {
+            let e = editor.borrow();
+            let sprite = e.sheet.meta.sprites.last().unwrap();
+            assert_eq!(sprite.props.get("key").map(String::as_str), Some("value"));
+            assert_eq!(sprite.modified, Some(777));
+        }
+        let blank = editor.borrow().sprite_blank_input;
+        click(context, render, blank);
+        {
+            let e = editor.borrow();
+            let sprite = e.sheet.meta.sprites.last().unwrap();
+            assert!(
+                matches!(&sprite.shape,crate::sprite::format::Shape::Set{canvas:[2,2],parts} if parts.is_empty())
+            );
+            assert_eq!(sprite.pivot, [16.0, 32.0]);
+            assert_eq!(sprite.modified, Some(777));
+            assert!(e.sheet.meta.validate().is_err());
+        }
+        let list = RefCell::new(SheetEditor::new(26, fake_sheet()));
+        let count_vertices = |context: &mut Context, n: usize| {
+            {
+                let mut e = list.borrow_mut();
+                let template = e.sheet.meta.sprites[0].clone();
+                e.sheet.meta.sprites = (0..n)
+                    .map(|i| {
+                        let mut s = template.clone();
+                        s.id = i as u64 + 1;
+                        s.name = format!("sprite-{i}");
+                        s
+                    })
+                    .collect();
+                e.selected_sprite = None;
+            }
+            vertices(context, consumer, |ui| {
+                ui.window("Sprite list test")
+                    .position([40.0, 40.0], Condition::Always)
+                    .size([700.0, 400.0], Condition::Always)
+                    .build(|| list.borrow_mut().sprites_tab(ui));
+            })
+        };
+        count_vertices(context, 20);
+        let small = count_vertices(context, 20);
+        let large = count_vertices(context, 1000);
+        assert!(large <= small + 100, "20 rows: {small}, 1000 rows: {large}");
+    }
+    fn check_animation_controls(context: &mut Context, consumer: &SynchronousRendererConsumer) {
+        use std::cell::{Cell, RefCell};
+        let editor = RefCell::new(SheetEditor::new(90, fake_sheet()));
+        {
+            let mut e = editor.borrow_mut();
+            e.now = || 888;
+            e.selected_animation = Some(5);
+            e.sheet.meta.animations[0].frames.truncate(2);
+            for f in &mut e.sheet.meta.animations[0].frames {
+                f.ms = 100;
+            }
+        }
+        let tick = Cell::new(0u64);
+        let render = |context: &mut Context| {
+            vertices(context, consumer, |ui| {
+                ui.window("Animation controls test")
+                    .position([40.0, 40.0], Condition::Always)
+                    .size([1100.0, 700.0], Condition::Always)
+                    .build(|| editor.borrow_mut().animations_tab(ui, tick.get()));
+            });
+        };
+        render(context);
+        tick.set(150);
+        render(context);
+        {
+            let e = editor.borrow();
+            assert_eq!(e.preview.highlighted, Some(1));
+            assert_eq!(e.preview.frame(150), 1);
+        }
+        let remove = editor.borrow().frame_remove_input;
+        click(context, render, remove);
+        {
+            let e = editor.borrow();
+            assert_eq!(e.sheet.meta.animations[0].frames.len(), 1);
+            assert_eq!(e.sheet.meta.animations[0].modified, Some(888));
+            assert_eq!(e.preview.highlighted, Some(0));
+        }
+        let remove = editor.borrow().frame_remove_input;
+        click(context, render, remove);
+        assert!(editor.borrow().sheet.meta.animations[0].frames.is_empty());
+        assert_eq!(editor.borrow().preview.highlighted, None);
+        let new = editor.borrow().animation_new_input;
+        click(context, render, new);
+        {
+            let e = editor.borrow();
+            let a = e.sheet.meta.animations.last().unwrap();
+            assert!(a.frames.is_empty());
+            assert_eq!(a.modified, Some(888));
+            assert!(e.sheet.meta.validate().is_err());
+        }
+        let add = editor.borrow().frame_add_input;
+        click(context, render, add);
+        {
+            let e = editor.borrow();
+            let a = e.sheet.meta.animations.last().unwrap();
+            assert_eq!(a.frames[0].sprite_id, 1);
+            assert_eq!(a.frames[0].ms, 100);
+        }
+        let list = RefCell::new(SheetEditor::new(91, fake_sheet()));
+        let measure = |context: &mut Context, n: usize| {
+            {
+                let mut e = list.borrow_mut();
+                let template = e.sheet.meta.animations[0].clone();
+                e.sheet.meta.animations = (0..n)
+                    .map(|i| {
+                        let mut a = template.clone();
+                        a.id = i as u64 + 10;
+                        a.name = format!("animation-{i}");
+                        a
+                    })
+                    .collect();
+                e.selected_animation = None;
+            }
+            vertices(context, consumer, |ui| {
+                ui.window("Animation list test")
+                    .position([40.0, 40.0], Condition::Always)
+                    .size([700.0, 400.0], Condition::Always)
+                    .build(|| list.borrow_mut().animations_tab(ui, 0));
+            })
+        };
+        measure(context, 20);
+        let small = measure(context, 20);
+        let large = measure(context, 1000);
+        assert!(large <= small + 100, "20 rows: {small}, 1000 rows: {large}");
+    }
+    fn check_drag_canvas(context: &mut Context, consumer: &SynchronousRendererConsumer) {
+        use std::cell::RefCell;
+        let a = RefCell::new(SheetEditor::new(80, fake_sheet()));
+        let b = RefCell::new(SheetEditor::new(81, fake_sheet()));
+        {
+            let mut a = a.borrow_mut();
+            a.zoom = 1;
+            let sprite = crate::sprite::Sprite {
+                id: 0,
+                name: "blank".into(),
+                shape: crate::sprite::format::Shape::Set {
+                    canvas: [2, 2],
+                    parts: vec![],
+                },
+                pivot: [16.0, 32.0],
+                props: Default::default(),
+                modified: None,
+            };
+            let id = a.sheet.meta.add_sprite(sprite, 100).unwrap();
+            a.selected_sprite = Some(id);
+        }
+        b.borrow_mut().zoom = 1;
+        let render = |context: &mut Context| {
+            vertices(context, consumer, |ui| {
+                ui.window("Drag source A")
+                    .position([30.0, 30.0], Condition::Always)
+                    .size([400.0, 180.0], Condition::Always)
+                    .build(|| a.borrow_mut().sheet_view(ui, &[]));
+                ui.window("Drag source B")
+                    .position([30.0, 260.0], Condition::Always)
+                    .size([400.0, 180.0], Condition::Always)
+                    .build(|| b.borrow_mut().sheet_view(ui, &[]));
+                ui.window("Drag target A")
+                    .position([500.0, 30.0], Condition::Always)
+                    .size([850.0, 700.0], Condition::Always)
+                    .build(|| a.borrow_mut().sprites_tab(ui));
+            });
+        };
+        render(context);
+        let origin = a.borrow().sheet_image_origin;
+        let source = [origin[0] + 40.0, origin[1] + 8.0];
+        let dest = a.borrow().canvas_cache.as_ref().unwrap().3.positions[3];
+        let before = a.borrow().sheet.meta.sprites.last().unwrap().clone();
+        click(context, render, source);
+        assert_eq!(a.borrow().sheet.selection.single(), Some((2, 0)));
+        assert_eq!(*a.borrow().sheet.meta.sprites.last().unwrap(), before);
+        let drag = |context: &mut Context, source: [f32; 2], middle: [f32; 2], dest: [f32; 2]| {
+            context.io_mut().add_mouse_pos_event(source);
+            render(context);
+            context
+                .io_mut()
+                .add_mouse_button_event(dear_imgui_rs::MouseButton::Left, true);
+            render(context);
+            context.io_mut().add_mouse_pos_event(middle);
+            render(context);
+            context.io_mut().add_mouse_pos_event(dest);
+            render(context);
+            context
+                .io_mut()
+                .add_mouse_button_event(dear_imgui_rs::MouseButton::Left, false);
+            render(context);
+        };
+        drag(context, source, [origin[0] + 56.0, origin[1] + 8.0], dest);
+        {
+            let a = a.borrow();
+            let sprite = a.sheet.meta.sprites.last().unwrap();
+            let parts = sprite.parts(&a.sheet.meta.grid);
+            assert_eq!(parts.len(), 1);
+            assert_eq!(
+                (parts[0].col, parts[0].row, parts[0].dx, parts[0].dy),
+                (2, 0, 16, 16)
+            );
+        }
+        let right_click = |context: &mut Context, point: [f32; 2]| {
+            context.io_mut().add_mouse_pos_event(point);
+            render(context);
+            context
+                .io_mut()
+                .add_mouse_button_event(dear_imgui_rs::MouseButton::Right, true);
+            render(context);
+            context
+                .io_mut()
+                .add_mouse_button_event(dear_imgui_rs::MouseButton::Right, false);
+            render(context);
+        };
+        right_click(context, dest);
+        let flip = a.borrow().canvas_cache.as_ref().unwrap().3.flip_input;
+        assert!(flip[0] > 0.0);
+        click(context, render, flip);
+        assert!(
+            a.borrow()
+                .sheet
+                .meta
+                .sprites
+                .last()
+                .unwrap()
+                .parts(&a.borrow().sheet.meta.grid)[0]
+                .flip_x
+        );
+        right_click(context, dest);
+        let rotate = a.borrow().canvas_cache.as_ref().unwrap().3.rotate_input;
+        assert!(rotate[0] > 0.0);
+        click(context, render, rotate);
+        assert_eq!(
+            a.borrow()
+                .sheet
+                .meta
+                .sprites
+                .last()
+                .unwrap()
+                .parts(&a.borrow().sheet.meta.grid)[0]
+                .rotation,
+            90
+        );
+        let saved = a.borrow().sheet.meta.sprites.last().unwrap().clone();
+        drag(
+            context,
+            source,
+            [origin[0] + 56.0, origin[1] + 8.0],
+            [1450.0, 850.0],
+        );
+        assert_eq!(*a.borrow().sheet.meta.sprites.last().unwrap(), saved);
+        let other = b.borrow().sheet_image_origin;
+        let source_b = [other[0] + 8.0, other[1] + 8.0];
+        drag(context, source_b, [other[0] + 24.0, other[1] + 8.0], dest);
+        assert_eq!(*a.borrow().sheet.meta.sprites.last().unwrap(), saved);
+        assert!(
+            a.borrow()
+                .log
+                .iter()
+                .any(|s| s.contains("Drop tiles from this sheet only"))
+        );
+    }
     fn check_sprite_rename_log_input(
         context: &mut Context,
         consumer: &SynchronousRendererConsumer,
     ) {
         use dear_imgui_rs::Condition;
         let mut editor = SheetEditor::new(22, fake_sheet());
-        editor.selected_sprite = Some("a".into());
+        editor.selected_sprite = Some(1);
+        editor.active_tab = EditorTab::Sprites;
+        editor.now = || 12345;
+        let animation_before = editor.sheet.meta.animations[0].clone();
         let editor = std::cell::RefCell::new(editor);
+        // The Preview panel draws too, so its target comes from the editor, not the test.
         let render = |context: &mut Context| {
             vertices(context, consumer, |ui| {
                 ui.window("Sprite input test")
                     .position([40.0, 40.0], Condition::Always)
                     .size([900.0, 400.0], Condition::Always)
-                    .build(|| editor.borrow_mut().sprites_tab(ui));
+                    .build(|| {
+                        let mut editor = editor.borrow_mut();
+                        editor.sprites_tab(ui);
+                        editor.preview_panel(ui, 0);
+                    });
             });
         };
         render(context);
+        assert_eq!(
+            editor.borrow().preview.target,
+            preview::PreviewTarget::Sprite(1)
+        );
         let at = editor.borrow().sprite_name_input;
         type_into(context, render, at, "mnopqrstuv");
         let editor = editor.borrow();
         assert_eq!(editor.sheet.meta.sprites[0].name, "amnopqrstuv");
-        assert_eq!(editor.sheet.meta.clips[0].frames[0].sprite, "amnopqrstuv");
+        assert_eq!(editor.sheet.meta.animations[0], animation_before);
+        assert_eq!(editor.selected_sprite, Some(1));
+        assert_eq!(editor.preview.target, preview::PreviewTarget::Sprite(1));
+        assert_eq!(editor.sheet.meta.sprites[0].modified, Some(12345));
         assert_eq!(editor.log.len(), 1, "{:?}", editor.log);
         assert!(
-            editor.log[0].ends_with("Sprite renamed and clip references updated (x10)"),
+            editor.log[0].ends_with("Sprite renamed (x10)"),
             "{:?}",
             editor.log
         );
@@ -1397,7 +1850,7 @@ mod tests {
         consumer: &SynchronousRendererConsumer,
     ) {
         use std::cell::RefCell;
-        let library = RefCell::new(SpriteLibrary::default());
+        let library = RefCell::new(AssetLibrary::default());
         library.borrow_mut().sheets.extend([
             SheetEditor::new(10, fake_sheet()),
             SheetEditor::new(11, fake_sheet()),
@@ -1438,6 +1891,67 @@ mod tests {
             matches!(library.borrow().pending[..], [Action::Close(11)]),
             "clean x closes immediately"
         );
+    }
+    #[test]
+    fn invalid_tile_properties_prevent_save() {
+        let temp = crate::test_support::TempDir::new("invalid-tile-props");
+        let image = temp.0.join("example.png");
+        let sidecar = store::sidecar_for(&image);
+        std::fs::write(&sidecar, "unchanged").unwrap();
+        let mut sheet = fake_sheet();
+        sheet.source = SheetSource::File(image);
+        sheet.dirty = true;
+        let mut editor = SheetEditor::new(100, sheet);
+        editor.tile_draft.cell = Some((0, 0));
+        editor
+            .tile_draft
+            .props
+            .rows
+            .push((" ".into(), "value".into()));
+        assert!(editor.save().unwrap_err().contains("property row 1"));
+        assert_eq!(std::fs::read_to_string(sidecar).unwrap(), "unchanged");
+    }
+    #[test]
+    fn install_warns_after_open_and_preserves_dirty() {
+        let mut library = AssetLibrary::default();
+        let mut sheet = fake_sheet();
+        sheet.dirty = true;
+        library.install_with_warning(sheet, &[(1, 0), (2, 0)]);
+        let editor = &library.sheets[0];
+        assert!(editor.sheet.dirty);
+        assert!(editor.log[0].contains("Opened"));
+        assert!(editor.log[1].contains("(1, 0)") && editor.log[1].contains("(2, 0)"));
+    }
+    #[test]
+    fn incomplete_animation_does_not_block_grid_edit() {
+        let mut sheet = fake_sheet();
+        sheet.meta.animations[0].frames.clear();
+        assert!(sheet.meta.validate().is_err());
+        assert!(sheet.set_grid(sheet.meta.grid).is_ok());
+        assert!(sheet.meta.validate().is_err());
+    }
+    #[test]
+    fn incomplete_edits_do_not_block_reload() {
+        // Reload passes the in-memory metadata back through open_sheet.
+        let (image, mut meta) = crate::sprite::example();
+        meta.animations[0].frames.clear();
+        let blank = crate::sprite::Sprite {
+            id: 0,
+            name: "blank".into(),
+            shape: crate::sprite::format::Shape::Set {
+                canvas: [2, 2],
+                parts: vec![],
+            },
+            pivot: [16.0, 32.0],
+            props: Default::default(),
+            modified: None,
+        };
+        meta.add_sprite(blank, 1).unwrap();
+        assert!(meta.validate().is_err());
+        let bytes = image.to_png().unwrap();
+        let (_, reloaded, _) =
+            open_sheet(Path::new("example.png"), &bytes, None, Some(meta.clone())).unwrap();
+        assert_eq!(reloaded, meta);
     }
     #[test]
     fn invalid_grid_edit_preserves_metadata_and_selection() {
@@ -1510,34 +2024,6 @@ mod tests {
         assert!(second.guess.is_none());
     }
     #[test]
-    fn suggest_worker_uses_current_grid_and_cancel_preserves_results() {
-        let mut editor = SheetEditor::new(1, fake_sheet());
-        editor.start_suggest();
-        let original = editor.sheet.meta.grid;
-        let mut grid = original;
-        grid.offset = [1, 0];
-        editor.sheet.meta.grid = grid;
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-        while editor.suggest_job.is_some() {
-            editor.poll_suggest();
-            assert!(std::time::Instant::now() < deadline);
-            std::thread::yield_now();
-        }
-        assert_eq!(
-            editor.suggestions,
-            edit::suggestions(&editor.sheet.image, &grid)
-        );
-        let expected = editor.suggestions.clone();
-        // Under the original grid a run would snap differently, so an applied result shows.
-        editor.sheet.meta.grid = original;
-        assert_ne!(edit::suggestions(&editor.sheet.image, &original), expected);
-        editor.start_suggest();
-        editor.cancel_suggest();
-        assert!(editor.suggest_job.is_none());
-        editor.poll_suggest();
-        assert_eq!(editor.suggestions, expected);
-    }
-    #[test]
     fn save_state_tracks_edits_success_failure_and_memory_images() {
         let temp = crate::test_support::TempDir::new("extract");
         let path = temp.0.join("example.png");
@@ -1553,10 +2039,10 @@ mod tests {
         grid.tile = 8;
         editor.sheet.set_grid(grid).unwrap();
         assert!(editor.can_save());
-        assert!(editor.window_title().contains(" *###"));
+        assert!(editor.window_title().contains(" * - Sheet Editor###"));
         editor.save().unwrap();
         assert!(!editor.can_save());
-        assert!(!editor.window_title().contains(" *###"));
+        assert!(!editor.window_title().contains(" * - Sheet Editor###"));
         assert_eq!(
             store::load(&store::sidecar_for(&path)).unwrap().sheet.grid,
             grid
@@ -1579,6 +2065,7 @@ mod tests {
     fn title_and_close_request_keep_sheet_identity_and_dirty_changes() {
         let mut editor = SheetEditor::new(42, fake_sheet());
         let clean_title = editor.window_title();
+        assert!(clean_title.ends_with(" - Sheet Editor###sheet-42"));
         editor.request_close();
         assert!(matches!(editor.pending[..], [Action::Close(42)]));
         assert!(!editor.confirm_close);
@@ -1588,14 +2075,14 @@ mod tests {
             clean_title.split("###").last(),
             editor.window_title().split("###").last()
         );
-        assert!(editor.window_title().contains(" *###"));
+        assert!(editor.window_title().contains(" * - Sheet Editor###"));
         editor.request_close();
         assert!(editor.confirm_close);
         assert!(editor.pending.is_empty(), "dirty x waits for Discard");
     }
     #[test]
     fn editor_output_moves_into_the_library_after_drawing() {
-        let mut library = SpriteLibrary::default();
+        let mut library = AssetLibrary::default();
         library.sheets.push(SheetEditor::new(7, fake_sheet()));
         library.status = "old".into();
         library.collect_editor_output();
@@ -1606,14 +2093,14 @@ mod tests {
         let editor = &mut library.sheets[0];
         editor.log("Grid updated");
         editor.pending.push(Action::Save(7));
-        editor.saved_path = Some("assets/splites/map/map.png".into());
+        editor.saved_path = Some("assets/sprites/map/map.png".into());
         library.collect_editor_output();
         assert_eq!(
             library.status, "old",
             "sheet logs do not replace Library status"
         );
         assert!(matches!(library.pending[..], [Action::Save(7)]));
-        assert_eq!(library.path_input, "assets/splites/map/map.png");
+        assert_eq!(library.path_input, "assets/sprites/map/map.png");
         let editor = &library.sheets[0];
         assert!(editor.log.last().unwrap().ends_with("Grid updated"));
         assert!(editor.pending.is_empty());
@@ -1631,7 +2118,7 @@ mod tests {
         // Both the default wrapper and bulk --ignored runs enter here. Only
         // the exact-test child owns an ImGui context.
         if !crate::test_support::in_child_process(
-            "ui::sprite_library::tests::hidden_library_grid_and_zoom_geometry",
+            "ui::asset_library::tests::hidden_library_grid_and_zoom_geometry",
             Some("RN_LIBRARY_GEOMETRY_CHILD"),
             true,
             None,
@@ -1641,8 +2128,12 @@ mod tests {
         // Same serialized CPU ImGui context style as the existing UI tests.
         let (mut context, consumer) = context();
         check_tile_log_input(&mut context, &consumer);
+        check_tile_properties_and_marker(&mut context, &consumer);
+        check_sprite_list_and_creation(&mut context, &consumer);
+        check_drag_canvas(&mut context, &consumer);
+        check_animation_controls(&mut context, &consumer);
         check_sprite_rename_log_input(&mut context, &consumer);
-        let library = std::cell::RefCell::new(SpriteLibrary::default());
+        let library = std::cell::RefCell::new(AssetLibrary::default());
         assert!(!library.borrow().open);
         assert_eq!(
             vertices(&mut context, &consumer, |ui| library
@@ -1734,6 +2225,82 @@ mod tests {
             single >= baseline + 4 && double >= single + 4,
             "baseline={baseline}, one={single}, two={double}"
         );
+        let transition = std::cell::RefCell::new(SheetEditor::new(71, fake_sheet()));
+        transition.borrow_mut().sheet.selection.cells.insert((0, 0));
+        let draw_transition = |context: &mut Context| {
+            vertices(context, &consumer, |ui| {
+                ui.window("Transition test")
+                    .position([40.0, 40.0], Condition::Always)
+                    .size([1200.0, 700.0], Condition::Always)
+                    .build(|| transition.borrow_mut().draw_contents(ui, 0, &[]));
+            })
+        };
+        draw_transition(&mut context);
+        {
+            let mut editor = transition.borrow_mut();
+            editor.active_tab = EditorTab::Animations;
+            editor.selected_animation = Some(5);
+        }
+        draw_transition(&mut context);
+        assert_eq!(transition.borrow().active_tab, EditorTab::Tileset);
+        assert_eq!(
+            transition.borrow().preview.target,
+            preview::PreviewTarget::Selection
+        );
+        // Each tab paints an image when its target exists; empty targets paint only text.
+        let editor = std::cell::RefCell::new(SheetEditor::new(70, fake_sheet()));
+        let measure_preview = |context: &mut Context, tab: EditorTab, selected: bool| {
+            {
+                let mut editor = editor.borrow_mut();
+                editor.active_tab = tab;
+                editor.preview.drawn_parts = 0;
+                editor.sheet.selection.cells.clear();
+                editor.selected_sprite = None;
+                editor.selected_animation = None;
+                if selected {
+                    match tab {
+                        EditorTab::Tileset | EditorTab::Import => {
+                            editor.sheet.selection.cells.insert((0, 0));
+                        }
+                        EditorTab::Sprites => editor.selected_sprite = Some(1),
+                        EditorTab::Animations => editor.selected_animation = Some(5),
+                    }
+                }
+            }
+            vertices(context, &consumer, |ui| {
+                ui.window("Preview panel test")
+                    .position([40.0, 40.0], Condition::Always)
+                    .size([400.0, 500.0], Condition::Always)
+                    .build(|| editor.borrow_mut().preview_panel(ui, 0));
+            })
+        };
+        for tab in [
+            EditorTab::Tileset,
+            EditorTab::Import,
+            EditorTab::Sprites,
+            EditorTab::Animations,
+        ] {
+            let _ = measure_preview(&mut context, tab, false);
+            let empty = measure_preview(&mut context, tab, false);
+            let with_target = measure_preview(&mut context, tab, true);
+            assert_eq!(editor.borrow().preview.drawn_parts, 1);
+            assert!(
+                with_target != empty,
+                "{tab:?}: target={with_target}, empty={empty}"
+            );
+        }
+        {
+            let mut e = editor.borrow_mut();
+            e.active_tab = EditorTab::Tileset;
+            e.sheet.selection.cells = (0..257).map(|col| (col, 0)).collect();
+        }
+        vertices(&mut context, &consumer, |ui| {
+            ui.window("Preview panel test")
+                .position([40.0, 40.0], Condition::Always)
+                .size([400.0, 500.0], Condition::Always)
+                .build(|| editor.borrow_mut().preview_panel(ui, 0));
+        });
+        assert_eq!(editor.borrow().preview.drawn_parts, 0);
         check_window_close_interactions(&mut context, &consumer);
         log::LogView::check_interactions(&mut context, &consumer);
         context
@@ -1747,7 +2314,7 @@ mod tests {
     #[ignore = "requires a display; run under Xvfb"]
     fn queued_replacement_registration_and_close() {
         if !crate::test_support::in_child_process(
-            "ui::sprite_library::tests::queued_replacement_registration_and_close",
+            "ui::asset_library::tests::queued_replacement_registration_and_close",
             Some("RN_LIBRARY_GL_CHILD"),
             true,
             None,
@@ -1758,7 +2325,7 @@ mod tests {
         let gl = std::rc::Rc::clone(&fixture.gl);
         let mut imgui = crate::dev::context().unwrap();
         let mut renderer = GlowRenderer::with_shared_context(Rc::clone(&gl), &mut imgui).unwrap();
-        let mut library = SpriteLibrary::default();
+        let mut library = AssetLibrary::default();
         let default_grid = Grid::DEFAULT;
         library.pending.push(Action::Replace {
             image: crate::sprite::example().0,
@@ -1910,7 +2477,7 @@ mod tests {
 
     #[cfg(unix)]
     fn check_escaping_load_refusals(
-        library: &mut SpriteLibrary,
+        library: &mut AssetLibrary,
         gl: &Rc<glow::Context>,
         renderer: &mut GlowRenderer,
     ) {
@@ -1929,7 +2496,7 @@ mod tests {
         for (target, alias) in targets.iter().zip(&aliases) {
             symlink(target, alias).unwrap();
         }
-        let snapshot = |library: &SpriteLibrary| {
+        let snapshot = |library: &AssetLibrary| {
             library
                 .sheets
                 .iter()
