@@ -34,6 +34,12 @@ fn resolve_load_path(given: &Path) -> Result<PathBuf, String> {
     })
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum LoadStep {
+    Focused,
+    Open(PathBuf),
+}
+
 pub enum SheetSource {
     File(PathBuf),
     Memory { name: String },
@@ -162,6 +168,19 @@ impl SpriteLibrary {
     fn editor_mut(&mut self, id: SheetId) -> Option<&mut SheetEditor> {
         self.sheets.iter_mut().find(|e| e.id == id)
     }
+    /// Refuse escaping paths before focus, reads or uploads, even if their target is open.
+    fn begin_load(&mut self, given: &Path) -> Result<LoadStep, String> {
+        let path = resolve_load_path(given)?;
+        if let Some(editor) = self
+            .sheets
+            .iter_mut()
+            .find(|editor| matches!(&editor.sheet.source, SheetSource::File(open) if open == &path))
+        {
+            editor.focus_requested = true;
+            return Ok(LoadStep::Focused);
+        }
+        Ok(LoadStep::Open(path))
+    }
     fn apply_action(
         &mut self,
         action: Action,
@@ -170,13 +189,10 @@ impl SpriteLibrary {
     ) -> Result<(), String> {
         match action {
             Action::Load(path) => {
-                let path = resolve_load_path(&path)?;
-                if let Some(editor) = self.sheets.iter_mut().find(|editor| {
-                    matches!(&editor.sheet.source, SheetSource::File(open) if open == &path)
-                }) {
-                    editor.focus_requested = true;
-                    return Ok(());
-                }
+                let path = match self.begin_load(&path)? {
+                    LoadStep::Focused => return Ok(()),
+                    LoadStep::Open(path) => path,
+                };
                 let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
                 let sidecar = store::sidecar_for(&path);
                 // try_exists propagates permission errors rather than treating them
@@ -1140,6 +1156,113 @@ mod tests {
             dirty: false,
             selection: Default::default(),
         }
+    }
+    #[test]
+    fn load_preparation_checks_paths_before_focus_without_gl() {
+        use std::fs;
+        let temp = crate::test_support::TempDir::new("load-preparation");
+        let outside = crate::test_support::TempDir::new("load-aliases");
+        let png = crate::sprite::example().0.to_png().unwrap();
+        let first = temp.0.join("first.png");
+        let second = temp.0.join("second.png");
+        fs::write(&first, &png).unwrap();
+        fs::write(&second, &png).unwrap();
+        fs::create_dir(temp.0.join("alias")).unwrap();
+        #[cfg(unix)]
+        for (target, name) in [(&first, "opened\n\r.png"), (&second, "unopened.png")] {
+            std::os::unix::fs::symlink(target, outside.0.join(name)).unwrap();
+        }
+        let entries = (
+            fs::read_dir(&temp.0).unwrap().count(),
+            fs::read_dir(&outside.0).unwrap().count(),
+        );
+        let mut library = SpriteLibrary {
+            path_input: "keep this user input".into(),
+            status: "before preparation".into(),
+            ..Default::default()
+        };
+        let mut sheet = fake_sheet();
+        sheet.source = SheetSource::File(first.canonicalize().unwrap());
+        library.install(sheet);
+        library.sheets[0].focus_requested = false;
+        let snapshot = |library: &SpriteLibrary| {
+            (
+                library.next_id,
+                library.path_input.clone(),
+                library.status.clone(),
+                library.pending.len(),
+                library
+                    .sheets
+                    .iter()
+                    .map(|editor| {
+                        (
+                            editor.id,
+                            editor.focus_requested,
+                            match &editor.sheet.source {
+                                SheetSource::File(path) => Some(path.clone()),
+                                SheetSource::Memory { .. } => None,
+                            },
+                            editor.sheet.meta.clone(),
+                            editor.sheet.dirty,
+                            editor.sheet.imgui_id,
+                            editor.sheet.external,
+                            editor.sheet.texture.is_some(),
+                            editor.sheet.image.clone(),
+                            editor.sheet.selection.clone(),
+                            editor.log.clone(),
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        };
+        let before = snapshot(&library);
+        // This is the preparation used by Action::Load. Bypassing it in that arm
+        // still needs the GL queue test; this test observes the preparation itself.
+        #[cfg(unix)]
+        for name in ["opened\n\r.png", "unopened.png"] {
+            let error = library.begin_load(&outside.0.join(name)).unwrap_err();
+            assert!(error.starts_with("unsafe image path:"), "{error}");
+            assert!(error.is_ascii() && !error.contains(['\n', '\r']));
+            assert_eq!(snapshot(&library), before, "refusal must precede focus");
+        }
+        let missing = temp.0.join("missing.png");
+        assert_eq!(
+            library.begin_load(&missing).unwrap_err(),
+            missing.canonicalize().unwrap_err().to_string()
+        );
+        assert_eq!(snapshot(&library), before);
+        assert_eq!(
+            library.begin_load(&second).unwrap(),
+            LoadStep::Open(second.canonicalize().unwrap())
+        );
+        assert_eq!(snapshot(&library), before);
+        assert_eq!(
+            library
+                .begin_load(&temp.0.join("alias/../first.png"))
+                .unwrap(),
+            LoadStep::Focused
+        );
+        assert!(library.sheets[0].focus_requested);
+        library.sheets[0].focus_requested = false;
+        assert_eq!(snapshot(&library), before, "only focus may change");
+        assert_eq!(
+            (
+                fs::read_dir(&temp.0).unwrap().count(),
+                fs::read_dir(&outside.0).unwrap().count(),
+            ),
+            entries
+        );
+        for path in [&first, &second] {
+            assert_eq!(fs::read(path).unwrap(), png);
+            assert!(!store::sidecar_for(path).exists());
+        }
+        #[cfg(unix)]
+        for (target, name) in [(&first, "opened\n\r.png"), (&second, "unopened.png")] {
+            assert_eq!(fs::read_link(outside.0.join(name)).unwrap(), *target);
+            assert!(!store::sidecar_for(&outside.0.join(name)).exists());
+        }
+        extract::tests::assert_no_temps(&temp.0);
+        extract::tests::assert_no_temps(&outside.0);
     }
     pub(super) fn context() -> (Context, SynchronousRendererConsumer) {
         let mut context = crate::dev::context().unwrap();
