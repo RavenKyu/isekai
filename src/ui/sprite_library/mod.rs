@@ -448,7 +448,10 @@ impl SpriteLibrary {
 }
 fn import_path_has_file_name(input: &str) -> bool {
     let path = input.trim();
-    !path.ends_with('/') && std::path::Path::new(path).file_name().is_some()
+    // Path::file_name normalizes a trailing `/` and `/.` away ("a/." names "a"),
+    // so the last raw segment is checked before it.
+    let last = path.rsplit('/').next().unwrap_or(path);
+    !matches!(last, "" | "." | "..") && std::path::Path::new(path).file_name().is_some()
 }
 
 impl OpenSheet {
@@ -499,7 +502,19 @@ mod tests {
     };
     #[test]
     fn import_path_requires_a_file_name() {
-        for path in ["", "  ", "\t\n", "/", ".", "..", "assets/", " assets/ \t"] {
+        for path in [
+            "",
+            "  ",
+            "\t\n",
+            "/",
+            ".",
+            "..",
+            "assets/",
+            " assets/ \t",
+            "assets/.",
+            "/tmp/a.png/.",
+            "assets/..",
+        ] {
             assert!(!import_path_has_file_name(path), "{path:?}");
         }
         for path in ["a.png", "assets/a.png", "/tmp/a.png", "  assets/a.png \t"] {
