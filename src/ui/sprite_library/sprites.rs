@@ -1,15 +1,14 @@
+use super::log;
 use super::{
-    SpriteLibrary, edit,
+    SheetEditor, edit,
     view::{Overlay, input_u32},
 };
 use crate::sprite::format::{Part, Shape};
 use dear_imgui_rs::Ui;
 
-impl SpriteLibrary {
+impl SheetEditor {
     pub fn sprite_overlays(&self) -> Vec<Overlay> {
-        let Some(sheet) = &self.sheet else {
-            return vec![];
-        };
+        let sheet = &self.sheet;
         let Some(sprite) = sheet
             .meta
             .sprites
@@ -31,9 +30,7 @@ impl SpriteLibrary {
             .collect()
     }
     pub fn sprites_tab(&mut self, ui: &Ui) {
-        let Some(sheet) = &mut self.sheet else {
-            return;
-        };
+        let sheet = &mut self.sheet;
         let selection = &sheet.selection.cells;
         if ui.button("New rect from selection") {
             let name =
@@ -43,7 +40,7 @@ impl SpriteLibrary {
                 sheet.meta.sprites.push(sprite);
                 sheet.dirty = true;
             } else {
-                self.status = "Select tiles first".into();
+                log::append(&mut self.log, "Select tiles first".into());
             }
         }
         ui.same_line();
@@ -55,13 +52,13 @@ impl SpriteLibrary {
                 sheet.meta.sprites.push(sprite);
                 sheet.dirty = true;
             } else {
-                self.status = "Select tiles first".into();
+                log::append(&mut self.log, "Select tiles first".into());
             }
         }
         if ui.button("Suggest from objects") {
             self.suggestions = edit::suggestions(&sheet.image, &sheet.meta.grid);
             if self.suggestions.is_empty() {
-                self.status = "No object suggestions".into();
+                log::append(&mut self.log, "No object suggestions".into());
             }
         }
         for (i, rect) in self.suggestions.iter().enumerate() {
@@ -123,10 +120,13 @@ impl SpriteLibrary {
                             super::preview::PreviewTarget::Sprite(sprite.name.clone());
                     }
                     sheet.dirty = true;
-                    self.status = "Sprite renamed and clip references updated".into();
+                    log::append(
+                        &mut self.log,
+                        "Sprite renamed and clip references updated".into(),
+                    );
                 }
                 Err(error) => {
-                    self.status = error;
+                    log::append(&mut self.log, error);
                     sprite.name = old_name.clone();
                 }
             }
@@ -189,9 +189,9 @@ impl SpriteLibrary {
                 Ok(()) => {
                     sheet.meta.sprites[index] = sprite;
                     sheet.dirty = true;
-                    self.status = "Sprite updated".into();
+                    log::append(&mut self.log, "Sprite updated".into());
                 }
-                Err(errors) => self.status = errors.join("; "),
+                Err(errors) => log::append(&mut self.log, errors.join("; ")),
             }
         }
         if ui.button("Delete sprite") {
@@ -201,7 +201,7 @@ impl SpriteLibrary {
                     self.selected_sprite = None;
                     sheet.dirty = true;
                 }
-                Err(error) => self.status = error,
+                Err(error) => log::append(&mut self.log, error),
             }
         }
     }

@@ -1,4 +1,4 @@
-use super::SpriteLibrary;
+use super::SheetEditor;
 use crate::sprite::{Grid, Mode, Timeline, format::Part};
 use dear_imgui_rs::{TextureId, Ui};
 
@@ -96,11 +96,9 @@ pub fn draw_parts(ui: &Ui, view: &PartView, parts: &[Part], origin: [f32; 2], zo
         draw.add_image(view.id, min, max, uv0, uv1, [1.0; 4]);
     }
 }
-impl SpriteLibrary {
+impl SheetEditor {
     pub fn preview_tab(&mut self, ui: &Ui, now: u64) {
-        let Some(sheet) = &self.sheet else {
-            return;
-        };
+        let sheet = &self.sheet;
         let mut choices = vec![("None".to_string(), PreviewTarget::None)];
         for clip in &sheet.meta.clips {
             choices.push((

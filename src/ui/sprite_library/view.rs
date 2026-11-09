@@ -1,4 +1,4 @@
-use super::{SpriteLibrary, cell_under};
+use super::{SheetEditor, cell_under};
 use dear_imgui_rs::{MouseButton, Ui, WindowFlags};
 
 pub struct Overlay {
@@ -17,11 +17,9 @@ pub fn input_u32(ui: &Ui, label: &str, value: &mut u32, min: u32) -> bool {
         false
     }
 }
-impl SpriteLibrary {
+impl SheetEditor {
     pub fn sheet_view(&mut self, ui: &Ui, overlays: &[Overlay]) {
-        let Some(sheet) = &mut self.sheet else {
-            return;
-        };
+        let sheet = &mut self.sheet;
         if let Some(texture) = &sheet.texture {
             debug_assert_eq!(texture.width, sheet.image.width);
         }

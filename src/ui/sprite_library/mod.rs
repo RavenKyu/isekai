@@ -1,6 +1,8 @@
 mod clips;
 mod edit;
 mod extract;
+mod guess;
+mod log;
 mod model;
 mod preview;
 mod regions;
@@ -31,12 +33,46 @@ pub struct OpenSheet {
     pub dirty: bool,
     pub selection: Selection,
 }
+/// Identifies one open sheet so queued actions reach the editor that asked.
+pub type SheetId = u64;
 pub enum Action {
     Load(PathBuf),
-    Reload,
-    Close,
-    Save,
-    Replace { image: RgbaImage, name: String },
+    Reload(SheetId),
+    Close(SheetId),
+    Save(SheetId),
+    Replace {
+        image: RgbaImage,
+        name: String,
+        grid: Grid,
+    },
+}
+/// Everything needed to edit one sheet. The library owns a list of these.
+pub struct SheetEditor {
+    pub id: SheetId,
+    pub sheet: OpenSheet,
+    focus_requested: bool,
+    confirm_close: bool,
+    #[cfg(test)]
+    close_controls: [[f32; 2]; 3],
+    pub zoom: u32,
+    pub show_grid: bool,
+    pub guess: Option<GridGuess>,
+    guess_job: Option<guess::GuessJob>,
+    pub log: Vec<String>,
+    log_view: log::LogView,
+    guess_logged_percent: u32,
+    /// Actions this editor queued; the library takes them after drawing.
+    pub pending: Vec<Action>,
+    /// Where Save image as wrote the memory image, for the library's PNG path field.
+    saved_path: Option<PathBuf>,
+    tile_draft: tiles::TileDraft,
+    selected_sprite: Option<String>,
+    selected_clip: Option<String>,
+    suggestions: Vec<raster::CellRect>,
+    clip_draft: clips::ClipDraft,
+    preview: preview::PreviewState,
+    regions: regions::RegionsState,
+    extract: extract::ExtractState,
 }
 pub struct SpriteLibrary {
     pub open: bool,
@@ -45,18 +81,10 @@ pub struct SpriteLibrary {
     pub assets: Vec<PathBuf>,
     pub key_color: String,
     pub use_key: bool,
-    pub zoom: u32,
-    pub show_grid: bool,
-    pub guess: Option<GridGuess>,
-    pub sheet: Option<OpenSheet>,
+    pub sheets: Vec<SheetEditor>,
     pub pending: Vec<Action>,
-    tile_draft: tiles::TileDraft,
     assets_scanned: bool,
-    selected_sprite: Option<String>,
-    selected_clip: Option<String>,
-    suggestions: Vec<raster::CellRect>,
-    clip_draft: clips::ClipDraft,
-    preview: preview::PreviewState,
+    next_id: SheetId,
 }
 impl Default for SpriteLibrary {
     fn default() -> Self {
@@ -67,18 +95,10 @@ impl Default for SpriteLibrary {
             assets: vec![],
             key_color: "ff00ff".into(),
             use_key: false,
-            zoom: 2,
-            show_grid: true,
-            guess: None,
-            sheet: None,
+            sheets: vec![],
             pending: vec![],
-            tile_draft: Default::default(),
             assets_scanned: false,
-            selected_sprite: None,
-            selected_clip: None,
-            suggestions: Vec::new(),
-            clip_draft: Default::default(),
-            preview: Default::default(),
+            next_id: 0,
         }
     }
 }
@@ -88,9 +108,20 @@ impl SpriteLibrary {
         self.pending.push(Action::Load(path));
     }
     pub fn apply_pending(&mut self, gl: &Rc<glow::Context>, renderer: &mut GlowRenderer) {
+        for editor in &mut self.sheets {
+            editor.poll_guess();
+        }
         for action in std::mem::take(&mut self.pending) {
+            let target = match &action {
+                Action::Save(id) | Action::Reload(id) | Action::Close(id) => Some(*id),
+                _ => None,
+            };
             if let Err(error) = self.apply_action(action, gl, renderer) {
-                self.status = error.replace(['\n', '\r'], " ");
+                if let Some(editor) = target.and_then(|id| self.editor_mut(id)) {
+                    editor.log(error);
+                } else {
+                    self.status = error.replace(['\n', '\r'], " ");
+                }
             }
         }
     }
@@ -101,6 +132,9 @@ impl SpriteLibrary {
             Ok(None)
         }
     }
+    fn editor_mut(&mut self, id: SheetId) -> Option<&mut SheetEditor> {
+        self.sheets.iter_mut().find(|e| e.id == id)
+    }
     fn apply_action(
         &mut self,
         action: Action,
@@ -109,6 +143,13 @@ impl SpriteLibrary {
     ) -> Result<(), String> {
         match action {
             Action::Load(path) => {
+                let path = path.canonicalize().map_err(|e| e.to_string())?;
+                if let Some(editor) = self.sheets.iter_mut().find(|editor| {
+                    matches!(&editor.sheet.source, SheetSource::File(open) if open == &path)
+                }) {
+                    editor.focus_requested = true;
+                    return Ok(());
+                }
                 let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
                 let sidecar = store::sidecar_for(&path);
                 // try_exists propagates permission errors rather than treating them
@@ -127,19 +168,11 @@ impl SpriteLibrary {
                     gl,
                     renderer,
                 )?;
-                self.install(opened, renderer)?;
+                self.install(opened);
                 self.path_input = path.to_string_lossy().into_owned();
                 self.status = format!("Opened {}", path.display());
             }
-            Action::Replace { image, name } => {
-                let grid = self.sheet.as_ref().map_or(
-                    Grid {
-                        tile: 16,
-                        offset: [0, 0],
-                        spacing: 0,
-                    },
-                    |s| s.meta.grid,
-                );
+            Action::Replace { image, name, grid } => {
                 let meta = SpriteSheet::new_for(&format!("{name}.png"), grid);
                 let opened = OpenSheet::prepare(
                     SheetSource::Memory { name },
@@ -149,20 +182,22 @@ impl SpriteLibrary {
                     gl,
                     renderer,
                 )?;
-                self.install(opened, renderer)?;
+                self.install(opened);
                 self.status = "Memory image: save the image first".into();
             }
-            Action::Reload => {
-                let Some(sheet) = &self.sheet else {
+            Action::Reload(id) => {
+                let key = self.key()?;
+                let Some(editor) = self.editor_mut(id) else {
                     return Ok(());
                 };
+                let sheet = &editor.sheet;
                 let SheetSource::File(path) = &sheet.source else {
                     return Err("save the image first".into());
                 };
                 let (image, meta, _) = open_sheet(
                     path,
                     &std::fs::read(path).map_err(|e| e.to_string())?,
-                    self.key()?,
+                    key,
                     Some(sheet.meta.clone()),
                 )?;
                 let opened = OpenSheet::prepare(
@@ -173,154 +208,87 @@ impl SpriteLibrary {
                     gl,
                     renderer,
                 )?;
-                self.install(opened, renderer)?;
-                self.status = "Image reloaded; metadata retained".into();
+                editor.replace_sheet(opened, renderer)?;
+                editor.log("Image reloaded; metadata retained");
             }
-            Action::Close => {
-                self.close_all(renderer)?;
+            Action::Close(id) => {
+                self.close(id, renderer)?;
                 self.status = "Sheet closed".into();
             }
-            Action::Save => {
-                if let Some(sheet) = &self.sheet {
-                    self.tile_draft.validate(&sheet.meta)?;
-                }
-                self.clip_draft.validate()?;
-                let Some(sheet) = &mut self.sheet else {
+            Action::Save(id) => {
+                let Some(editor) = self.editor_mut(id) else {
                     return Ok(());
                 };
-                let SheetSource::File(path) = &sheet.source else {
-                    return Err("save the image first".into());
-                };
-                sheet
-                    .meta
-                    .validate_bounds(sheet.image.width, sheet.image.height)
-                    .map_err(|e| e.join("; "))?;
-                let sidecar = store::sidecar_for(path);
-                store::save(&sidecar, &sheet.meta).map_err(|e| e.to_string())?;
-                sheet.dirty = false;
-                self.status = format!("Saved {}", sidecar.display());
+                let message = editor.save()?;
+                editor.log(message);
             }
         }
         Ok(())
     }
-    fn install(
-        &mut self,
-        mut opened: OpenSheet,
-        renderer: &mut GlowRenderer,
-    ) -> Result<(), String> {
-        if let Err(error) = self.close_all(renderer) {
-            if let Some(id) = opened.external.take() {
-                let _ = renderer.unregister_external_texture(id);
-            }
-            return Err(error);
+    /// Adds an independent editor. File identity is checked before loading/uploading.
+    fn install(&mut self, opened: OpenSheet) {
+        let id = self.next_id;
+        self.next_id += 1;
+        let mut editor = SheetEditor::new(id, opened);
+        match &editor.sheet.source {
+            SheetSource::File(path) => editor.log(format!("Opened {}", path.display())),
+            SheetSource::Memory { .. } => editor.log("Memory image: save the image first"),
         }
-        self.sheet = Some(opened);
-        self.selected_sprite = None;
-        self.selected_clip = None;
-        self.suggestions.clear();
-        self.clip_draft = Default::default();
-        self.preview = Default::default();
-        self.guess = None;
-        self.tile_draft = Default::default();
+        self.sheets.push(editor);
+    }
+    /// Releases one sheet's texture and drops its editor. On error the editor stays.
+    pub fn close(&mut self, id: SheetId, renderer: &mut GlowRenderer) -> Result<(), String> {
+        let Some(index) = self.sheets.iter().position(|e| e.id == id) else {
+            return Ok(());
+        };
+        self.sheets[index].release_texture(renderer)?;
+        self.sheets.remove(index);
         Ok(())
     }
     pub fn close_all(&mut self, renderer: &mut GlowRenderer) -> Result<(), String> {
-        if let Some(sheet) = &mut self.sheet
-            && let Some(id) = sheet.external
-        {
-            renderer
-                .unregister_external_texture(id)
-                .map_err(|e| e.to_string())?;
-            sheet.external = None;
+        for id in self.sheets.iter().map(|e| e.id).collect::<Vec<_>>() {
+            self.close(id, renderer)?;
         }
-        self.sheet = None;
-        self.guess = None;
-        self.tile_draft = Default::default();
         Ok(())
     }
     pub fn draw(&mut self, ui: &Ui, now_ms: u64) {
-        if !self.open {
-            return;
-        }
-        if !self.assets_scanned {
-            self.refresh_assets();
-            self.assets_scanned = true;
-        }
-        let mut open = self.open;
-        ui.window("Sprite Library")
-            .opened(&mut open)
-            .size([1000.0, 650.0], Condition::FirstUseEver)
-            .position([140.0, 40.0], Condition::FirstUseEver)
-            .build(|| {
-                self.import_panel(ui);
-                ui.text_wrapped(&self.status);
-                let Some(sheet) = &self.sheet else {
-                    return;
-                };
-                let name = match &sheet.source {
-                    SheetSource::File(path) => path
-                        .file_name()
-                        .map_or_else(|| "?".into(), |s| s.to_string_lossy()),
-                    SheetSource::Memory { name } => name.as_str().into(),
-                };
-                ui.separator();
-                ui.text(format!("{}{}", name, if sheet.dirty { " *" } else { "" }));
-                let memory = matches!(sheet.source, SheetSource::Memory { .. });
-                let dirty = sheet.dirty;
-                {
-                    let _disabled = ui.begin_disabled_with_cond(memory);
-                    if ui.button("Save") {
-                        self.pending.push(Action::Save);
-                    }
-                    ui.same_line();
-                    if ui.button("Reload image") {
-                        self.pending.push(Action::Reload);
-                    }
-                }
-                ui.same_line();
-                if ui.button("Close") {
-                    if dirty {
-                        ui.open_popup("Discard changes?");
-                    } else {
-                        self.pending.push(Action::Close);
-                    }
-                }
-                if memory {
-                    ui.text("Memory image: save the image first");
-                    regions::memory_header(self, ui);
-                }
-                ui.modal_popup("Discard changes?", || {
-                    ui.text("Discard unsaved changes?");
-                    if ui.button("Discard") {
-                        self.pending.push(Action::Close);
-                        ui.close_current_popup();
-                    }
-                    ui.same_line();
-                    if ui.button("Cancel") {
-                        ui.close_current_popup();
-                    }
+        if self.open {
+            if !self.assets_scanned {
+                self.refresh_assets();
+                self.assets_scanned = true;
+            }
+            let mut open = self.open;
+            ui.window("Sprite Library")
+                .opened(&mut open)
+                .size([620.0, 260.0], Condition::FirstUseEver)
+                .position([140.0, 40.0], Condition::FirstUseEver)
+                .build(|| {
+                    self.import_panel(ui);
+                    ui.text_wrapped(&self.status);
                 });
-                self.grid_panel(ui);
-                let overlays = self.sprite_overlays();
-                regions::sheet_view(self, ui, overlays);
-                if let Some(_tabs) = ui.tab_bar("Sprite library tabs") {
-                    if let Some(_tab) = ui.tab_item("Tiles") {
-                        self.tiles_tab(ui);
-                    }
-                    if let Some(_tab) = ui.tab_item("Sprites") {
-                        self.sprites_tab(ui);
-                    }
-                    if let Some(_tab) = ui.tab_item("Clips") {
-                        self.clips_tab(ui);
-                    }
-                    if let Some(_tab) = ui.tab_item("Preview") {
-                        self.preview_tab(ui, now_ms);
-                    }
-                    regions::tab(self, ui);
-                    extract::tab(self, ui);
-                }
-            });
-        self.open = open;
+            self.open = open;
+        }
+        let open_files: Vec<_> = self
+            .sheets
+            .iter()
+            .filter_map(|editor| match &editor.sheet.source {
+                SheetSource::File(path) => Some(path.clone()),
+                SheetSource::Memory { .. } => None,
+            })
+            .collect();
+        for editor in &mut self.sheets {
+            editor.draw(ui, now_ms, &open_files);
+        }
+        self.collect_editor_output();
+    }
+    /// Moves what the editors produced while drawing into the library.
+    fn collect_editor_output(&mut self) {
+        for editor in &mut self.sheets {
+            self.pending.append(&mut editor.pending);
+            if let Some(path) = editor.saved_path.take() {
+                self.path_input = path.to_string_lossy().into_owned();
+            }
+        }
     }
     fn refresh_assets(&mut self) {
         match std::env::current_dir().map(|p| p.join("assets")) {
@@ -376,11 +344,273 @@ impl SpriteLibrary {
                 }
             });
     }
-    fn grid_panel(&mut self, ui: &Ui) {
-        let Some(sheet) = &mut self.sheet else {
+}
+impl SheetEditor {
+    pub fn new(id: SheetId, sheet: OpenSheet) -> Self {
+        Self {
+            id,
+            sheet,
+            focus_requested: true,
+            confirm_close: false,
+            #[cfg(test)]
+            close_controls: [[0.0; 2]; 3],
+            zoom: 2,
+            show_grid: true,
+            guess: None,
+            guess_job: None,
+            log: vec![],
+            log_view: Default::default(),
+            guess_logged_percent: 0,
+            pending: vec![],
+            saved_path: None,
+            tile_draft: Default::default(),
+            selected_sprite: None,
+            selected_clip: None,
+            suggestions: Vec::new(),
+            clip_draft: Default::default(),
+            preview: Default::default(),
+            regions: Default::default(),
+            extract: Default::default(),
+        }
+    }
+    /// Swaps in a reloaded or replacing image. View settings and per-tab inputs stay;
+    /// selections, drafts and results tied to the old image are cleared.
+    fn replace_sheet(
+        &mut self,
+        mut opened: OpenSheet,
+        renderer: &mut GlowRenderer,
+    ) -> Result<(), String> {
+        if let Err(error) = self.release_texture(renderer) {
+            if let Some(id) = opened.external.take() {
+                let _ = renderer.unregister_external_texture(id);
+            }
+            return Err(error);
+        }
+        self.cancel_guess();
+        self.sheet = opened;
+        self.selected_sprite = None;
+        self.selected_clip = None;
+        self.suggestions.clear();
+        self.clip_draft = Default::default();
+        self.preview = Default::default();
+        self.guess = None;
+        self.tile_draft = Default::default();
+        Ok(())
+    }
+    fn release_texture(&mut self, renderer: &mut GlowRenderer) -> Result<(), String> {
+        if let Some(id) = self.sheet.external {
+            renderer
+                .unregister_external_texture(id)
+                .map_err(|e| e.to_string())?;
+            self.sheet.external = None;
+        }
+        Ok(())
+    }
+    fn can_save(&self) -> bool {
+        self.sheet.dirty && matches!(self.sheet.source, SheetSource::File(_))
+    }
+    fn save(&mut self) -> Result<String, String> {
+        self.tile_draft.validate(&self.sheet.meta)?;
+        self.clip_draft.validate()?;
+        let sheet = &mut self.sheet;
+        let SheetSource::File(path) = &sheet.source else {
+            return Err("save the image first".into());
+        };
+        sheet
+            .meta
+            .validate_bounds(sheet.image.width, sheet.image.height)
+            .map_err(|e| e.join("; "))?;
+        let sidecar = store::sidecar_for(path);
+        store::save(&sidecar, &sheet.meta).map_err(|e| e.to_string())?;
+        sheet.dirty = false;
+        Ok(format!("Saved {}", sidecar.display()))
+    }
+    fn window_title(&self) -> String {
+        let name = match &self.sheet.source {
+            SheetSource::File(path) => path
+                .file_name()
+                .map_or_else(|| "?".into(), |s| s.to_string_lossy()),
+            SheetSource::Memory { name } => name.as_str().into(),
+        };
+        format!(
+            "{name}{}###sheet-{}",
+            if self.sheet.dirty { " *" } else { "" },
+            self.id
+        )
+    }
+    fn request_close(&mut self) {
+        if self.sheet.dirty {
+            self.confirm_close = true;
+        } else {
+            self.pending.push(Action::Close(self.id));
+        }
+    }
+    fn draw(&mut self, ui: &Ui, now_ms: u64, open_files: &[PathBuf]) {
+        let mut open = true;
+        let focus = std::mem::take(&mut self.focus_requested);
+        let mut window = ui
+            .window(self.window_title())
+            .opened(&mut open)
+            .size([1000.0, 700.0], Condition::FirstUseEver)
+            .position(
+                [
+                    180.0 + (self.id % 8) as f32 * 28.0,
+                    70.0 + (self.id % 8) as f32 * 28.0,
+                ],
+                Condition::FirstUseEver,
+            )
+            .focused(focus);
+        if focus || self.confirm_close {
+            window = window.collapsed(false, Condition::Always);
+        }
+        window.build(|| {
+            #[cfg(test)]
+            {
+                let pos = ui.window_pos();
+                self.close_controls[0] = [
+                    pos[0] + ui.window_size()[0] - ui.frame_height() * 0.5,
+                    pos[1] + ui.frame_height() * 0.5,
+                ];
+            }
+            let footer = log::HEIGHT + ui.frame_height_with_spacing() + 12.0;
+            ui.child_window("Editor controls")
+                .size([0.0, -footer])
+                .build(ui, || {
+                    if self.confirm_close {
+                        ui.open_popup(format!("Discard changes?###discard-sheet-{}", self.id));
+                        self.confirm_close = false;
+                    }
+                    self.draw_contents(ui, now_ms, open_files);
+                });
+            self.log_view.draw(&mut self.log, ui);
+        });
+        if !open {
+            self.request_close();
+        }
+    }
+    fn draw_contents(&mut self, ui: &Ui, now_ms: u64, open_files: &[PathBuf]) {
+        let sheet = &self.sheet;
+        let memory = matches!(sheet.source, SheetSource::Memory { .. });
+        {
+            let _disabled = ui.begin_disabled_with_cond(!self.can_save());
+            if ui.button("Save") {
+                self.pending.push(Action::Save(self.id));
+            }
+        }
+        ui.same_line();
+        {
+            let _disabled = ui.begin_disabled_with_cond(memory);
+            if ui.button("Reload image") {
+                self.pending.push(Action::Reload(self.id));
+            }
+        }
+        if memory {
+            ui.text("Memory image: save the image first");
+            regions::memory_header(self, ui, open_files);
+        }
+        ui.modal_popup(
+            format!("Discard changes?###discard-sheet-{}", self.id),
+            || {
+                ui.text("Discard unsaved changes?");
+                if ui.button("Discard") {
+                    self.pending.push(Action::Close(self.id));
+                    ui.close_current_popup();
+                }
+                #[cfg(test)]
+                {
+                    self.close_controls[1] = tests::item_center(ui);
+                }
+                ui.same_line();
+                if ui.button("Cancel") {
+                    ui.close_current_popup();
+                }
+                #[cfg(test)]
+                {
+                    self.close_controls[2] = tests::item_center(ui);
+                }
+            },
+        );
+        self.grid_panel(ui);
+        let overlays = self.sprite_overlays();
+        regions::sheet_view(self, ui, overlays);
+        if let Some(_tabs) = ui.tab_bar("Sprite library tabs") {
+            if let Some(_tab) = ui.tab_item("Tiles") {
+                self.tiles_tab(ui);
+            }
+            if let Some(_tab) = ui.tab_item("Sprites") {
+                self.sprites_tab(ui);
+            }
+            if let Some(_tab) = ui.tab_item("Clips") {
+                self.clips_tab(ui);
+            }
+            if let Some(_tab) = ui.tab_item("Preview") {
+                self.preview_tab(ui, now_ms);
+            }
+            regions::tab(self, ui);
+            extract::tab(self, ui, open_files);
+        }
+    }
+    fn log(&mut self, message: impl Into<String>) {
+        log::append(&mut self.log, message.into());
+    }
+    fn start_guess(&mut self) {
+        if self.guess_job.is_some() {
+            return;
+        }
+        self.guess = None;
+        match guess::GuessJob::start(self.sheet.image.clone()) {
+            Ok(job) => {
+                self.guess_job = Some(job);
+                self.guess_logged_percent = 0;
+                self.log("Guess started (0%)");
+            }
+            Err(error) => log::append(&mut self.log, error),
+        }
+    }
+    fn cancel_guess(&mut self) {
+        if self.guess_job.take().is_some() {
+            log::append(&mut self.log, "Guess cancelled".into());
+        }
+    }
+    fn poll_guess(&mut self) {
+        let Some(job) = &self.guess_job else {
             return;
         };
-        let mut grid = sheet.meta.grid;
+        match job.poll() {
+            Ok(Some(result)) => {
+                self.log("Guess completed (100%)");
+                for score in &result.scores {
+                    self.log(format!(
+                        "{} px offset ({}, {}): {}/{} unique ({:.3})",
+                        score.tile,
+                        score.offset.0,
+                        score.offset.1,
+                        score.unique,
+                        score.total,
+                        score.ratio
+                    ));
+                }
+                if result.pick.is_none() {
+                    self.log("No strong grid suggestion; keep manual values");
+                }
+                self.guess = Some(result);
+                self.guess_job = None;
+            }
+            Ok(None) => {
+                let percent = ((job.fraction() * 100.0) as u32 / 10) * 10;
+                if percent > self.guess_logged_percent && percent < 100 {
+                    self.guess_logged_percent = percent;
+                    self.log(format!("Guessing... {percent}%"));
+                }
+            }
+            Err(error) => {
+                self.guess_job = None;
+                log::append(&mut self.log, error);
+            }
+        }
+    }
+    fn grid_panel(&mut self, ui: &Ui) {
+        let mut grid = self.sheet.meta.grid;
         let mut changed = false;
         ui.set_next_item_width(130.0);
         changed |= view::input_u32(ui, "Tile", &mut grid.tile, 1);
@@ -393,12 +623,18 @@ impl SpriteLibrary {
         ui.same_line();
         ui.set_next_item_width(130.0);
         changed |= view::input_u32(ui, "Spacing", &mut grid.spacing, 0);
-        if ui.button("Guess") {
-            self.guess = Some(raster::guess_grid(
-                &sheet.image,
-                &raster::DEFAULT_GUESS_CANDIDATES,
-                true,
-            ));
+        if let Some(job) = &self.guess_job {
+            let fraction = job.fraction();
+            ui.progress_bar(fraction)
+                .size([240.0, 0.0])
+                .overlay_text(format!("Guessing... {:.0}%", fraction * 100.0))
+                .build();
+            ui.same_line();
+            if ui.button("Cancel Guess") {
+                self.cancel_guess();
+            }
+        } else if ui.button("Guess") {
+            self.start_guess();
         }
         ui.same_line();
         ui.checkbox("Show grid", &mut self.show_grid);
@@ -406,17 +642,6 @@ impl SpriteLibrary {
         ui.set_next_item_width(160.0);
         ui.slider("Zoom", 1, 16, &mut self.zoom);
         if let Some(guess) = &self.guess {
-            for score in &guess.scores {
-                ui.text(format!(
-                    "{} px offset ({}, {}): {}/{} unique ({:.3})",
-                    score.tile,
-                    score.offset.0,
-                    score.offset.1,
-                    score.unique,
-                    score.total,
-                    score.ratio
-                ));
-            }
             if let Some(pick) = guess.pick {
                 if ui.button(format!(
                     "Apply {} px, offset ({}, {})",
@@ -430,16 +655,20 @@ impl SpriteLibrary {
             }
         }
         if changed {
-            match sheet.set_grid(grid) {
+            match self.sheet.set_grid(grid) {
                 Ok(()) => {
                     self.tile_draft = Default::default();
-                    extract::invalidate();
-                    self.status = "Grid updated".into();
+                    self.extract.invalidate();
+                    log::append(&mut self.log, "Grid updated".into());
                 }
-                Err(error) => self.status = error,
+                Err(error) => log::append(&mut self.log, error),
             }
         }
-        let cells = sheet.meta.grid.cells(sheet.image.width, sheet.image.height);
+        let cells = self
+            .sheet
+            .meta
+            .grid
+            .cells(self.sheet.image.width, self.sheet.image.height);
         ui.text(format!(
             "{} x {} cells, leftover {} x {} px",
             cells.cols, cells.rows, cells.leftover_right, cells.leftover_bottom
@@ -572,6 +801,70 @@ mod tests {
         }
         count
     }
+    pub(super) fn item_center(ui: &Ui) -> [f32; 2] {
+        let min = ui.item_rect_min();
+        let size = ui.item_rect_size();
+        [min[0] + size[0] * 0.5, min[1] + size[1] * 0.5]
+    }
+    fn check_window_close_interactions(
+        context: &mut Context,
+        consumer: &SynchronousRendererConsumer,
+    ) {
+        use std::cell::RefCell;
+        let library = RefCell::new(SpriteLibrary::default());
+        library.borrow_mut().sheets.extend([
+            SheetEditor::new(10, fake_sheet()),
+            SheetEditor::new(11, fake_sheet()),
+        ]);
+        library.borrow_mut().sheets[0].sheet.dirty = true;
+        let render = |context: &mut Context| {
+            vertices(context, consumer, |ui| library.borrow_mut().draw(ui, 0));
+        };
+        let click = |context: &mut Context, point| {
+            context.io_mut().add_mouse_pos_event(point);
+            render(context);
+            context
+                .io_mut()
+                .add_mouse_button_event(dear_imgui_rs::MouseButton::Left, true);
+            render(context);
+            context
+                .io_mut()
+                .add_mouse_button_event(dear_imgui_rs::MouseButton::Left, false);
+            render(context);
+        };
+        render(context);
+        library.borrow_mut().sheets[0].focus_requested = true;
+        render(context);
+        let first_x = library.borrow().sheets[0].close_controls[0];
+        click(context, first_x);
+        assert!(
+            library.borrow().pending.is_empty(),
+            "dirty x waits for confirmation"
+        );
+        let cancel = library.borrow().sheets[0].close_controls[2];
+        assert!(cancel[0] > 0.0, "the discard modal was rendered");
+        click(context, cancel);
+        assert!(
+            library.borrow().pending.is_empty(),
+            "Cancel keeps the editor"
+        );
+        click(context, first_x);
+        let discard = library.borrow().sheets[0].close_controls[1];
+        click(context, discard);
+        assert!(
+            matches!(library.borrow().pending[..], [Action::Close(10)]),
+            "Discard targets its sheet"
+        );
+        library.borrow_mut().pending.clear();
+        library.borrow_mut().sheets.remove(0);
+        render(context);
+        let second_x = library.borrow().sheets[0].close_controls[0];
+        click(context, second_x);
+        assert!(
+            matches!(library.borrow().pending[..], [Action::Close(11)]),
+            "clean x closes immediately"
+        );
+    }
     #[test]
     fn invalid_grid_edit_preserves_metadata_and_selection() {
         let mut sheet = fake_sheet();
@@ -598,6 +891,131 @@ mod tests {
                 })
                 .is_err()
         );
+    }
+    #[test]
+    fn cancelled_guess_cannot_install_a_late_result_and_editors_are_independent() {
+        let mut first = SheetEditor::new(1, fake_sheet());
+        let second = SheetEditor::new(2, fake_sheet());
+        first.start_guess();
+        assert!(first.guess_job.is_some());
+        assert!(second.guess_job.is_none());
+        first.cancel_guess();
+        assert!(first.log.iter().any(|line| line.contains("Guess started")));
+        assert!(
+            first
+                .log
+                .iter()
+                .any(|line| line.contains("Guess cancelled"))
+        );
+        assert!(first.guess_job.is_none());
+        first.poll_guess();
+        assert!(first.guess.is_none());
+        first.start_guess();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while first.guess_job.is_some() {
+            first.poll_guess();
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        assert_eq!(
+            first.guess,
+            Some(raster::guess_grid(
+                &first.sheet.image,
+                &raster::DEFAULT_GUESS_CANDIDATES,
+                true
+            ))
+        );
+        assert!(
+            first
+                .log
+                .iter()
+                .any(|line| line.contains("Guess completed (100%)"))
+        );
+        assert!(first.log.iter().any(|line| line.contains("unique (")));
+        assert!(second.log.is_empty());
+        assert!(second.guess.is_none());
+    }
+    #[test]
+    fn save_state_tracks_edits_success_failure_and_memory_images() {
+        let temp = extract::tests::Temp::new();
+        let path = temp.0.join("example.png");
+        let (image, meta) = crate::sprite::example();
+        let bytes = image.to_png().unwrap();
+        let (_, _, dirty) = open_sheet(&path, &bytes, None, Some(meta.clone())).unwrap();
+        let mut sheet = fake_sheet();
+        sheet.source = SheetSource::File(path.clone());
+        sheet.dirty = dirty;
+        let mut editor = SheetEditor::new(0, sheet);
+        assert!(!editor.can_save());
+        let mut grid = editor.sheet.meta.grid;
+        grid.tile = 8;
+        editor.sheet.set_grid(grid).unwrap();
+        assert!(editor.can_save());
+        assert!(editor.window_title().contains(" *###"));
+        editor.save().unwrap();
+        assert!(!editor.can_save());
+        assert!(!editor.window_title().contains(" *###"));
+        assert_eq!(
+            store::load(&store::sidecar_for(&path)).unwrap().sheet.grid,
+            grid
+        );
+        editor.sheet.dirty = true;
+        editor.sheet.meta.grid.tile = 0;
+        assert!(editor.save().is_err());
+        assert!(editor.can_save(), "failed validation leaves Save enabled");
+        let (_, _, dirty) = open_sheet(&path, &bytes, None, None).unwrap();
+        assert!(dirty, "a PNG without a sidecar starts dirty");
+        editor.sheet.source = SheetSource::Memory {
+            name: "crop".into(),
+        };
+        assert!(
+            !editor.can_save(),
+            "memory images must be saved as PNG first"
+        );
+    }
+    #[test]
+    fn title_and_close_request_keep_sheet_identity_and_dirty_changes() {
+        let mut editor = SheetEditor::new(42, fake_sheet());
+        let clean_title = editor.window_title();
+        editor.request_close();
+        assert!(matches!(editor.pending[..], [Action::Close(42)]));
+        assert!(!editor.confirm_close);
+        editor.pending.clear();
+        editor.sheet.dirty = true;
+        assert_eq!(
+            clean_title.split("###").last(),
+            editor.window_title().split("###").last()
+        );
+        assert!(editor.window_title().contains(" *###"));
+        editor.request_close();
+        assert!(editor.confirm_close);
+        assert!(editor.pending.is_empty(), "dirty x waits for Discard");
+    }
+    #[test]
+    fn editor_output_moves_into_the_library_after_drawing() {
+        let mut library = SpriteLibrary::default();
+        library.sheets.push(SheetEditor::new(7, fake_sheet()));
+        library.status = "old".into();
+        library.collect_editor_output();
+        assert_eq!(
+            library.status, "old",
+            "an editor with nothing to say keeps the line"
+        );
+        let editor = &mut library.sheets[0];
+        editor.log("Grid updated");
+        editor.pending.push(Action::Save(7));
+        editor.saved_path = Some("assets/splites/map/map.png".into());
+        library.collect_editor_output();
+        assert_eq!(
+            library.status, "old",
+            "sheet logs do not replace Library status"
+        );
+        assert!(matches!(library.pending[..], [Action::Save(7)]));
+        assert_eq!(library.path_input, "assets/splites/map/map.png");
+        let editor = &library.sheets[0];
+        assert!(editor.log.last().unwrap().ends_with("Grid updated"));
+        assert!(editor.pending.is_empty());
+        assert!(editor.saved_path.is_none());
     }
     #[test]
     fn library_geometry_in_its_own_process() {
@@ -637,27 +1055,31 @@ mod tests {
             library.borrow_mut().draw(ui, 0)
         });
         assert!(empty > 0);
-        library.borrow_mut().sheet = Some(fake_sheet());
-        library.borrow_mut().show_grid = false;
+        library
+            .borrow_mut()
+            .sheets
+            .push(SheetEditor::new(0, fake_sheet()));
+        library.borrow_mut().sheets[0].show_grid = false;
         let no_grid = vertices(&mut context, &consumer, |ui| {
             library.borrow_mut().draw(ui, 0)
         });
-        library.borrow_mut().show_grid = true;
+        library.borrow_mut().sheets[0].show_grid = true;
         let grid = vertices(&mut context, &consumer, |ui| {
             library.borrow_mut().draw(ui, 0)
         });
         assert!(grid > no_grid, "grid={grid}, no_grid={no_grid}");
-        library.borrow_mut().zoom = 2;
+        library.borrow_mut().sheets[0].zoom = 2;
         let size = std::cell::Cell::new([0.0; 2]);
         vertices(&mut context, &consumer, |ui| {
             ui.window("image dimensions").build(|| {
                 let lib = library.borrow();
-                let sheet = lib.sheet.as_ref().unwrap();
+                let editor = &lib.sheets[0];
+                let sheet = &editor.sheet;
                 ui.image(
                     sheet.imgui_id,
                     [
-                        sheet.image.width as f32 * lib.zoom as f32,
-                        sheet.image.height as f32 * lib.zoom as f32,
+                        sheet.image.width as f32 * editor.zoom as f32,
+                        sheet.image.height as f32 * editor.zoom as f32,
                     ],
                 );
                 size.set(ui.item_rect_size());
@@ -665,11 +1087,12 @@ mod tests {
         });
         assert_eq!(size.get(), [128.0, 32.0]);
         library.borrow_mut().open = false;
-        assert_eq!(
+        assert!(
             vertices(&mut context, &consumer, |ui| library
                 .borrow_mut()
-                .draw(ui, 0)),
-            0
+                .draw(ui, 0))
+                > 0,
+            "sheet windows survive closing the library"
         );
         let view = preview::PartView {
             id: TextureId::new(1),
@@ -708,6 +1131,8 @@ mod tests {
             single >= baseline + 4 && double >= single + 4,
             "baseline={baseline}, one={single}, two={double}"
         );
+        check_window_close_interactions(&mut context, &consumer);
+        log::LogView::check_interactions(&mut context, &consumer);
         context
             .prepare_renderer_texture_reset(&consumer)
             .unwrap()
@@ -761,37 +1186,135 @@ mod tests {
         let mut imgui = crate::dev::context().unwrap();
         let mut renderer = GlowRenderer::with_shared_context(Rc::clone(&gl), &mut imgui).unwrap();
         let mut library = SpriteLibrary::default();
+        let default_grid = Grid {
+            tile: 16,
+            offset: [0, 0],
+            spacing: 0,
+        };
         library.pending.push(Action::Replace {
             image: crate::sprite::example().0,
             name: "cropped".into(),
+            grid: default_grid,
         });
         library.apply_pending(&gl, &mut renderer);
-        let sheet = library.sheet.as_mut().unwrap();
+        let sheet = &mut library.sheets[0].sheet;
         assert!(matches!(&sheet.source,SheetSource::Memory { name } if name=="cropped"));
         assert!(sheet.dirty && sheet.selection.cells.is_empty());
         sheet.meta.grid.offset = [3, 5];
         sheet.selection.apply(Some((0, 0)), false, false);
         let old = sheet.external.unwrap();
         let texture = sheet.texture.as_ref().unwrap().raw();
+        let grid = sheet.meta.grid;
         library.pending.push(Action::Replace {
             image: crate::sprite::example().0,
             name: "second".into(),
+            grid,
         });
         library.apply_pending(&gl, &mut renderer);
-        assert_eq!(library.sheet.as_ref().unwrap().meta.grid.offset, [3, 5]);
-        assert!(library.sheet.as_ref().unwrap().selection.cells.is_empty());
+        assert_eq!(library.sheets.len(), 2);
+        assert_eq!(library.sheets[1].sheet.meta.grid.offset, [3, 5]);
+        assert!(library.sheets[1].sheet.selection.cells.is_empty());
+        let latest = library.sheets[1].sheet.external.unwrap();
+        let latest_texture = library.sheets[1].sheet.texture.as_ref().unwrap().raw();
+        library.close(library.sheets[0].id, &mut renderer).unwrap();
+        assert_eq!(library.sheets.len(), 1);
         assert!(
             renderer.unregister_external_texture(old).is_err(),
-            "replacement must unregister old id"
+            "closed id must be unregistered"
         );
         use glow::HasContext;
-        // SAFETY: current context; the first texture should have been deleted.
+        // SAFETY: the test's GL context is current.
         unsafe {
             assert!(!gl.is_texture(texture));
+            assert!(
+                gl.is_texture(latest_texture),
+                "closing a sibling keeps this texture alive"
+            );
         }
-        let latest = library.sheet.as_ref().unwrap().external.unwrap();
         library.close_all(&mut renderer).unwrap();
+        assert!(library.sheets.is_empty());
         assert!(renderer.unregister_external_texture(latest).is_err());
+        let temp = extract::tests::Temp::new();
+        let first = temp.0.join("first.png");
+        let second = temp.0.join("second.png");
+        let bytes = crate::sprite::example().0.to_png().unwrap();
+        std::fs::write(&first, &bytes).unwrap();
+        std::fs::write(&second, &bytes).unwrap();
+        library
+            .pending
+            .extend([Action::Load(first.clone()), Action::Load(second.clone())]);
+        library.apply_pending(&gl, &mut renderer);
+        assert_eq!(
+            library.sheets.len(),
+            2,
+            "different files get independent editors"
+        );
+        let first_id = library.sheets[0].id;
+        let first_external = library.sheets[0].sheet.external;
+        library.sheets[0].sheet.meta.grid.offset = [1, 0];
+        library.sheets[0].focus_requested = false;
+        std::fs::create_dir(temp.0.join("alias")).unwrap();
+        library
+            .pending
+            .push(Action::Load(temp.0.join("alias/../first.png")));
+        library.apply_pending(&gl, &mut renderer);
+        assert_eq!(library.sheets.len(), 2);
+        assert!(library.sheets[0].focus_requested);
+        assert_eq!(
+            library.sheets[0].sheet.external, first_external,
+            "focus reuses the texture"
+        );
+        assert_eq!(
+            library.sheets[0].sheet.meta.grid.offset,
+            [1, 0],
+            "focus retains edits"
+        );
+        let second_external = library.sheets[1].sheet.external;
+        library.sheets[0].start_guess();
+        library.pending.push(Action::Reload(first_id));
+        library.apply_pending(&gl, &mut renderer);
+        assert_eq!(
+            library.sheets[1].sheet.external, second_external,
+            "reload affects its own sheet"
+        );
+        assert_ne!(library.sheets[0].sheet.external, first_external);
+        assert!(
+            library.sheets[0].guess_job.is_none() && library.sheets[0].guess.is_none(),
+            "reload cancels and clears results for the previous image"
+        );
+        assert!(
+            library.sheets[0]
+                .log
+                .iter()
+                .any(|line| line.contains("Image reloaded"))
+        );
+        let second_log = library.sheets[1].log.clone();
+        let library_status = library.status.clone();
+        library.sheets[0].sheet.meta.grid.tile = 0;
+        library.pending.push(Action::Save(first_id));
+        library.apply_pending(&gl, &mut renderer);
+        assert_eq!(
+            library.status, library_status,
+            "sheet validation errors stay out of Library status"
+        );
+        assert_eq!(
+            library.sheets[1].log, second_log,
+            "a sibling never receives the error"
+        );
+        assert!(library.sheets[0].log.last().unwrap().contains("tile"));
+        library.sheets[0].sheet.meta.grid.tile = 16;
+        library.pending.push(Action::Save(first_id));
+        library.apply_pending(&gl, &mut renderer);
+        assert!(library.sheets[0].log.last().unwrap().contains("Saved"));
+        library
+            .pending
+            .push(Action::Load(temp.0.join("missing.png")));
+        library.apply_pending(&gl, &mut renderer);
+        assert_ne!(
+            library.status, library_status,
+            "Load errors still use Library status"
+        );
+        library.close_all(&mut renderer).unwrap();
         renderer.shutdown(&mut imgui).unwrap();
     }
 }

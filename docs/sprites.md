@@ -109,7 +109,8 @@ cargo run --features dev
 ```
 
 백틱을 눌러 메뉴를 열고 `Assets > Sprite Library`를 켠다. 창은 처음에는 닫혀 있다.
-웹 dev에는 Assets 메뉴가 없다. `View`의 기존 개발 창은 그대로 쓸 수 있다.
+PNG마다 별도의 편집 창이 열린다. 같은 파일을 다시 열면 기존 창이 앞으로 온다.
+Library 창을 닫아도 편집 창은 유지된다. 웹 dev에는 Assets 메뉴가 없다. `View`의 기존 개발 창은 그대로 쓸 수 있다.
 
 1. `PNG path` 입력 후 `Load`, 파일 드래그 앤 드롭, `Browse...`의 네이티브 파일
    대화상자, `assets/` 목록 중 하나로 PNG를 연다. 드롭은 도구가 숨겨져 있어도 창을 연다.
@@ -120,11 +121,12 @@ cargo run --features dev
    `Reload image`도 현재 키 색 옵션으로 이미지를 다시 읽는다.
 3. `Tile`, `Offset x`, `Offset y`, `Spacing`을 넣는다. 정수 음수는 0, tile의 0은 1로
    제한한다. 변경으로 기존 메타가 범위 밖이 되면 경고하고 격자를 되돌린다.
-4. `Guess`는 반복 패턴의 점수와 후보를 제시한다. `Apply ... offset (x,y)`를 눌러야
+4. `Guess`는 반복 패턴의 후보를 제시하고 점수는 아래 로그에 남긴다. `Apply ... offset (x,y)`를 눌러야
    tile과 x·y 여백이 함께 들어가며 spacing은 유지된다. 자동 적용하지 않는다.
-   고유 타일만 모은 시트에서는 약하므로 사람이 정한 값이 우선이다.
-   이 버튼은 동기 실행이다. debug 빌드의 실제 480×800 맵에서 약 55초 동안 프레임이 멈춘 사례가 있다.
-   현재 진행 표시·취소는 없으므로 추정 중에는 응답을 기다리거나 처음부터 값을 직접 넣는다.
+   고유 타일만 모은 시트에서는 추정 정확도가 떨어지므로 사람이 정한 값이 우선이다.
+   Guess는 백그라운드에서 실행하며 검사한 offset 수에 따른 진행률을 표시한다.
+   실행 중에도 격자를 편집하거나 다른 창을 쓸 수 있다. `Cancel Guess`로 취소할 수 있으며, 창을 닫아도
+   작업이 취소된다. `Reload image`는 이전 이미지의 작업과 결과를 버린다.
 5. `Show grid`, 배율 1–16(`Zoom` 또는 이미지 위 Ctrl+휠)을 조정한다.
    클릭은 한 셀, Shift+클릭은 앵커부터 사각 범위, Ctrl+클릭은 토글이다.
    이미지 안의 격자 밖을 클릭하면 선택을 비운다.
@@ -142,12 +144,19 @@ cargo run --features dev
    새 clip은 빈 프레임 목록으로 시작하므로 최소 하나를 추가해야 Save된다.
 9. `Preview`에서 clip, 타일 애니메이션, 정지 sprite를 고른다. `Play`/`Pause`, `Restart`,
    배율 1–8, 프레임 번호·경과 ms, pivot 십자를 확인한다. once는 마지막 프레임에 머문다.
-10. 헤더의 `*`는 변경 표시다. `Save`는 JSON을 저장한다. `Reload image`는 현재 메타를
-    유지하며 PNG만 다시 읽는다. 메타도 다시 읽으려면 저장 후 `Close`하고 PNG를 다시 Load한다.
-    `Close`는 변경이 있으면 `Discard`/`Cancel`로 확인한다. 앱 종료는 확인 없이 미저장 변경을 잃는다.
+10. 창 제목의 `*`는 변경 표시다. `Save`는 변경이 있을 때만 켜지고 JSON 저장에 성공하면
+    다시 꺼진다. 사이드카가 없는 PNG는 열자마자 켜진다. `Reload image`는 현재 메타를
+    유지하며 PNG만 다시 읽는다. 메타까지 다시 읽으려면 저장 후 편집 창의 닫기(x)로 닫고 PNG를 다시 Load한다.
+    닫을 때 변경이 남아 있으면 `Discard`/`Cancel`로 확인한다. 앱 종료는 확인 없이 미저장 변경을 잃는다.
+
+각 편집 창 아래에는 검은 배경·흰 글자의 로그 영역이 있다. Save·Reload·검증 결과와
+Guess의 진행·점수가 시스템 현지 시각 `HH:MM:SS`와 함께 쌓인다. 최대 500줄을 유지한다.
+스크롤해서 읽고 텍스트를 선택해 복사할 수 있다. 아래쪽에서 읽는 동안에는 새 줄을 따라가며,
+위쪽을 읽고 있으면 스크롤 위치를 유지한다. `Clear`로 해당 창의 로그만 지운다.
+Load 실패와 assets 스캔 오류는 Library의 상태 문구에 표시한다.
 
 메모리 이미지는 `Save image as`로 PNG 경로를 정하기 전에는 Save·Reload가 비활성이다.
-PNG 저장 후 `Save`로 메타를 따로 쓴다. GL 최대 텍스처 크기를 넘으면 치수와
+PNG 저장 후 `Save`로 메타를 따로 쓴다. 다른 편집 창이 열고 있는 PNG 경로에는 저장할 수 없다. GL 최대 텍스처 크기를 넘으면 치수와
 `GL_MAX_TEXTURE_SIZE` 오류를 한 줄로 표시하고 기존 시트를 유지한다.
 라벨은 ASCII 영어이고 한글 폰트·undo·배치 설정 저장은 제공하지 않는다.
 
@@ -159,13 +168,13 @@ PNG 저장 후 `Save`로 메타를 따로 쓴다. GL 최대 텍스처 크기를 
 1. 큰 PNG를 열고 `Regions`에서 배경 `Auto`/`Transparent`/`Color`, hex, `Min size`를 정해
    `Find regions`를 누른다. Auto는 투명 픽셀이 있으면 알파를, 없으면 좌상단 색을 배경으로 쓴다.
    기본 Min size는 32이며 8방향 연결 덩어리의 bbox를 제안한다. 후보는 JSON에 저장하지 않는다.
-2. 후보를 선택하고 `Crop to new image`를 누른다. 변경이 있으면 `Discard and crop` 또는
-   `Cancel crop`로 확인한다. 선택 영역은 다음 프레임에 새 메모리 이미지로 열린다.
+2. 후보를 선택하고 `Crop to new image`를 누른다. 선택 영역은 다음 프레임에 새 창의
+   메모리 이미지로 열리며, 원본 창의 변경은 유지된다.
    격자는 유지하고 타일·sprite·clip 메타는 빈 상태로 시작한다.
 3. `Image output`을 확인하고 `Save image as`로 crop PNG를 쓴다. 기본은
    `assets/splites/<crop 이름>/<crop 이름>.png`다. 이 버튼은 JSON을 만들지 않는다.
    그 경로의 사이드카가 이미 있으면 Save가 그 메타를 덮게 되므로 PNG도 쓰지 않고 거부한다.
-4. 배경을 제거하려면 그 PNG를 저장한 다음 `Key color`를 켜고 Load한다.
+4. 배경을 제거하려면 그 PNG를 저장한 다음 `Key color`를 켜고 해당 창의 `Reload image`를 누른다.
    이어 격자를 직접 입력하거나 Guess/Apply로 정한다. crop과 키 색 제거는 이 두 단계다.
 5. `Extract`의 `Analyze`를 누른다. 완전 투명 픽셀의 RGB를 0으로 정규화한 뒤
    바이트가 같은 타일만 묶고 첫 등장 순서를 유지한다. 완전 투명 타일도 하나의 고유 타일이다.
@@ -176,7 +185,7 @@ PNG 저장 후 `Save`로 메타를 따로 쓴다. GL 최대 텍스처 크기를 
    `Open result`로 결과를 바로 열 수 있다. sprite·clip은 자동 생성하지 않으므로
    런타임 재생 전 편집기에서 sprite와 최소 하나의 clip을 작성한다.
 
-Find regions·Suggest from objects·Guess·Analyze는 버튼에서만 동기로 실행하며 큰 이미지에서는 화면이 멈출 수 있다.
+Find regions·Suggest from objects·Analyze는 버튼에서만 동기로 실행하며 큰 이미지에서는 화면이 멈출 수 있다.
 출력은 `.png`만 받는다. checkout의 `assets/splites/` 안에서는 없는 디렉터리를 만들지만,
 밖에서는 이미 존재하는 디렉터리만 쓸 수 있다. `..`와 심볼릭 링크를 거치는 출력 디렉터리는 거부한다.
 저장소 안이면서 이 ignore 폴더 밖이면 커밋 대상이 될 수 있다는 상태 줄을 표시한다.
@@ -274,10 +283,10 @@ current인지, 텍스처·shader가 GLContext보다 먼저 해제되는지 코�
 
 ## 한계와 로컬 자산
 
-PNG만, 한 번에 시트 하나, undo 없음, 프레임 이벤트 없음, 상태머신·타일맵 배치 없음이다.
-Guess의 장시간 동기 정지와 앱 종료 시 미저장 변경 유실도 현재 한계다.
+PNG만 지원하며 undo, 프레임 이벤트, 상태머신·타일맵 배치는 지원하지 않는다.
+Find regions·Suggest from objects·Analyze의 동기 실행과 앱 종료 시 미저장 변경 유실도 현재 한계다.
 사람의 원본 `/home/raven/Works/splites/`와 결과 `assets/splites/`는 로컬 전용이다.
 `/assets/splites/`는 gitignore에 있으며 이미지·결과 PNG·사이드카를 커밋하지 않는다.
 라이선스는 이 문서에서 단정하지 않는다. 자동 검사·웹 예제는 코드가 만든 이미지로만 동작한다.
 
-Decided in: rn-fcuz
+Decided in: rn-fcuz, rn-hk1c

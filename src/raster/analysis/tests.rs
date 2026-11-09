@@ -467,3 +467,80 @@ fn local_assets_report() {
         }
     }
 }
+
+#[test]
+fn guess_work_counts_only_valid_offsets_and_progress_reaches_the_total() {
+    // 5x6: tile=2 allows 2 x 2 offsets; tile=3 has fewer than two columns.
+    let image = RgbaImage::new(5, 6);
+    assert_eq!(guess_grid_work(&image, &[0, 2, 3, u32::MAX], true), 4);
+    assert_eq!(guess_grid_work(&image, &[2, 3], false), 1);
+    assert_eq!(guess_grid_work(&RgbaImage::new(6, 7), &[3], true), 2);
+    for width in 0..12 {
+        for height in 0..12 {
+            let image = RgbaImage::new(width, height);
+            for search in [false, true] {
+                let candidates = [0, 1, 2, 3, 5, 8];
+                let mut expected = 0;
+                for tile in candidates {
+                    for oy in 0..if search { tile } else { 1 } {
+                        for ox in 0..if search { tile } else { 1 } {
+                            let cells = Grid {
+                                tile,
+                                offset: [ox, oy],
+                                spacing: 0,
+                            }
+                            .cells(width, height);
+                            expected += u64::from(cells.cols >= 2 && cells.rows >= 2);
+                        }
+                    }
+                }
+                assert_eq!(guess_grid_work(&image, &candidates, search), expected);
+            }
+        }
+    }
+    let ticks = std::cell::RefCell::new(Vec::new());
+    let result = guess_grid_with(
+        &image,
+        &[0, 2, 3],
+        true,
+        &|done, total| ticks.borrow_mut().push((done, total)),
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+    assert_eq!(*ticks.borrow(), [(0, 4), (1, 4), (2, 4), (3, 4), (4, 4)]);
+    assert_eq!(result, guess_grid(&image, &[0, 2, 3], true));
+    assert_eq!(
+        result.scores,
+        vec![GridScore {
+            tile: 2,
+            offset: (0, 0),
+            unique: 1,
+            total: 6,
+            ratio: 1.0 / 6.0,
+        }]
+    );
+    assert_eq!(guess_grid_work(&RgbaImage::new(0, 0), &[2], true), 0);
+}
+
+#[test]
+fn guess_cancellation_discards_partial_scores() {
+    let image = RgbaImage::new(12, 12);
+    let cancel = AtomicBool::new(true);
+    assert!(guess_grid_with(&image, &[2], true, &|_, _| {}, &cancel).is_none());
+    cancel.store(false, Ordering::Relaxed);
+    let visited = std::cell::Cell::new(0);
+    let result = guess_grid_with(
+        &image,
+        &[2, 3],
+        true,
+        &|done, _| {
+            visited.set(done);
+            if done == 1 {
+                cancel.store(true, Ordering::Relaxed);
+            }
+        },
+        &cancel,
+    );
+    assert!(result.is_none());
+    assert_eq!(visited.get(), 1);
+}

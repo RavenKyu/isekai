@@ -1,5 +1,6 @@
+use super::log;
 use super::{
-    SpriteLibrary, format_props, format_tags, model::Selection, parse_props, parse_tags,
+    SheetEditor, format_props, format_tags, model::Selection, parse_props, parse_tags,
     view::input_u32,
 };
 use crate::sprite::{
@@ -82,11 +83,9 @@ pub fn mode_combo(ui: &Ui, label: &str, mode: &mut Mode) -> bool {
         false
     }
 }
-impl SpriteLibrary {
+impl SheetEditor {
     pub fn tiles_tab(&mut self, ui: &Ui) {
-        let Some(sheet) = &mut self.sheet else {
-            return;
-        };
+        let sheet = &mut self.sheet;
         let Some((col, row)) = self.tile_draft.target(&sheet.selection) else {
             self.tile_draft = Default::default();
             ui.text(format!("{} tiles selected", sheet.selection.cells.len()));
@@ -144,7 +143,7 @@ impl SpriteLibrary {
             match parse_props(&self.tile_draft.props) {
                 Ok(props) => tile.props = props,
                 Err(error) => {
-                    self.status = error;
+                    log::append(&mut self.log, error);
                     return;
                 }
             }
@@ -218,9 +217,9 @@ impl SpriteLibrary {
                 Ok(()) => {
                     sheet.meta = candidate;
                     sheet.dirty = true;
-                    self.status = "Tile metadata updated".into();
+                    log::append(&mut self.log, "Tile metadata updated".into());
                 }
-                Err(errors) => self.status = errors.join("; "),
+                Err(errors) => log::append(&mut self.log, errors.join("; ")),
             }
         }
     }

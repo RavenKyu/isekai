@@ -1,6 +1,9 @@
 use super::RgbaImage;
 use crate::sprite::grid::Grid;
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 pub const REPEAT_RATIO: f64 = 0.25;
 pub const DEFAULT_GUESS_CANDIDATES: [u32; 7] = [8, 12, 16, 24, 32, 48, 64];
@@ -70,9 +73,52 @@ pub struct GridGuess {
     pub scores: Vec<GridScore>,
 }
 
+/// Number of offsets that contain at least two rows and columns of cells.
+/// A partial edge skips offsets exactly as the scoring loop does.
+pub fn guess_grid_work(image: &RgbaImage, candidates: &[u32], search_offset: bool) -> u64 {
+    candidates.iter().fold(0u64, |total, &tile| {
+        if tile == 0 {
+            return total;
+        }
+        let limit = if search_offset { u64::from(tile) } else { 1 };
+        let offsets = |size: u32| {
+            (u64::from(size) + 1)
+                .saturating_sub(2 * u64::from(tile))
+                .min(limit)
+        };
+        total.saturating_add(offsets(image.width) * offsets(image.height))
+    })
+}
+
 /// Expensive suggestion: invoke from an explicit editor button, never on every frame.
 /// Full normalized byte keys preserve equality even when hash values collide.
 pub fn guess_grid(image: &RgbaImage, candidates: &[u32], search_offset: bool) -> GridGuess {
+    guess_grid_with(
+        image,
+        candidates,
+        search_offset,
+        &|_, _| {},
+        &AtomicBool::new(false),
+    )
+    .expect("uncancelled grid guess")
+}
+
+/// The synchronous algorithm with progress after each scored offset. Cancellation
+/// is checked between cells as well, so a large offset cannot hold up cancellation.
+/// Cancelled work returns no partial suggestion.
+pub fn guess_grid_with(
+    image: &RgbaImage,
+    candidates: &[u32],
+    search_offset: bool,
+    progress: &dyn Fn(u64, u64),
+    cancel: &AtomicBool,
+) -> Option<GridGuess> {
+    let total_work = guess_grid_work(image, candidates, search_offset);
+    let mut done = 0;
+    progress(done, total_work);
+    if cancel.load(Ordering::Relaxed) {
+        return None;
+    }
     let mut scores = Vec::new();
     for &tile in candidates {
         let bounds = Grid {
@@ -88,6 +134,9 @@ pub fn guess_grid(image: &RgbaImage, candidates: &[u32], search_offset: bool) ->
         let limit = if search_offset { tile } else { 1 };
         for oy in 0..limit {
             for ox in 0..limit {
+                if cancel.load(Ordering::Relaxed) {
+                    return None;
+                }
                 let grid = Grid {
                     tile,
                     offset: [ox, oy],
@@ -100,6 +149,9 @@ pub fn guess_grid(image: &RgbaImage, candidates: &[u32], search_offset: bool) ->
                 let mut unique = HashSet::new();
                 for row in 0..cells.rows {
                     for col in 0..cells.cols {
+                        if cancel.load(Ordering::Relaxed) {
+                            return None;
+                        }
                         unique.insert(image.normalized_tile_bytes(&grid, col, row));
                     }
                 }
@@ -114,6 +166,8 @@ pub fn guess_grid(image: &RgbaImage, candidates: &[u32], search_offset: bool) ->
                 if best.as_ref().is_none_or(|old| score.ratio < old.ratio) {
                     best = Some(score);
                 }
+                done += 1;
+                progress(done, total_work);
             }
         }
         if let Some(score) = best {
@@ -130,7 +184,11 @@ pub fn guess_grid(image: &RgbaImage, candidates: &[u32], search_offset: bool) ->
                 .min_by_key(|s| (s.unique as u128 * u128::from(s.tile).pow(2), s.tile))
         })
         .map(|s| (s.tile, s.offset));
-    GridGuess { pick, scores }
+    if cancel.load(Ordering::Relaxed) {
+        None
+    } else {
+        Some(GridGuess { pick, scores })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
