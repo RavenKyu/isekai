@@ -212,11 +212,28 @@ pub(super) fn refuse_open_output(output: &Path, open_files: &[PathBuf]) -> Resul
     }
     Ok(())
 }
+/// Validates an output and checks open editors without creating directories.
+pub(super) fn checked_output(
+    path: &Path,
+    checkout: &Path,
+    open_files: &[PathBuf],
+) -> Result<PathBuf, String> {
+    let output = absolute_output(path, checkout).map_err(|e| e.to_string())?;
+    refuse_open_output(&output, open_files)?;
+    Ok(output)
+}
 pub(super) fn inside_local_assets(path: &Path, checkout: &Path) -> bool {
     absolute_output(path, checkout).is_ok_and(|path| path.starts_with(checkout.join(LOCAL_ASSETS)))
 }
-pub(super) fn ensure_output_dir(path: &Path, checkout: &Path) -> Result<PathBuf, StoreError> {
-    let output = absolute_output(path, checkout)?;
+/// Prepares the parent of an already validated, absolute output path.
+pub(super) fn create_output_dir(output: &Path, checkout: &Path) -> Result<(), StoreError> {
+    debug_assert!(
+        output.is_absolute()
+            && !output
+                .components()
+                .any(|c| matches!(c, Component::ParentDir)),
+        "create_output_dir takes an output from absolute_output"
+    );
     let parent = output
         .parent()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "output needs a parent"))?;
@@ -246,7 +263,7 @@ pub(super) fn ensure_output_dir(path: &Path, checkout: &Path) -> Result<PathBuf,
         }
     }
     if !parent.is_dir() {
-        if !inside_local_assets(&output, checkout) {
+        if !output.starts_with(checkout.join(LOCAL_ASSETS)) {
             return Err(io::Error::new(
                 io::ErrorKind::NotFound,
                 "output directory does not exist; only assets/splites directories are created",
@@ -255,7 +272,7 @@ pub(super) fn ensure_output_dir(path: &Path, checkout: &Path) -> Result<PathBuf,
         }
         fs::create_dir_all(parent)?;
     }
-    Ok(output)
+    Ok(())
 }
 pub(super) fn path_note(path: &Path, checkout: &Path) -> &'static str {
     if path.starts_with(checkout) && !inside_local_assets(path, checkout) {
@@ -362,9 +379,8 @@ fn save_sidecar_new(path: &Path, sheet: &SpriteSheet) -> Result<(), StoreError> 
     store::publish_new(path, store::to_json(sheet).as_bytes())
 }
 fn write_plan(plan: &ExtractPlan, open_files: &[PathBuf]) -> Result<String, String> {
-    let output = absolute_output(&plan.output, &plan.checkout).map_err(|e| e.to_string())?;
-    refuse_open_output(&output, open_files)?;
-    let output = ensure_output_dir(&output, &plan.checkout).map_err(|e| e.to_string())?;
+    let output = checked_output(&plan.output, &plan.checkout, open_files)?;
+    create_output_dir(&output, &plan.checkout).map_err(|e| e.to_string())?;
     store::write_atomic(&output, &plan.png).map_err(|e| format!("PNG not written: {e}"))?;
     // PNG and map are regenerated artifacts, replaced even when edited metadata exists.
     // The three files are not a transaction: after any JSON error the PNG remains.
@@ -572,7 +588,7 @@ pub(super) mod tests {
         }
         (image, grid)
     }
-    fn assert_no_temps(root: &Path) {
+    pub(crate) fn assert_no_temps(root: &Path) {
         for entry in fs::read_dir(root).unwrap() {
             let entry = entry.unwrap();
             assert!(
@@ -686,6 +702,27 @@ pub(super) mod tests {
         assert_eq!(fs::read(target).unwrap(), b"untouched");
         assert_no_temps(&temp.0);
     }
+    #[cfg(debug_assertions)]
+    #[test]
+    fn output_directory_requires_a_validated_absolute_path() {
+        let temp = crate::test_support::TempDir::new("output-precondition");
+        for output in [
+            temp.0.join("assets/splites/../../escaped/out.png"),
+            PathBuf::from("assets/splites/new/out.png"),
+        ] {
+            let panic = std::panic::catch_unwind(|| create_output_dir(&output, &temp.0))
+                .expect_err(
+                    "unchecked output must trip the precondition before creating directories",
+                );
+            let message = panic
+                .downcast_ref::<String>()
+                .map(String::as_str)
+                .or_else(|| panic.downcast_ref::<&str>().copied())
+                .unwrap();
+            assert!(message.contains("create_output_dir takes an output from absolute_output"));
+            assert_eq!(fs::read_dir(&temp.0).unwrap().count(), 0);
+        }
+    }
     #[test]
     fn defaults_and_output_directory_boundaries() {
         let temp = crate::test_support::TempDir::new("extract");
@@ -716,7 +753,7 @@ pub(super) mod tests {
             &temp.0.join("assets/splites-other/out.png"),
             &temp.0
         ));
-        ensure_output_dir(&output, &temp.0).unwrap();
+        create_output_dir(&output, &temp.0).unwrap();
         assert!(output.parent().unwrap().is_dir());
         for directory in [
             temp.0.join("other"),
@@ -726,10 +763,10 @@ pub(super) mod tests {
                 .join(format!("rn-extract-forbidden-{}", std::process::id())),
         ] {
             assert!(!directory.exists());
-            assert!(ensure_output_dir(&directory.join("out.png"), &temp.0).is_err());
+            assert!(create_output_dir(&directory.join("out.png"), &temp.0).is_err());
             assert!(!directory.exists());
         }
-        assert!(ensure_output_dir(&temp.0.join("out.png"), &temp.0).is_ok());
+        assert!(create_output_dir(&temp.0.join("out.png"), &temp.0).is_ok());
         assert!(
             path_note(&temp.0.join("out.png"), &temp.0).contains("inside the repo and not ignored")
         );
@@ -739,7 +776,7 @@ pub(super) mod tests {
             let external = crate::test_support::TempDir::new("extract");
             std::os::unix::fs::symlink(&external.0, temp.0.join("assets/splites/link")).unwrap();
             assert!(
-                ensure_output_dir(&temp.0.join("assets/splites/link/new/out.png"), &temp.0)
+                create_output_dir(&temp.0.join("assets/splites/link/new/out.png"), &temp.0)
                     .is_err()
             );
             assert!(!external.0.join("new").exists());
@@ -772,7 +809,7 @@ pub(super) mod tests {
             assert_no_temps(&temp.0);
         }
         // A still-open editor may hold a path whose PNG has since disappeared.
-        // The refusal must happen before ensure_output_dir creates this parent.
+        // The refusal must happen before create_output_dir creates this parent.
         let missing = temp.0.join("assets/splites/missing/result.png");
         let plan = plan_extract(&image, &grid, 16, &missing, &temp.0).unwrap();
         assert!(
