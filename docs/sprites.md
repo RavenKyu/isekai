@@ -184,6 +184,8 @@ PNG 저장 후 `Save`로 메타를 따로 쓴다. 다른 편집 창이 열고 �
    기본 폴더는 `assets/splites/<stem>/`이며 번호는 1부터 목록 순이다. 대상 중 사이드카가
    하나라도 있거나, 출력 이름이 심볼릭 링크이거나, 어느 편집 창에든 열린 PNG면 디렉터리를
    만들기 전에 전체를 거부한다. 그 밖의 기존 PNG는 교체한다. 검사는 버튼을 누를 때 한 번 한다.
+   열린 이미지가 충돌하면 `sidecar, symlink or open image conflicts: ...`에 경로가 표시된다.
+   해당 PNG의 편집 창을 닫거나 다른 Output dir을 고른다.
    백그라운드 진행률과 `Cancel region save`를 표시한다. 취소는 파일 사이에서 확인하므로
    이미 쓴 파일은 남는다. `Reload image`와 창 닫기도 저장을 취소한다. 이때 쓰던 파일 하나는
    끝까지 쓰고, Reload는 그 파일까지 로그에 남긴 뒤 취소를 적는다. 그 뒤로는 새 이미지의 로그에
@@ -192,6 +194,8 @@ PNG 저장 후 `Save`로 메타를 따로 쓴다. 다른 편집 창이 열고 �
    `assets/splites/<crop 이름>/<crop 이름>.png`다. 이 버튼은 JSON을 만들지 않는다.
    그 경로에 PNG나 사이드카가 이미 있으면 쓰지 않고 거부한다. 심볼릭 링크 이름도 포함한다.
    PNG는 배타적으로 게시하므로 동시에 다른 쓰기가 만든 파일도 덮지 않는다.
+   어느 편집 창에든 열린 PNG나 그 PNG를 가리키는 심볼릭 링크도 거부한다.
+   `image … is already open; choose another image path`가 표시되면 해당 창을 닫거나 다른 Image output을 고른다.
 4. 배경을 제거하려면 그 PNG를 저장한 다음 `Key color`를 켜고 해당 창의 `Reload image`를 누른다.
    이어 격자를 직접 입력하거나 Guess/Apply로 정한다. crop과 키 색 제거는 이 두 단계다.
 5. `Extract`의 `Analyze`를 누른다. 완전 투명 픽셀의 RGB를 0으로 정규화한 뒤
@@ -204,6 +208,7 @@ PNG 저장 후 `Save`로 메타를 따로 쓴다. 다른 편집 창이 열고 �
    `assets/splites/<맵 stem>/<맵 stem>-tileset.png`다. tile은 유지하고 offset·spacing은 0이 된다.
    현재 창의 원본 PNG를 포함해 어느 편집 창에든 열린 PNG는 Output으로 쓸 수 없다.
    그 PNG를 가리키는 심볼릭 링크도 파일이나 디렉터리를 만들기 전에 거부한다.
+   `image … is already open; choose another image path`가 표시되면 해당 창을 닫거나 다른 Output을 고른다.
    `Open result`로 결과를 바로 열 수 있다. sprite·clip은 자동 생성하지 않으므로
    런타임 재생 전 편집기에서 sprite와 최소 하나의 clip을 작성한다.
 
