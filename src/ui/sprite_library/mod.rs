@@ -303,12 +303,23 @@ impl SpriteLibrary {
         }
     }
     fn import_panel(&mut self, ui: &Ui) {
+        let style = ui.clone_style();
+        let reserved_width = ui.calc_text_size("PNG path")[0]
+            + style.item_inner_spacing()[0]
+            + ui.calc_text_size("Load")[0]
+            + 2.0 * style.frame_padding()[0]
+            + style.item_spacing()[0];
+        ui.set_next_item_width((ui.content_region_avail()[0] - reserved_width).max(1.0));
         ui.input_text("PNG path", &mut self.path_input).build();
-        if ui.button("Load") {
-            self.pending
-                .push(Action::Load(PathBuf::from(&self.path_input)));
-        }
         ui.same_line();
+        {
+            let _disabled =
+                ui.begin_disabled_with_cond(!import_path_has_file_name(&self.path_input));
+            if ui.button("Load") {
+                self.pending
+                    .push(Action::Load(PathBuf::from(self.path_input.trim())));
+            }
+        }
         if ui.button("Browse...")
             && let Some(path) = rfd::FileDialog::new()
                 .add_filter("PNG", &["png"])
@@ -664,6 +675,14 @@ impl SheetEditor {
         ));
     }
 }
+fn import_path_has_file_name(input: &str) -> bool {
+    let path = input.trim();
+    // Path::file_name normalizes a trailing `/` and `/.` away ("a/." names "a"),
+    // so the last raw segment is checked before it.
+    let last = path.rsplit('/').next().unwrap_or(path);
+    !matches!(last, "" | "." | "..") && std::path::Path::new(path).file_name().is_some()
+}
+
 impl OpenSheet {
     fn set_grid(&mut self, grid: Grid) -> Result<(), String> {
         let mut candidate = self.meta.clone();
@@ -710,6 +729,28 @@ mod tests {
         BackendFlags, Context,
         render::{SynchronousRendererConsumer, TextureOp},
     };
+    #[test]
+    fn import_path_requires_a_file_name() {
+        for path in [
+            "",
+            "  ",
+            "\t\n",
+            "/",
+            ".",
+            "..",
+            "assets/",
+            " assets/ \t",
+            "assets/.",
+            "/tmp/a.png/.",
+            "assets/..",
+        ] {
+            assert!(!import_path_has_file_name(path), "{path:?}");
+        }
+        for path in ["a.png", "assets/a.png", "/tmp/a.png", "  assets/a.png \t"] {
+            assert!(import_path_has_file_name(path), "{path:?}");
+        }
+    }
+
     fn fake_sheet() -> OpenSheet {
         let (image, meta) = crate::sprite::example();
         OpenSheet {
