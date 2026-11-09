@@ -160,6 +160,13 @@ impl SheetEditor {
                     ui.same_line();
                     ui.set_next_item_width(140.0);
                     changed |= ui.input_int("dy", &mut part.dy);
+                    changed |= ui.checkbox("Flip X", &mut part.flip_x);
+                    let mut rotation = usize::from(part.rotation / 90);
+                    if ui.combo_simple_string("Rotation", &mut rotation, &["0", "90", "180", "270"])
+                    {
+                        part.rotation = rotation as u16 * 90;
+                        changed = true;
+                    }
                     if count > 1 && ui.small_button("Remove part") {
                         remove = Some(i);
                     }
@@ -176,6 +183,7 @@ impl SheetEditor {
                         row,
                         dx: 0,
                         dy: 0,
+                        ..Default::default()
                     });
                     changed = true;
                 }

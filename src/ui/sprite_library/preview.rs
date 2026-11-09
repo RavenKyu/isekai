@@ -93,8 +93,20 @@ pub fn draw_parts(ui: &Ui, view: &PartView, parts: &[Part], origin: [f32; 2], zo
             min[0] + view.grid.tile as f32 * scale,
             min[1] + view.grid.tile as f32 * scale,
         ];
-        draw.add_image(view.id, min, max, uv0, uv1, [1.0; 4]);
+        let [(p1, uv1), (p2, uv2), (p3, uv3), (p4, uv4)] =
+            image_quad(min, max, part.transform().uv_corners(uv0, uv1));
+        draw.add_image_quad(view.id, p1, p2, p3, p4, uv1, uv2, uv3, uv4, [1.0; 4]);
     }
+}
+/// imgui walks the quad clockwise from top-left; the shared corners use
+/// triangle-strip order (top-left, top-right, bottom-left, bottom-right).
+fn image_quad(min: [f32; 2], max: [f32; 2], corners: [[f32; 2]; 4]) -> [([f32; 2], [f32; 2]); 4] {
+    [
+        (min, corners[0]),
+        ([max[0], min[1]], corners[1]),
+        (max, corners[3]),
+        ([min[0], max[1]], corners[2]),
+    ]
 }
 impl SheetEditor {
     pub fn preview_tab(&mut self, ui: &Ui, now: u64) {
@@ -194,6 +206,7 @@ impl SheetEditor {
                         row: frame.row,
                         dx: 0,
                         dy: 0,
+                        ..Default::default()
                     });
                     bounds = (sheet.meta.grid.tile, sheet.meta.grid.tile);
                     pivot = [bounds.0 as f32 / 2.0, bounds.1 as f32 / 2.0];
@@ -271,6 +284,28 @@ impl SheetEditor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn image_quad_corners_sample_the_transformed_pixels() {
+        use crate::{raster::RgbaImage, sprite::Transform};
+        let mut image = RgbaImage::new(2, 2);
+        for (i, p) in image.pixels.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+            *p = [i as u8 + 1, 0, 0, 255];
+        }
+        for t in Transform::ALL {
+            let pixels = image.transformed(t);
+            let quad = image_quad([0.0, 0.0], [1.0, 1.0], t.uv_corners([0.0; 2], [1.0; 2]));
+            // imgui's AddImageQuad expects p1..p4 clockwise from the top-left.
+            let positions: Vec<_> = quad.iter().map(|(p, _)| *p).collect();
+            assert_eq!(positions, [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
+            for (pos, uv) in quad {
+                assert_eq!(
+                    image.pixel(uv[0] as u32, uv[1] as u32),
+                    pixels.pixel(pos[0] as u32, pos[1] as u32),
+                    "{t:?} at {pos:?}"
+                );
+            }
+        }
+    }
     #[test]
     fn playback_clock_pause_restart_and_timeline_edits() {
         let mut state = PreviewState::default();

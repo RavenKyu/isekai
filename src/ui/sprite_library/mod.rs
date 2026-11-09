@@ -1401,6 +1401,7 @@ mod tests {
             row: 0,
             dx: 0,
             dy: 0,
+            ..Default::default()
         }];
         let two = [
             one[0],
@@ -1409,6 +1410,7 @@ mod tests {
                 row: 0,
                 dx: 16,
                 dy: 0,
+                ..Default::default()
             },
         ];
         let measure_parts = |context: &mut Context, parts: &[crate::sprite::format::Part]| {

@@ -116,7 +116,11 @@ impl PlayFixture {
         let sheet = root.join("sheet");
         std::fs::create_dir_all(&sheet).unwrap();
         let owned = Self { root, sheet };
-        for name in ["example.png", "example.sprites.json"] {
+        for name in [
+            "example.png",
+            "example.sprites.json",
+            "example-turned.sprites.json",
+        ] {
             std::fs::copy(fixtures.join(name), owned.sheet.join(name)).unwrap();
         }
         std::fs::copy(fixtures.join("example.png"), owned.root.join("example.png")).unwrap();
@@ -137,6 +141,14 @@ fn smoke_play() {
     let source = sidecar.to_str().unwrap();
     let (output, timeout) = run(
         &["--play", source, "--smoke-frames", "3"],
+        false,
+        Duration::from_secs(10),
+    );
+    assert!(!timeout, "{output:?}");
+    assert_success_line(&output, 3, true);
+    let turned = fixture.sheet.join("example-turned.sprites.json");
+    let (output, timeout) = run(
+        &["--play", turned.to_str().unwrap(), "--smoke-frames", "3"],
         false,
         Duration::from_secs(10),
     );
