@@ -790,41 +790,71 @@ mod tests {
         pub asset: Option<ImportItem>,
     }
 
+    const IMPORT_PATH_CASES: &[(&str, Option<&str>)] = &[
+        ("", None),
+        ("  ", None),
+        ("\t\n", None),
+        ("/", None),
+        (".", None),
+        ("..", None),
+        ("assets/", None),
+        (" assets/ \t", None),
+        ("assets/.", None),
+        ("/tmp/a.png/.", None),
+        ("assets/..", None),
+        ("a.png", Some("a.png")),
+        ("assets/a.png", Some("assets/a.png")),
+        ("/tmp/a.png", Some("/tmp/a.png")),
+        ("  assets/a.png \t", Some("assets/a.png")),
+    ];
+
+    fn click(context: &mut Context, render: impl Fn(&mut Context), point: [f32; 2]) {
+        context.io_mut().add_mouse_pos_event(point);
+        render(context);
+        context
+            .io_mut()
+            .add_mouse_button_event(dear_imgui_rs::MouseButton::Left, true);
+        render(context);
+        context
+            .io_mut()
+            .add_mouse_button_event(dear_imgui_rs::MouseButton::Left, false);
+        render(context);
+    }
+
     #[test]
     fn import_panel_in_its_own_process() {
-        let fixture = std::env::temp_dir().join(format!(
-            "rn-import-panel-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(fixture.join("assets")).unwrap();
-        // Refresh only lists the name; no PNG decoding, GL or local assets.
-        std::fs::write(fixture.join("assets/from-refresh.png"), []).unwrap();
-        let output = std::process::Command::new(std::env::current_exe().unwrap())
-            .current_dir(&fixture)
-            .args([
-                "--exact",
-                "ui::sprite_library::tests::import_panel_clicks_and_layout",
-                "--ignored",
-            ])
-            .output();
-        std::fs::remove_dir_all(fixture).unwrap();
-        let output = output.unwrap();
-        assert!(
-            output.status.success(),
-            "{}{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
+        import_panel_clicks_and_layout();
     }
 
     #[test]
     #[ignore = "run by import_panel_in_its_own_process with isolated assets fixture"]
     fn import_panel_clicks_and_layout() {
         use std::cell::{Cell, RefCell};
+        // Both the normal wrapper and bulk --ignored runs enter here. Only
+        // the exact-test child owns an ImGui context and scans the fixture.
+        if std::env::var_os("RN_IMPORT_PANEL_CHILD").is_none() {
+            let fixture = extract::tests::Temp::new();
+            std::fs::create_dir(fixture.0.join("assets")).unwrap();
+            // Refresh only lists the name; no PNG decoding, GL or local assets.
+            std::fs::write(fixture.0.join("assets/from-refresh.png"), []).unwrap();
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .env("RN_IMPORT_PANEL_CHILD", "1")
+                .current_dir(&fixture.0)
+                .args([
+                    "--exact",
+                    "ui::sprite_library::tests::import_panel_clicks_and_layout",
+                    "--ignored",
+                ])
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
         let (mut context, consumer) = context();
         let library = RefCell::new(SpriteLibrary::default());
         let content_right = Cell::new(0.0);
@@ -841,35 +871,7 @@ mod tests {
                         });
                 });
             };
-            let click = |context: &mut Context, point| {
-                context.io_mut().add_mouse_pos_event(point);
-                render(context);
-                context
-                    .io_mut()
-                    .add_mouse_button_event(dear_imgui_rs::MouseButton::Left, true);
-                render(context);
-                context
-                    .io_mut()
-                    .add_mouse_button_event(dear_imgui_rs::MouseButton::Left, false);
-                render(context);
-            };
-            for (input, expected) in [
-                ("", None),
-                ("  ", None),
-                ("\t\n", None),
-                ("/", None),
-                (".", None),
-                ("..", None),
-                ("assets/", None),
-                (" assets/ \t", None),
-                ("assets/.", None),
-                ("/tmp/a.png/.", None),
-                ("assets/..", None),
-                ("a.png", Some("a.png")),
-                ("assets/a.png", Some("assets/a.png")),
-                ("/tmp/a.png", Some("/tmp/a.png")),
-                ("  assets/a.png \t", Some("assets/a.png")),
-            ] {
+            for &(input, expected) in IMPORT_PATH_CASES {
                 library.borrow_mut().path_input = input.into();
                 library.borrow_mut().assets = vec!["from-list.png".into()];
                 render(&mut context);
@@ -914,7 +916,7 @@ mod tests {
                     "Refresh follows Browse"
                 );
 
-                click(&mut context, items.load.center());
+                click(&mut context, render, items.load.center());
                 let pending = std::mem::take(&mut library.borrow_mut().pending);
                 match expected {
                     None => assert!(pending.is_empty(), "disabled Load queued: {input:?}"),
@@ -929,7 +931,7 @@ mod tests {
             library.borrow_mut().path_input.clear();
             render(&mut context);
             let refresh = library.borrow().import_controls.refresh.center();
-            click(&mut context, refresh);
+            click(&mut context, render, refresh);
             assert_eq!(
                 library.borrow().assets,
                 [std::env::current_dir()
@@ -939,7 +941,7 @@ mod tests {
             );
             assert!(library.borrow().pending.is_empty());
             let asset = library.borrow().import_controls.asset.unwrap().center();
-            click(&mut context, asset);
+            click(&mut context, render, asset);
             let pending = std::mem::take(&mut library.borrow_mut().pending);
             assert!(
                 matches!(&pending[..], [Action::Load(path)] if path == &library.borrow().assets[0]),
@@ -956,23 +958,12 @@ mod tests {
 
     #[test]
     fn import_path_requires_a_file_name() {
-        for path in [
-            "",
-            "  ",
-            "\t\n",
-            "/",
-            ".",
-            "..",
-            "assets/",
-            " assets/ \t",
-            "assets/.",
-            "/tmp/a.png/.",
-            "assets/..",
-        ] {
-            assert!(!import_path_has_file_name(path), "{path:?}");
-        }
-        for path in ["a.png", "assets/a.png", "/tmp/a.png", "  assets/a.png \t"] {
-            assert!(import_path_has_file_name(path), "{path:?}");
+        for &(path, expected) in IMPORT_PATH_CASES {
+            assert_eq!(
+                import_path_has_file_name(path),
+                expected.is_some(),
+                "{path:?}"
+            );
         }
     }
 
@@ -1045,37 +1036,25 @@ mod tests {
         let render = |context: &mut Context| {
             vertices(context, consumer, |ui| library.borrow_mut().draw(ui, 0));
         };
-        let click = |context: &mut Context, point| {
-            context.io_mut().add_mouse_pos_event(point);
-            render(context);
-            context
-                .io_mut()
-                .add_mouse_button_event(dear_imgui_rs::MouseButton::Left, true);
-            render(context);
-            context
-                .io_mut()
-                .add_mouse_button_event(dear_imgui_rs::MouseButton::Left, false);
-            render(context);
-        };
         render(context);
         library.borrow_mut().sheets[0].focus_requested = true;
         render(context);
         let first_x = library.borrow().sheets[0].close_controls[0];
-        click(context, first_x);
+        click(context, render, first_x);
         assert!(
             library.borrow().pending.is_empty(),
             "dirty x waits for confirmation"
         );
         let cancel = library.borrow().sheets[0].close_controls[2];
         assert!(cancel[0] > 0.0, "the discard modal was rendered");
-        click(context, cancel);
+        click(context, render, cancel);
         assert!(
             library.borrow().pending.is_empty(),
             "Cancel keeps the editor"
         );
-        click(context, first_x);
+        click(context, render, first_x);
         let discard = library.borrow().sheets[0].close_controls[1];
-        click(context, discard);
+        click(context, render, discard);
         assert!(
             matches!(library.borrow().pending[..], [Action::Close(10)]),
             "Discard targets its sheet"
@@ -1084,7 +1063,7 @@ mod tests {
         library.borrow_mut().sheets.remove(0);
         render(context);
         let second_x = library.borrow().sheets[0].close_controls[0];
-        click(context, second_x);
+        click(context, render, second_x);
         assert!(
             matches!(library.borrow().pending[..], [Action::Close(11)]),
             "clean x closes immediately"
