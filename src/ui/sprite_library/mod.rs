@@ -23,12 +23,14 @@ use std::{
 };
 
 fn resolve_load_path(given: &Path) -> Result<PathBuf, String> {
-    // Unlike store::load, editor Load requires an existing image. Check the
-    // original directory before canonical identity can focus an existing editor.
-    let canonical = given.canonicalize().map_err(|e| e.to_string())?;
-    store::image_within_directory(given, given.parent().unwrap_or(Path::new(".")))
-        .map_err(|e| e.to_string())?;
-    Ok(canonical)
+    // Unlike store::load, editor Load requires an existing image. Use the exact
+    // path the common rule checked, before canonical identity can focus an editor.
+    store::image_within_directory(given, given.parent().unwrap_or(Path::new("."))).map_err(|e| {
+        match e {
+            store::StoreError::Io(error) => error.to_string(),
+            other => other.to_string(),
+        }
+    })
 }
 
 pub enum SheetSource {
@@ -823,6 +825,20 @@ mod tests {
         let canonical = dir.join("local.png").canonicalize().unwrap();
         assert_eq!(resolve_load_path(image_path).unwrap(), canonical);
         store::load(&sidecar).unwrap();
+        // The resolved path is what Load reads. Replacing the input alias later
+        // must not redirect that read to an unchecked outside image.
+        let checked = resolve_load_path(image_path).unwrap();
+        fs::remove_file(image_path).unwrap();
+        symlink(&target, image_path).unwrap();
+        assert_eq!(fs::read(&checked).unwrap(), png);
+        assert_eq!(checked, canonical);
+        assert!(
+            resolve_load_path(image_path)
+                .unwrap_err()
+                .starts_with("unsafe image path:")
+        );
+        fs::remove_file(image_path).unwrap();
+        symlink("local.png", image_path).unwrap();
         // A directory symlink resolves image and parent into the same directory.
         let alias = outside.0.join("directory");
         symlink(&dir, &alias).unwrap();

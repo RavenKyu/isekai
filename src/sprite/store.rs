@@ -71,29 +71,35 @@ pub fn load(sidecar: &Path) -> Result<Loaded, StoreError> {
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
-    let image_path = parent.join(&sheet.image);
-    image_within_directory(&image_path, parent).map_err(|error| match error {
-        StoreError::UnsafeImagePath(_) => StoreError::UnsafeImagePath(sheet.image.clone()),
-        other => other,
-    })?;
+    let given = parent.join(&sheet.image);
+    let image_path = match image_within_directory(&given, parent) {
+        Ok(checked) => checked,
+        // Keep missing-image diagnosis with the image reader, as before.
+        Err(StoreError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => given,
+        Err(StoreError::UnsafeImagePath(_)) => {
+            return Err(StoreError::UnsafeImagePath(sheet.image));
+        }
+        Err(error) => return Err(error),
+    };
     Ok(Loaded { sheet, image_path })
 }
 /// Reject existing image symlinks that escape the given directory. Directory
 /// symlinks are allowed when both paths resolve within the same directory.
-/// Missing images remain the image reader's responsibility.
-pub fn image_within_directory(image: &Path, dir: &Path) -> Result<(), StoreError> {
+/// Return exactly the canonical image path that was checked. Callers must use
+/// this path rather than resolve the input again. Missing images return IO errors.
+pub fn image_within_directory(image: &Path, dir: &Path) -> Result<PathBuf, StoreError> {
     let dir = if dir.as_os_str().is_empty() {
         Path::new(".")
     } else {
         dir
     };
-    match image.canonicalize() {
-        Ok(actual) if !actual.starts_with(dir.canonicalize()?) => Err(StoreError::UnsafeImagePath(
+    let actual = image.canonicalize()?;
+    if !actual.starts_with(dir.canonicalize()?) {
+        return Err(StoreError::UnsafeImagePath(
             image.to_string_lossy().into_owned(),
-        )),
-        Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error.into()),
-        _ => Ok(()),
+        ));
     }
+    Ok(actual)
 }
 pub fn to_json(sheet: &SpriteSheet) -> String {
     let mut normalized = sheet.clone();
@@ -326,7 +332,10 @@ mod tests {
         let dir = Temp::new();
         let path = super::super::example::write_example(&dir.0).unwrap();
         let loaded = load(&path).unwrap();
-        assert_eq!(loaded.image_path, dir.0.join("example.png"));
+        assert_eq!(
+            loaded.image_path,
+            dir.0.join("example.png").canonicalize().unwrap()
+        );
         assert_eq!(loaded.sheet, super::super::example().1);
         let json = to_json(&loaded.sheet);
         save(&path, &loaded.sheet).unwrap();
@@ -363,18 +372,31 @@ mod tests {
         fs::remove_file(&image).unwrap();
         fs::write(dir.0.join("local.png"), b"local image").unwrap();
         symlink("local.png", &image).unwrap();
-        image_within_directory(&image, &dir.0).unwrap();
-        load(&sidecar).unwrap();
+        let checked = dir.0.join("local.png").canonicalize().unwrap();
+        assert_eq!(image_within_directory(&image, &dir.0).unwrap(), checked);
+        assert_eq!(load(&sidecar).unwrap().image_path, checked);
         let alias = outside.0.join("directory");
         symlink(&dir.0, &alias).unwrap();
-        image_within_directory(&alias.join("example.png"), &alias).unwrap();
-        load(&alias.join("example.sprites.json")).unwrap();
+        assert_eq!(
+            image_within_directory(&alias.join("example.png"), &alias).unwrap(),
+            checked
+        );
+        assert_eq!(
+            load(&alias.join("example.sprites.json"))
+                .unwrap()
+                .image_path,
+            checked
+        );
 
         fs::remove_file(&image).unwrap();
-        image_within_directory(&image, &dir.0).unwrap();
+        assert!(
+            matches!(image_within_directory(&image, &dir.0), Err(StoreError::Io(e)) if e.kind() == std::io::ErrorKind::NotFound)
+        );
         load(&sidecar).unwrap();
         symlink("missing.png", &image).unwrap();
-        image_within_directory(&image, &dir.0).unwrap();
+        assert!(
+            matches!(image_within_directory(&image, &dir.0), Err(StoreError::Io(e)) if e.kind() == std::io::ErrorKind::NotFound)
+        );
         load(&sidecar).unwrap();
     }
     #[test]
@@ -383,8 +405,43 @@ mod tests {
         let relative = Path::new("Cargo.toml");
         assert_eq!(relative.parent(), Some(Path::new("")));
         assert!(relative.is_file());
-        image_within_directory(relative, relative.parent().unwrap()).unwrap();
-        image_within_directory(Path::new("missing-image.png"), Path::new("")).unwrap();
+        assert_eq!(
+            image_within_directory(relative, relative.parent().unwrap()).unwrap(),
+            relative.canonicalize().unwrap()
+        );
+        assert!(
+            matches!(image_within_directory(Path::new("missing-image.png"), Path::new("")), Err(StoreError::Io(e)) if e.kind() == std::io::ErrorKind::NotFound)
+        );
+    }
+    #[cfg(unix)]
+    #[test]
+    fn checked_image_paths_keep_the_resolved_target_after_alias_replacement() {
+        use std::os::unix::fs::symlink;
+        let dir = Temp::new();
+        let outside = Temp::new();
+        let local = dir.0.join("local.png");
+        let foreign = outside.0.join("foreign.png");
+        fs::write(&local, b"checked local image").unwrap();
+        fs::write(&foreign, b"foreign image").unwrap();
+        let alias = dir.0.join("example.png");
+        symlink(&local, &alias).unwrap();
+        let sidecar = dir.0.join("example.sprites.json");
+        save(&sidecar, &super::super::example().1).unwrap();
+        let checked = image_within_directory(&alias, &dir.0).unwrap();
+        let loaded = load(&sidecar).unwrap();
+        fs::remove_file(&alias).unwrap();
+        symlink(&foreign, &alias).unwrap();
+        assert_eq!(checked, local.canonicalize().unwrap());
+        assert_eq!(loaded.image_path, checked);
+        assert_eq!(fs::read(&checked).unwrap(), b"checked local image");
+        assert_eq!(
+            fs::read(&loaded.image_path).unwrap(),
+            b"checked local image"
+        );
+        assert!(matches!(
+            load(&sidecar),
+            Err(StoreError::UnsafeImagePath(_))
+        ));
     }
     #[cfg(unix)]
     #[test]

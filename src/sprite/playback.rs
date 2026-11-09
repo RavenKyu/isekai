@@ -40,7 +40,7 @@ impl Playback {
             .parent()
             .filter(|p| !p.as_os_str().is_empty())
             .unwrap_or(std::path::Path::new("."));
-        if loaded.image_path.parent() != Some(parent) {
+        if parent.join(&loaded.sheet.image).parent() != Some(parent) {
             return Err(format!(
                 "image {} must share sidecar directory {}",
                 loaded.image_path.display(),
