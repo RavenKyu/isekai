@@ -11,7 +11,6 @@ use dear_imgui_rs::{TextureId, Ui};
 use std::{
     fs, io,
     path::{Component, Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
 };
 
 struct Analysis {
@@ -103,7 +102,7 @@ pub(super) fn default_output(source: &SheetSource, checkout: &Path) -> PathBuf {
         .join(&stem)
         .join(format!("{stem}-tileset.png"))
 }
-fn absolute_output(path: &Path, checkout: &Path) -> Result<PathBuf, StoreError> {
+pub(super) fn absolute_output(path: &Path, checkout: &Path) -> Result<PathBuf, StoreError> {
     if path.components().any(|c| matches!(c, Component::ParentDir)) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -125,7 +124,7 @@ fn absolute_output(path: &Path, checkout: &Path) -> Result<PathBuf, StoreError> 
     }
     Ok(path)
 }
-/// Refuses a write over a PNG another editor holds: its window would keep the old
+/// Refuses a write over a PNG any editor holds: its window would keep the old
 /// image, and Load of that path only focuses it. A symlink or alias resolves first.
 pub(super) fn refuse_open_output(output: &Path, open_files: &[PathBuf]) -> Result<(), String> {
     let resolved = output
@@ -135,7 +134,8 @@ pub(super) fn refuse_open_output(output: &Path, open_files: &[PathBuf]) -> Resul
         return Err(format!(
             "image {} is already open; choose another image path",
             output.display()
-        ));
+        )
+        .replace(['\n', '\r'], " "));
     }
     Ok(())
 }
@@ -249,48 +249,14 @@ fn plan_extract(
     plan_from_analysis(&Analysis::new(image, grid), grid, columns, output, checkout)
 }
 
-static NEXT_STAGE: AtomicU64 = AtomicU64::new(0);
-struct Staged(PathBuf);
-impl Drop for Staged {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.0);
-    }
-}
 fn save_sidecar_new(path: &Path, sheet: &SpriteSheet) -> Result<(), StoreError> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "sidecar needs a parent"))?;
-    let name = path.file_name().unwrap();
-    let stage = loop {
-        let mut name = name.to_os_string();
-        name.push(format!(
-            ".tmp-sidecar-{}-{}",
-            std::process::id(),
-            NEXT_STAGE.fetch_add(1, Ordering::Relaxed)
-        ));
-        let candidate = parent.join(name);
-        match fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&candidate)
-        {
-            Ok(file) => {
-                drop(file);
-                break Staged(candidate);
-            }
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
-            Err(e) => return Err(e.into()),
-        }
-    };
-    store::save(&stage.0, sheet)?;
-    // Hard-link publication is atomic and refuses an existing destination. Unlike
-    // rename, it cannot overwrite metadata created between existence check/save.
-    fs::hard_link(&stage.0, path)?;
-    Ok(())
+    sheet.validate().map_err(StoreError::Invalid)?;
+    store::publish_new(path, store::to_json(sheet).as_bytes())
 }
 fn write_plan(plan: &ExtractPlan, open_files: &[PathBuf]) -> Result<String, String> {
-    let output = ensure_output_dir(&plan.output, &plan.checkout).map_err(|e| e.to_string())?;
+    let output = absolute_output(&plan.output, &plan.checkout).map_err(|e| e.to_string())?;
     refuse_open_output(&output, open_files)?;
+    let output = ensure_output_dir(&output, &plan.checkout).map_err(|e| e.to_string())?;
     store::write_atomic(&output, &plan.png).map_err(|e| format!("PNG not written: {e}"))?;
     // PNG is a regenerated artifact and is replaced even when edited metadata exists.
     // These two files are not a transaction: after any JSON error the PNG remains.
@@ -389,7 +355,11 @@ pub(super) fn tab(editor: &mut SheetEditor, ui: &Ui, open_files: &[PathBuf]) {
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
-    use std::io::Read;
+    use std::{
+        io::Read,
+        sync::atomic::{AtomicU64, Ordering},
+    };
+    static NEXT_STAGE: AtomicU64 = AtomicU64::new(0);
     pub(crate) struct Temp(pub PathBuf);
     impl Temp {
         pub(crate) fn new() -> Self {
@@ -572,6 +542,48 @@ pub(super) mod tests {
         }
     }
     #[test]
+    fn opened_output_is_refused_before_any_disk_changes() {
+        let temp = Temp::new();
+        let (image, grid) = map(0, [0, 0]);
+        let source = temp.0.join("original.png");
+        fs::write(&source, image.to_png().unwrap()).unwrap();
+        let original = fs::read(&source).unwrap();
+        let open_files = [source.canonicalize().unwrap()];
+        let mut outputs = vec![source.clone()];
+        #[cfg(unix)]
+        {
+            let alias = temp.0.join("alias.png");
+            std::os::unix::fs::symlink(&source, &alias).unwrap();
+            outputs.push(alias);
+        }
+        let entries = fs::read_dir(&temp.0).unwrap().count();
+        for output in outputs {
+            let plan = plan_extract(&image, &grid, 16, &output, &temp.0).unwrap();
+            let error = write_plan(&plan, &open_files).unwrap_err();
+            assert!(error.contains("already open"), "{error}");
+            assert!(error.is_ascii() && !error.contains(['\r', '\n']));
+            assert_eq!(fs::read(&source).unwrap(), original);
+            assert!(!plan.sidecar_path.exists());
+            assert_eq!(fs::read_dir(&temp.0).unwrap().count(), entries);
+            assert_no_temps(&temp.0);
+        }
+        // A still-open editor may hold a path whose PNG has since disappeared.
+        // The refusal must happen before ensure_output_dir creates this parent.
+        let missing = temp.0.join("assets/splites/missing/result.png");
+        let plan = plan_extract(&image, &grid, 16, &missing, &temp.0).unwrap();
+        assert!(
+            write_plan(&plan, std::slice::from_ref(&missing))
+                .unwrap_err()
+                .contains("already open")
+        );
+        assert!(!temp.0.join("assets").exists());
+        assert_eq!(fs::read_dir(&temp.0).unwrap().count(), entries);
+        // Once no editor holds that path, the same new output is writable.
+        write_plan(&plan, &[]).unwrap();
+        assert_eq!(fs::read(&missing).unwrap(), plan.png);
+        assert_no_temps(&temp.0);
+    }
+    #[test]
     fn writes_are_atomic_png_replaced_sidecar_preserved_and_temps_cleaned() {
         let temp = Temp::new();
         let (mut image, grid) = map(1, [2, 0]);
@@ -619,6 +631,18 @@ pub(super) mod tests {
                 .contains("PNG written:")
         );
         assert_no_temps(&temp.0);
+    }
+    #[test]
+    fn sidecar_publication_validates_before_creating_files() {
+        let temp = Temp::new();
+        let path = temp.0.join("invalid.sprites.json");
+        let mut sheet = memory_sheet().meta;
+        sheet.grid.tile = 0;
+        assert!(matches!(
+            save_sidecar_new(&path, &sheet),
+            Err(StoreError::Invalid(_))
+        ));
+        assert_eq!(fs::read_dir(&temp.0).unwrap().count(), 0);
     }
     #[test]
     fn sidecar_publication_cannot_clobber_a_concurrent_writer() {

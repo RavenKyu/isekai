@@ -17,7 +17,21 @@ use crate::{
 };
 use dear_imgui_glow::{ExternalTextureId, GlowRenderer};
 use dear_imgui_rs::{Condition, TextureId, Ui};
-use std::{path::PathBuf, rc::Rc};
+use std::{
+    path::{Path, PathBuf},
+    rc::Rc,
+};
+
+fn resolve_load_path(given: &Path) -> Result<PathBuf, String> {
+    // Unlike store::load, editor Load requires an existing image. Use the exact
+    // path the common rule checked, before canonical identity can focus an editor.
+    store::image_within_directory(given, given.parent().unwrap_or(Path::new("."))).map_err(|e| {
+        match e {
+            store::StoreError::Io(error) => error.to_string(),
+            other => other.to_string(),
+        }
+    })
+}
 
 pub enum SheetSource {
     File(PathBuf),
@@ -147,7 +161,7 @@ impl SpriteLibrary {
     ) -> Result<(), String> {
         match action {
             Action::Load(path) => {
-                let path = path.canonicalize().map_err(|e| e.to_string())?;
+                let path = resolve_load_path(&path)?;
                 if let Some(editor) = self.sheets.iter_mut().find(|editor| {
                     matches!(&editor.sheet.source, SheetSource::File(open) if open == &path)
                 }) {
@@ -754,6 +768,100 @@ mod tests {
         BackendFlags, Context,
         render::{SynchronousRendererConsumer, TextureOp},
     };
+
+    #[cfg(unix)]
+    #[test]
+    fn load_path_rules_in_their_own_process() {
+        use std::{fs, os::unix::fs::symlink};
+        // A private cwd exercises the empty parent of "example.png" without
+        // changing the process-wide directory used by concurrently running tests.
+        if std::env::var_os("RN_LOAD_PATH_CHILD").is_none() {
+            let fixture = extract::tests::Temp::new();
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .env("RN_LOAD_PATH_CHILD", "1")
+                .current_dir(&fixture.0)
+                .args([
+                    "--exact",
+                    "ui::sprite_library::tests::load_path_rules_in_their_own_process",
+                    "--nocapture",
+                ])
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+            return;
+        }
+        let dir = std::env::current_dir().unwrap();
+        let outside = extract::tests::Temp::new();
+        let (image, mut meta) = crate::sprite::example();
+        let png = image.to_png().unwrap();
+        let image_path = Path::new("example.png");
+        let sidecar = store::sidecar_for(image_path);
+        let target = outside.0.join("outside.png");
+        fs::write(&target, &png).unwrap();
+        symlink(&target, image_path).unwrap();
+        store::save(&sidecar, &meta).unwrap();
+        let json = fs::read(&sidecar).unwrap();
+        let error = resolve_load_path(image_path).unwrap_err();
+        assert_eq!(error, "unsafe image path: \"example.png\"");
+        assert!(!error.contains(['\n', '\r']));
+        assert!(matches!(
+            store::load(&sidecar),
+            Err(store::StoreError::UnsafeImagePath(_))
+        ));
+        assert_eq!(fs::read(&target).unwrap(), png);
+        assert_eq!(fs::read(&sidecar).unwrap(), json);
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 2);
+        assert_eq!(fs::read_dir(&outside.0).unwrap().count(), 1);
+
+        fs::remove_file(image_path).unwrap();
+        fs::write("local.png", &png).unwrap();
+        symlink("local.png", image_path).unwrap();
+        let canonical = dir.join("local.png").canonicalize().unwrap();
+        assert_eq!(resolve_load_path(image_path).unwrap(), canonical);
+        store::load(&sidecar).unwrap();
+        // The resolved path is what Load reads. Replacing the input alias later
+        // must not redirect that read to an unchecked outside image.
+        let checked = resolve_load_path(image_path).unwrap();
+        fs::remove_file(image_path).unwrap();
+        symlink(&target, image_path).unwrap();
+        assert_eq!(fs::read(&checked).unwrap(), png);
+        assert_eq!(checked, canonical);
+        assert!(
+            resolve_load_path(image_path)
+                .unwrap_err()
+                .starts_with("unsafe image path:")
+        );
+        fs::remove_file(image_path).unwrap();
+        symlink("local.png", image_path).unwrap();
+        // A directory symlink resolves image and parent into the same directory.
+        let alias = outside.0.join("directory");
+        symlink(&dir, &alias).unwrap();
+        assert_eq!(
+            resolve_load_path(&alias.join(image_path)).unwrap(),
+            canonical
+        );
+        store::load(&alias.join(&sidecar)).unwrap();
+
+        fs::remove_file(image_path).unwrap();
+        fs::write(image_path, &png).unwrap();
+        assert_eq!(resolve_load_path(image_path).unwrap(), dir.join(image_path));
+        // A missing image is allowed by the metadata loader, but editor Load
+        // still fails with the ordinary canonicalize diagnostic.
+        meta.image = "missing.png".into();
+        store::save(&sidecar, &meta).unwrap();
+        store::load(&sidecar).unwrap();
+        let missing = Path::new("missing.png");
+        assert_eq!(
+            resolve_load_path(missing).unwrap_err(),
+            missing.canonicalize().unwrap_err().to_string()
+        );
+    }
 
     // Observe the actual submitted items, rather than repeating import_panel's
     // layout or enabled condition in a test-only copy of the UI.
@@ -1457,6 +1565,8 @@ mod tests {
         );
         let first_id = library.sheets[0].id;
         let first_external = library.sheets[0].sheet.external;
+        #[cfg(unix)]
+        check_escaping_load_refusals(&mut library, &gl, &mut renderer);
         library.sheets[0].sheet.meta.grid.offset = [1, 0];
         library.sheets[0].focus_requested = false;
         std::fs::create_dir(temp.0.join("alias")).unwrap();
@@ -1522,5 +1632,91 @@ mod tests {
         );
         library.close_all(&mut renderer).unwrap();
         renderer.shutdown(&mut imgui).unwrap();
+    }
+
+    #[cfg(unix)]
+    fn check_escaping_load_refusals(
+        library: &mut SpriteLibrary,
+        gl: &Rc<glow::Context>,
+        renderer: &mut GlowRenderer,
+    ) {
+        use std::{fs, os::unix::fs::symlink};
+        let links = extract::tests::Temp::new();
+        let outside = extract::tests::Temp::new();
+        let SheetSource::File(opened) = &library.sheets[0].sheet.source else {
+            panic!("expected a file-backed editor")
+        };
+        let opened = opened.clone();
+        let unopened = outside.0.join("unopened.png");
+        let png = fs::read(&opened).unwrap();
+        fs::write(&unopened, &png).unwrap();
+        let targets = [unopened, opened];
+        let aliases = [links.0.join("unopened.png"), links.0.join("opened\n\r.png")];
+        for (target, alias) in targets.iter().zip(&aliases) {
+            symlink(target, alias).unwrap();
+        }
+        let snapshot = |library: &SpriteLibrary| {
+            library
+                .sheets
+                .iter()
+                .map(|e| {
+                    (
+                        e.id,
+                        e.focus_requested,
+                        match &e.sheet.source {
+                            SheetSource::File(path) => Some(path.clone()),
+                            SheetSource::Memory { .. } => None,
+                        },
+                        e.sheet.meta.clone(),
+                        e.sheet.dirty,
+                        e.sheet.imgui_id,
+                        e.sheet.external,
+                        e.log.clone(),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        library.path_input = "keep this user input".into();
+        for alias in &aliases {
+            for editor in &mut library.sheets {
+                editor.focus_requested = false;
+            }
+            let before = snapshot(library);
+            let next_id = library.next_id;
+            library.status = "before refusal".into();
+            library.pending.push(Action::Load(alias.clone()));
+            library.apply_pending(gl, renderer);
+            assert!(
+                library.status.starts_with("unsafe image path:"),
+                "{}",
+                library.status
+            );
+            assert!(
+                library.status.contains(
+                    &alias
+                        .file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .replace('\n', "\\n")
+                        .replace('\r', "\\r")
+                )
+            );
+            assert!(!library.status.contains(['\n', '\r']));
+            assert_eq!(library.path_input, "keep this user input");
+            assert_eq!(
+                snapshot(library),
+                before,
+                "refusal precedes upload and same-file focus"
+            );
+            assert_eq!(library.next_id, next_id);
+            assert!(library.pending.is_empty());
+            assert!(!store::sidecar_for(alias).exists());
+        }
+        for target in &targets {
+            assert_eq!(fs::read(target).unwrap(), png);
+            assert!(!store::sidecar_for(target).exists());
+        }
+        assert_eq!(fs::read_dir(&links.0).unwrap().count(), 2);
+        assert_eq!(fs::read_dir(&outside.0).unwrap().count(), 1);
     }
 }

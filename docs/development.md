@@ -128,6 +128,8 @@ scripts/check-no-imgui.sh --release
 버전 교체 및 인자 보존을 검사한다. 실제 SDK·웹 검사를 대신하지 않는다.
 [웹 스모크](web.md#웹-스모크)로 이어 간다. 회귀 검사를 바꿀 때는
 [실패하는 변이로 약속을 확인하는 교훈](lessons/verify-promises-with-mutations.md)을 따른다.
+파일 열기·저장 경로를 바꿀 때는 [검증한 경로 해석 결과를 그대로 사용하는 규칙](lessons/use-the-path-that-was-validated.md)도 확인한다.
+ImGui 검사에는 [기본 실행과 ignored 실행을 모두 자식으로 격리하는 규칙](lessons/isolate-imgui-tests-at-every-entry.md)을 적용한다.
 성공 경로 검사에서는 [fixture의 전제조건](lessons/prepare-valid-fixtures-for-success-paths.md)을 먼저 맞춘다.
 파일 재열기 방식을 바꿀 때는 [쓰기 경로와 파일 식별 기준](lessons/inspect-write-paths-when-deduplicating-open-files.md)도 함께 확인한다.
 

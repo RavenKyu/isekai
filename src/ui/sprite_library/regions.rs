@@ -80,22 +80,37 @@ fn save_memory(
     if !matches!(sheet.source, SheetSource::Memory { .. }) {
         return Err("only memory images need Save image as".into());
     }
-    let output = extract::ensure_output_dir(path, checkout).map_err(|e| e.to_string())?;
+    let output = extract::absolute_output(path, checkout).map_err(|e| e.to_string())?;
     extract::refuse_open_output(&output, open_files)?;
     // Save would then replace this sidecar with the crop's empty metadata.
     let sidecar = store::sidecar_for(&output);
-    if sidecar.try_exists().map_err(|e| e.to_string())? {
+    if match std::fs::symlink_metadata(&sidecar) {
+        Ok(_) => true,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+        Err(e) => return Err(e.to_string()),
+    } {
         return Err(format!(
             "sidecar {} exists; choose another image path",
             sidecar.display()
-        ));
+        )
+        .replace(['\n', '\r'], " "));
     }
     let name = output
         .file_name()
         .and_then(|s| s.to_str())
         .ok_or("image file name must be valid UTF-8")?
         .to_owned();
-    store::write_atomic(&output, &sheet.image.to_png()?).map_err(|e| e.to_string())?;
+    let output = extract::ensure_output_dir(&output, checkout).map_err(|e| e.to_string())?;
+    store::publish_new(&output, &sheet.image.to_png()?).map_err(|e| match e {
+        store::StoreError::Io(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            format!(
+                "image {} exists; choose another image path",
+                output.display()
+            )
+            .replace(['\n', '\r'], " ")
+        }
+        other => other.to_string(),
+    })?;
     // Load compares canonical paths, so a later Load of this PNG focuses this editor.
     let output = output.canonicalize().unwrap_or(output);
     sheet.meta.image = name;
@@ -300,6 +315,130 @@ mod tests {
         );
     }
     #[test]
+    fn memory_save_button_in_its_own_process() {
+        memory_save_button_preserves_state_on_refusal();
+    }
+    #[test]
+    #[ignore = "run by memory_save_button_in_its_own_process"]
+    fn memory_save_button_preserves_state_on_refusal() {
+        use super::super::tests::{context, item_center, vertices};
+        use std::cell::{Cell, RefCell};
+        // Both the default wrapper and bulk --ignored runs must enter a fresh
+        // process before creating ImGui's single-thread-owned context.
+        if std::env::var_os("RN_MEMORY_SAVE_CHILD").is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .env("RN_MEMORY_SAVE_CHILD", "1")
+                .args([
+                    "--exact",
+                    "ui::sprite_library::regions::tests::memory_save_button_preserves_state_on_refusal",
+                    "--ignored",
+                    "--nocapture",
+                ])
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+            return;
+        }
+        let temp = super::super::extract::tests::Temp::new();
+        let path = temp.0.join("existing.png");
+        std::fs::write(&path, b"existing PNG without metadata").unwrap();
+        let mut editor = SheetEditor::new(1, super::super::extract::tests::memory_sheet());
+        editor.sheet.dirty = false;
+        editor.regions.source = Some(editor.sheet.imgui_id);
+        editor.regions.save_path = path.to_string_lossy().into_owned();
+        let meta = editor.sheet.meta.clone();
+        let editor = RefCell::new(editor);
+        let center = Cell::new([0.0; 2]);
+        let (mut context, consumer) = context();
+        let render = |context: &mut dear_imgui_rs::Context| {
+            vertices(context, &consumer, |ui| {
+                ui.window("Save memory test")
+                    .size([600.0, 160.0], dear_imgui_rs::Condition::Always)
+                    .build(|| {
+                        memory_header(&mut editor.borrow_mut(), ui, &[]);
+                        center.set(item_center(ui));
+                    });
+            });
+        };
+        render(&mut context);
+        context.io_mut().add_mouse_pos_event(center.get());
+        render(&mut context);
+        context
+            .io_mut()
+            .add_mouse_button_event(dear_imgui_rs::MouseButton::Left, true);
+        render(&mut context);
+        context
+            .io_mut()
+            .add_mouse_button_event(dear_imgui_rs::MouseButton::Left, false);
+        render(&mut context);
+        let editor = editor.borrow();
+        assert!(editor.saved_path.is_none());
+        assert!(matches!(editor.sheet.source, SheetSource::Memory { .. }));
+        assert!(!editor.sheet.dirty);
+        assert_eq!(editor.sheet.meta, meta);
+        assert_eq!(editor.log.len(), 1, "the button must actually have run");
+        assert!(editor.log[0].contains("exists; choose another image path"));
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            b"existing PNG without metadata"
+        );
+        assert_eq!(std::fs::read_dir(&temp.0).unwrap().count(), 1);
+    }
+    #[cfg(unix)]
+    #[test]
+    fn save_memory_refuses_existing_symlink_names() {
+        let temp = super::super::extract::tests::Temp::new();
+        let outside = super::super::extract::tests::Temp::new();
+        let target = outside.0.join("original.png");
+        std::fs::write(&target, b"original PNG").unwrap();
+        for (name, target) in [
+            ("alias.png", target.clone()),
+            ("dangling.png", outside.0.join("missing.png")),
+        ] {
+            let output = temp.0.join(name);
+            std::os::unix::fs::symlink(&target, &output).unwrap();
+            let mut sheet = super::super::extract::tests::memory_sheet();
+            sheet.dirty = false;
+            let meta = sheet.meta.clone();
+            assert!(
+                save_memory(&mut sheet, &output, &temp.0, &[])
+                    .unwrap_err()
+                    .contains("exists; choose another image path")
+            );
+            assert!(matches!(sheet.source, SheetSource::Memory { .. }));
+            assert!(!sheet.dirty);
+            assert_eq!(sheet.meta, meta);
+            assert_eq!(std::fs::read_link(&output).unwrap(), target);
+            assert!(!store::sidecar_for(&output).exists());
+        }
+        assert_eq!(std::fs::read(&target).unwrap(), b"original PNG");
+        assert_eq!(std::fs::read_dir(&temp.0).unwrap().count(), 2);
+        assert_eq!(std::fs::read_dir(&outside.0).unwrap().count(), 1);
+        // A dangling sidecar still reserves its name for metadata.
+        let output = temp.0.join("orphan.png");
+        let sidecar = store::sidecar_for(&output);
+        std::os::unix::fs::symlink("absent.json", &sidecar).unwrap();
+        assert!(
+            save_memory(
+                &mut super::super::extract::tests::memory_sheet(),
+                &output,
+                &temp.0,
+                &[]
+            )
+            .unwrap_err()
+            .contains("sidecar")
+        );
+        assert!(!output.exists());
+        assert!(sidecar.is_symlink());
+        assert_eq!(std::fs::read_dir(&temp.0).unwrap().count(), 3);
+    }
+    #[test]
     fn save_memory_uses_png_and_changes_source_only_after_success() {
         let temp = super::super::extract::tests::Temp::new();
         let mut sheet = super::super::extract::tests::memory_sheet();
@@ -335,6 +474,19 @@ mod tests {
             std::fs::remove_file(&link).unwrap();
         }
         assert!(matches!(sheet.source, SheetSource::Memory { .. }));
+        let dirty = sheet.dirty;
+        let meta = sheet.meta.clone();
+        assert!(
+            save_memory(&mut sheet, &output, &temp.0, &[])
+                .unwrap_err()
+                .contains("exists; choose another image path")
+        );
+        assert_eq!(std::fs::read(&output).unwrap(), b"open sibling PNG");
+        assert_eq!(sheet.meta, meta);
+        assert_eq!(sheet.dirty, dirty);
+        assert!(matches!(sheet.source, SheetSource::Memory { .. }));
+        assert!(!store::sidecar_for(&output).exists());
+        std::fs::remove_file(&output).unwrap();
         save_memory(&mut sheet, &output, &temp.0, &[]).unwrap();
         assert!(matches!(&sheet.source,SheetSource::File(path) if path==&output));
         assert_eq!(sheet.meta.image, "map.png");
@@ -344,6 +496,21 @@ mod tests {
             sheet.image
         );
         assert!(!store::sidecar_for(&output).exists());
+        // The next crop's unchanged default output cannot replace the first crop.
+        let png = std::fs::read(&output).unwrap();
+        let mut other = super::super::extract::tests::memory_sheet();
+        other.dirty = false;
+        other.image.set_pixel(0, 0, [1, 2, 3, 255]);
+        assert_eq!(default_image_output(&other.source, &temp.0), output);
+        assert!(save_memory(&mut other, &output, &temp.0, &[]).is_err());
+        assert!(matches!(other.source, SheetSource::Memory { .. }));
+        assert!(!other.dirty);
+        assert_eq!(std::fs::read(&output).unwrap(), png);
+        assert!(!store::sidecar_for(&output).exists());
+        assert_eq!(
+            std::fs::read_dir(output.parent().unwrap()).unwrap().count(),
+            1
+        );
         // An existing sidecar holds someone's metadata: refuse before writing the PNG.
         std::fs::write(store::sidecar_for(&output), b"kept").unwrap();
         let png = std::fs::read(&output).unwrap();
@@ -357,5 +524,14 @@ mod tests {
         assert!(matches!(other.source, SheetSource::Memory { .. }));
         assert_eq!(std::fs::read(&output).unwrap(), png);
         assert_eq!(std::fs::read(store::sidecar_for(&output)).unwrap(), b"kept");
+        // Orphan metadata alone still reserves the output name.
+        std::fs::remove_file(&output).unwrap();
+        assert!(save_memory(&mut other, &output, &temp.0, &[]).is_err());
+        assert!(!output.exists());
+        assert_eq!(std::fs::read(store::sidecar_for(&output)).unwrap(), b"kept");
+        assert_eq!(
+            std::fs::read_dir(output.parent().unwrap()).unwrap().count(),
+            1
+        );
     }
 }

@@ -81,6 +81,9 @@ Save는 같은 디렉터리의 새 임시 파일에 쓰고 `sync_all` 후 rename
 형식 자체는 `sub/x.png`도 허용하지만 네이티브 런타임은 추가로 이미지와 사이드카가 같은
 디렉터리에 있어야 한다. 편집기·추출기는 항상 이미지 파일 이름 하나만 쓴다.
 기존 이미지의 심볼릭 링크가 사이드카 디렉터리 밖을 가리키면 로더가 거부한다.
+편집기도 PNG를 열 때 같은 규칙을 적용하고, 사람이 지정한 디렉터리 밖으로 가는 파일
+심볼릭 링크를 `unsafe image path`로 거부한다. 같은 디렉터리 안을 가리키는 파일 링크와
+이미지·부모가 같은 실제 디렉터리로 모이는 디렉터리 링크는 허용한다.
 
 편집기로 PNG를 열 때 사이드카가 잘못됐거나 `image`가 연 PNG 이름과 다르면 기존 시트를
 유지하고 오류를 표시한다. 실패한 사이드카를 빈 메타데이터로 취급해 덮어쓰지 않는다.
@@ -114,6 +117,8 @@ Library 창을 닫아도 편집 창은 유지된다. 웹 dev에는 Assets 메뉴
 
 1. `PNG path` 입력 후 `Load`, 파일 드래그 앤 드롭, `Browse...`의 네이티브 파일
    대화상자, `assets/` 목록 중 하나로 PNG를 연다. 드롭은 도구가 숨겨져 있어도 창을 연다.
+   디렉터리 밖을 가리키는 PNG 심볼릭 링크는 이미 열린 파일을 가리켜도 포커스 전에 거부한다.
+   오류는 Library 상태 줄에 남고, 열린 창과 입력 경로 및 디스크는 유지된다.
    목록은 현재 checkout의 assets 아래를 재귀 탐색하며 숨김 항목·심볼릭 링크를 따르지 않는다.
    `Refresh assets/`로 다시 읽는다. 확장자 대소문자는 무시하고 PNG만 받는다.
 2. 마젠타 등을 투명하게 만들려면 `Key color`를 켜고 `RGB hex`에 `ff00ff` 같은 값을
@@ -173,7 +178,8 @@ PNG 저장 후 `Save`로 메타를 따로 쓴다. 다른 편집 창이 열고 �
    격자는 유지하고 타일·sprite·clip 메타는 빈 상태로 시작한다.
 3. `Image output`을 확인하고 `Save image as`로 crop PNG를 쓴다. 기본은
    `assets/splites/<crop 이름>/<crop 이름>.png`다. 이 버튼은 JSON을 만들지 않는다.
-   그 경로의 사이드카가 이미 있으면 Save가 그 메타를 덮게 되므로 PNG도 쓰지 않고 거부한다.
+   그 경로에 PNG나 사이드카가 이미 있으면 쓰지 않고 거부한다. 심볼릭 링크 이름도 포함한다.
+   PNG는 배타적으로 게시하므로 동시에 다른 쓰기가 만든 파일도 덮지 않는다.
 4. 배경을 제거하려면 그 PNG를 저장한 다음 `Key color`를 켜고 해당 창의 `Reload image`를 누른다.
    이어 격자를 직접 입력하거나 Guess/Apply로 정한다. crop과 키 색 제거는 이 두 단계다.
 5. `Extract`의 `Analyze`를 누른다. 완전 투명 픽셀의 RGB를 0으로 정규화한 뒤
@@ -182,6 +188,8 @@ PNG 저장 후 `Save`로 메타를 따로 쓴다. 다른 편집 창이 열고 �
    `Columns`(기본 16)와 `Output`을 정한다. 격자·이미지가 바뀌면 분석을 다시 해야 한다.
 6. `Write tileset`으로 PNG와 빈 메타의 사이드카를 쓴다. 기본 출력은
    `assets/splites/<맵 stem>/<맵 stem>-tileset.png`다. tile은 유지하고 offset·spacing은 0이 된다.
+   현재 창의 원본 PNG를 포함해 어느 편집 창에든 열린 PNG는 Output으로 쓸 수 없다.
+   그 PNG를 가리키는 심볼릭 링크도 파일이나 디렉터리를 만들기 전에 거부한다.
    `Open result`로 결과를 바로 열 수 있다. sprite·clip은 자동 생성하지 않으므로
    런타임 재생 전 편집기에서 sprite와 최소 하나의 clip을 작성한다.
 
@@ -190,8 +198,12 @@ Find regions·Suggest from objects·Analyze는 버튼에서만 동기로 실행�
 밖에서는 이미 존재하는 디렉터리만 쓸 수 있다. `..`와 심볼릭 링크를 거치는 출력 디렉터리는 거부한다.
 저장소 안이면서 이 ignore 폴더 밖이면 커밋 대상이 될 수 있다는 상태 줄을 표시한다.
 
-PNG는 재생성 결과로서 원자적으로 교체한다. JSON은 기존 파일이나 동시에 다른 쓰기가 만든
+`Write tileset`의 PNG는 재생성 결과로서 원자적으로 교체한다. JSON은 기존 파일이나 동시에 다른 쓰기가 만든
 파일을 덮지 않도록 배타적으로 게시한다. 둘은 하나의 트랜잭션이 아니다.
+배타 게시에는 하드 링크를 지원하는 파일시스템이 필요하다. FAT/exFAT나 하드 링크를 지원하지 않는
+일부 네트워크 마운트에서는 `Save image as`와 타일셋 JSON 게시가 IO 오류로 실패한다.
+`Write tileset`은 이때도 PNG를 이미 교체했고 `PNG written: ...; sidecar not written: sprite file IO: ...`를 표시한다.
+이때는 하드 링크를 지원하는 저장 위치를 사용한다. 다른 방식으로 자동 전환하지 않는다.
 기존 사이드카 때문에 JSON 저장이 거부돼도 PNG는 이미 새 내용일 수 있다.
 `PNG written: ...; sidecar not written: sidecar exists; remove it first`가 그 상태다.
 이 경우 기존 JSON과 새 PNG의 격자가 맞는지 확인하고, 다른 출력 이름을 사용하거나
@@ -289,4 +301,4 @@ Find regions·Suggest from objects·Analyze의 동기 실행과 앱 종료 시 �
 `/assets/splites/`는 gitignore에 있으며 이미지·결과 PNG·사이드카를 커밋하지 않는다.
 라이선스는 이 문서에서 단정하지 않는다. 자동 검사·웹 예제는 코드가 만든 이미지로만 동작한다.
 
-Decided in: rn-fcuz, rn-hk1c
+Decided in: rn-fcuz, rn-hk1c, rn-aw9h
