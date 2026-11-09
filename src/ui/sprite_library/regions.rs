@@ -972,24 +972,12 @@ mod tests {
         use std::cell::{Cell, RefCell};
         // Both the default wrapper and bulk --ignored runs must enter a fresh
         // process before creating ImGui's single-thread-owned context.
-        if std::env::var_os("RN_MEMORY_SAVE_CHILD").is_none() {
-            let output = std::process::Command::new(std::env::current_exe().unwrap())
-                .env("RN_MEMORY_SAVE_CHILD", "1")
-                .args([
-                    "--exact",
-                    "ui::sprite_library::regions::tests::memory_save_button_preserves_state_on_refusal",
-                    "--ignored",
-                    "--nocapture",
-                ])
-                .output()
-                .unwrap();
-            assert!(
-                output.status.success(),
-                "{}{}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            );
-            assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+        if !crate::test_support::in_child_process(
+            "ui::sprite_library::regions::tests::memory_save_button_preserves_state_on_refusal",
+            Some("RN_MEMORY_SAVE_CHILD"),
+            true,
+            None,
+        ) {
             return;
         }
         let temp = crate::test_support::TempDir::new("extract");
