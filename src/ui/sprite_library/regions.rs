@@ -1,3 +1,4 @@
+use super::log;
 use super::{
     Action, OpenSheet, SheetEditor, SheetSource, extract,
     view::{self, Overlay},
@@ -103,7 +104,7 @@ pub(super) fn memory_header(editor: &mut SheetEditor, ui: &Ui) {
     let SheetEditor {
         sheet,
         regions: state,
-        status,
+        log,
         saved_path,
         ..
     } = editor;
@@ -113,7 +114,7 @@ pub(super) fn memory_header(editor: &mut SheetEditor, ui: &Ui) {
     let checkout = match std::env::current_dir() {
         Ok(path) => path,
         Err(e) => {
-            *status = e.to_string();
+            log::append(log, e.to_string());
             return;
         }
     };
@@ -130,9 +131,9 @@ pub(super) fn memory_header(editor: &mut SheetEditor, ui: &Ui) {
                 if let SheetSource::File(path) = &sheet.source {
                     *saved_path = Some(path.clone());
                 }
-                *status = message;
+                log::append(log, message);
             }
-            Err(error) => *status = error,
+            Err(error) => log::append(log, error),
         }
     }
 }
@@ -166,7 +167,7 @@ pub(super) fn tab(editor: &mut SheetEditor, ui: &Ui) {
     let SheetEditor {
         sheet,
         regions: state,
-        status,
+        log,
         pending,
         ..
     } = editor;
@@ -187,9 +188,12 @@ pub(super) fn tab(editor: &mut SheetEditor, ui: &Ui) {
                 // Large images pause the editor; invoke only on this button.
                 state.candidates = raster::find_objects(&sheet.image, background, state.min_size);
                 state.selected = None;
-                *status = format!("{} region candidates (not saved)", state.candidates.len());
+                log::append(
+                    log,
+                    format!("{} region candidates (not saved)", state.candidates.len()),
+                );
             }
-            Err(e) => *status = e,
+            Err(e) => log::append(log, e),
         }
     }
     ui.child_window("Region candidates")
@@ -219,7 +223,7 @@ pub(super) fn tab(editor: &mut SheetEditor, ui: &Ui) {
             let name = region_name(&extract::source_stem(&sheet.source), i + 1);
             match crop_action(&sheet.image, sheet.meta.grid, bbox, name) {
                 Ok(action) => pending.push(action),
-                Err(e) => *status = e,
+                Err(e) => log::append(log, e),
             }
         }
     }

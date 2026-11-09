@@ -177,4 +177,4 @@ rn-smoke: ok frames=<N> vtx=<M> lit=<K>
 - `sheet ... exceeds GL_MAX_TEXTURE_SIZE ...`: 이미지 크기가 GL 한계를 넘는다. 시트를 작게 나누거나 지원 가능한 환경에서 연다.
 - `missing required tool`: 오류에 표시된 Xvfb, Python, timeout, nm 등을 준비한다.
 
-Decided in: rn-35g9, rn-7w7b, rn-fcuz
+Decided in: rn-35g9, rn-7w7b, rn-fcuz, rn-hk1c

@@ -1,0 +1,213 @@
+use dear_imgui_rs::{StyleColor, StyleVar, Ui, WindowFlags};
+
+pub(super) const LIMIT: usize = 500;
+pub(super) const HEIGHT: f32 = 120.0;
+
+fn timestamp() -> String {
+    let mut ticks = 0;
+    let mut date = sdl3::sys::time::SDL_DateTime::default();
+    // SAFETY: both SDL functions write into live, correctly typed stack values.
+    // They need no SDL subsystem and permit calls from any thread.
+    if unsafe {
+        sdl3::sys::time::SDL_GetCurrentTime(&mut ticks)
+            && sdl3::sys::time::SDL_TimeToDateTime(ticks, &mut date, true)
+    } {
+        format!("{:02}:{:02}:{:02}", date.hour, date.minute, date.second)
+    } else {
+        "??:??:??".into()
+    }
+}
+
+pub(super) fn append(lines: &mut Vec<String>, message: String) {
+    let time = timestamp();
+    // One timestamp per physical line; embedded NULs cannot truncate InputText.
+    for line in message.replace('\0', " ").lines() {
+        lines.push(format!("{time} {}", line.trim_end_matches('\r')));
+    }
+    if lines.len() > LIMIT {
+        lines.drain(..lines.len() - LIMIT);
+    }
+}
+
+#[derive(Default)]
+pub(super) struct LogView {
+    text: String,
+    #[cfg(test)]
+    metrics: [f32; 4],
+    #[cfg(test)]
+    clear_center: [f32; 2],
+}
+impl LogView {
+    pub fn draw(&mut self, lines: &mut Vec<String>, ui: &Ui) {
+        ui.separator();
+        ui.text("Log");
+        ui.same_line();
+        if ui.small_button("Clear") {
+            lines.clear();
+        }
+        #[cfg(test)]
+        {
+            let min = ui.item_rect_min();
+            let size = ui.item_rect_size();
+            self.clear_center = [min[0] + size[0] * 0.5, min[1] + size[1] * 0.5];
+        }
+        let text = lines.join("\n");
+        let changed = text != self.text;
+        self.text = text;
+        let _background = ui.push_style_color(StyleColor::ChildBg, [0.0, 0.0, 0.0, 1.0]);
+        let _frame = ui.push_style_color(StyleColor::FrameBg, [0.0, 0.0, 0.0, 1.0]);
+        let _hover = ui.push_style_color(StyleColor::FrameBgHovered, [0.0, 0.0, 0.0, 1.0]);
+        let _active = ui.push_style_color(StyleColor::FrameBgActive, [0.0, 0.0, 0.0, 1.0]);
+        let _text = ui.push_style_color(StyleColor::Text, [1.0; 4]);
+        let _padding = ui.push_style_var(StyleVar::FramePadding([4.0, 4.0]));
+        ui.child_window("Sheet log")
+            .size([0.0, HEIGHT])
+            .flags(WindowFlags::HORIZONTAL_SCROLLBAR)
+            .build(ui, || {
+                let at_bottom = ui.scroll_y() >= ui.scroll_max_y() - 1.0;
+                #[cfg(test)]
+                {
+                    let pos = ui.window_pos();
+                    let size = ui.window_size();
+                    self.metrics = [
+                        ui.scroll_y(),
+                        ui.scroll_max_y(),
+                        pos[0] + size[0] * 0.5,
+                        pos[1] + size[1] * 0.5,
+                    ];
+                }
+                // The outer child owns scrolling. A full-height input permits
+                // selecting/copying across lines without a second vertical scrollbar.
+                let width =
+                    (ui.calc_text_size(&self.text)[0] + 16.0).max(ui.content_region_avail()[0]);
+                let height = (lines.len().max(1) as f32 * ui.text_line_height()) + 16.0;
+                ui.input_text_multiline("##log text", &mut self.text, [width, height])
+                    .read_only(true)
+                    .build();
+                if changed && at_bottom {
+                    ui.set_scroll_here_y(1.0);
+                }
+            });
+    }
+}
+
+#[cfg(test)]
+impl LogView {
+    pub(super) fn check_interactions(
+        context: &mut dear_imgui_rs::Context,
+        consumer: &dear_imgui_rs::render::SynchronousRendererConsumer,
+    ) {
+        use dear_imgui_rs::{Condition, Key, MouseButton};
+        use std::{cell::RefCell, rc::Rc};
+        struct Clipboard(Rc<RefCell<String>>);
+        impl dear_imgui_rs::ClipboardBackend for Clipboard {
+            fn get(&mut self) -> Option<String> {
+                Some(self.0.borrow().clone())
+            }
+            fn set(&mut self, value: &str) {
+                *self.0.borrow_mut() = value.into();
+            }
+        }
+        let clipboard = Rc::new(RefCell::new(String::new()));
+        context.set_clipboard_backend(Clipboard(Rc::clone(&clipboard)));
+        let view = RefCell::new(Self::default());
+        let lines = RefCell::new(Vec::new());
+        let render = |context: &mut dear_imgui_rs::Context| {
+            super::tests::vertices(context, consumer, |ui| {
+                ui.window("Log interactions")
+                    .size([600.0, 300.0], Condition::Always)
+                    .position([20.0, 20.0], Condition::Always)
+                    .build(|| view.borrow_mut().draw(&mut lines.borrow_mut(), ui));
+            });
+        };
+        for i in 0..40 {
+            append(&mut lines.borrow_mut(), format!("event {i}"));
+        }
+        render(context);
+        let [y, max, x, mouse_y] = view.borrow().metrics;
+        assert!(
+            max > 0.0 && y >= max - 1.0,
+            "new lines follow the bottom: {y}/{max}"
+        );
+        context.io_mut().add_mouse_pos_event([x, mouse_y]);
+        render(context);
+        context.io_mut().add_mouse_wheel_event([0.0, 5.0]);
+        render(context);
+        let [before, max, ..] = view.borrow().metrics;
+        assert!(before < max - 1.0, "wheel scrolls the outer log child");
+        append(&mut lines.borrow_mut(), "while reading older lines".into());
+        render(context);
+        let after = view.borrow().metrics[0];
+        assert!(
+            (before - after).abs() < 1.0,
+            "new log must keep reading position: {before} -> {after}"
+        );
+        context
+            .io_mut()
+            .add_mouse_button_event(MouseButton::Left, true);
+        render(context);
+        context
+            .io_mut()
+            .add_mouse_button_event(MouseButton::Left, false);
+        render(context);
+        context.io_mut().add_key_event(Key::ModCtrl, true);
+        context.io_mut().add_key_event(Key::A, true);
+        render(context);
+        context.io_mut().add_key_event(Key::A, false);
+        render(context);
+        context.io_mut().add_key_event(Key::C, true);
+        render(context);
+        context.io_mut().add_key_event(Key::C, false);
+        context.io_mut().add_key_event(Key::ModCtrl, false);
+        render(context);
+        assert_eq!(
+            *clipboard.borrow(),
+            lines.borrow().join("\n"),
+            "read-only text can be selected and copied"
+        );
+        context.io_mut().add_key_event(Key::Backspace, true);
+        render(context);
+        context.io_mut().add_key_event(Key::Backspace, false);
+        render(context);
+        assert_eq!(
+            view.borrow().text,
+            lines.borrow().join("\n"),
+            "typing cannot edit the log"
+        );
+        let clear = view.borrow().clear_center;
+        context.io_mut().add_mouse_pos_event(clear);
+        render(context);
+        context
+            .io_mut()
+            .add_mouse_button_event(MouseButton::Left, true);
+        render(context);
+        context
+            .io_mut()
+            .add_mouse_button_event(MouseButton::Left, false);
+        render(context);
+        assert!(lines.borrow().is_empty(), "Clear empties only this log");
+    }
+}
+
+#[cfg(test)]
+pub(super) mod tests {
+    use super::*;
+    #[test]
+    fn logs_keep_the_latest_500_timestamped_lines_and_normalize_control_characters() {
+        let mut lines = Vec::new();
+        for i in 0..LIMIT + 3 {
+            append(&mut lines, format!("line {i}"));
+        }
+        assert_eq!(lines.len(), LIMIT);
+        assert!(lines[0].ends_with(" line 3"));
+        assert!(lines.last().unwrap().ends_with(" line 502"));
+        let prefix = &lines[0][..8];
+        assert_eq!(&prefix[2..3], ":");
+        assert_eq!(&prefix[5..6], ":");
+        assert!(prefix.replace(':', "").chars().all(|c| c.is_ascii_digit()));
+        append(&mut lines, "first\r\nsecond\0last".into());
+        assert_eq!(lines.len(), LIMIT);
+        assert!(lines[LIMIT - 2].ends_with(" first"));
+        assert!(lines[LIMIT - 1].ends_with(" second last"));
+    }
+}

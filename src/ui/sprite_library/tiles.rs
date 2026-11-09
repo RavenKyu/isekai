@@ -1,3 +1,4 @@
+use super::log;
 use super::{
     SheetEditor, format_props, format_tags, model::Selection, parse_props, parse_tags,
     view::input_u32,
@@ -142,7 +143,7 @@ impl SheetEditor {
             match parse_props(&self.tile_draft.props) {
                 Ok(props) => tile.props = props,
                 Err(error) => {
-                    self.status = error;
+                    log::append(&mut self.log, error);
                     return;
                 }
             }
@@ -216,9 +217,9 @@ impl SheetEditor {
                 Ok(()) => {
                     sheet.meta = candidate;
                     sheet.dirty = true;
-                    self.status = "Tile metadata updated".into();
+                    log::append(&mut self.log, "Tile metadata updated".into());
                 }
-                Err(errors) => self.status = errors.join("; "),
+                Err(errors) => log::append(&mut self.log, errors.join("; ")),
             }
         }
     }

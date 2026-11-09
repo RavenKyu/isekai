@@ -121,7 +121,7 @@ Library 창을 닫아도 편집 창은 유지된다. 웹 dev에는 Assets 메뉴
    `Reload image`도 현재 키 색 옵션으로 이미지를 다시 읽는다.
 3. `Tile`, `Offset x`, `Offset y`, `Spacing`을 넣는다. 정수 음수는 0, tile의 0은 1로
    제한한다. 변경으로 기존 메타가 범위 밖이 되면 경고하고 격자를 되돌린다.
-4. `Guess`는 반복 패턴의 점수와 후보를 제시한다. `Apply ... offset (x,y)`를 눌러야
+4. `Guess`는 반복 패턴의 후보를 제시하고 점수는 아래 로그에 남긴다. `Apply ... offset (x,y)`를 눌러야
    tile과 x·y 여백이 함께 들어가며 spacing은 유지된다. 자동 적용하지 않는다.
    고유 타일만 모은 시트에서는 약하므로 사람이 정한 값이 우선이다.
    Guess는 백그라운드에서 실행하며 검사한 offset 수에 따른 진행률을 표시한다.
@@ -148,6 +148,12 @@ Library 창을 닫아도 편집 창은 유지된다. 웹 dev에는 Assets 메뉴
     다시 꺼진다. 사이드카가 없는 PNG는 열자마자 켜진다. `Reload image`는 현재 메타를
     유지하며 PNG만 다시 읽는다. 메타도 다시 읽으려면 저장 후 편집 창의 x로 닫고 PNG를 다시 Load한다.
     x는 변경이 있으면 `Discard`/`Cancel`로 확인한다. 앱 종료는 확인 없이 미저장 변경을 잃는다.
+
+각 편집 창 아래에는 검은 배경·흰 글자의 로그 영역이 있다. Save·Reload·검증 결과와
+Guess의 진행·점수가 시스템 현지 시각 `HH:MM:SS`와 함께 쌓인다. 최대 500줄을 유지한다.
+스크롤해서 읽고 텍스트를 선택해 복사할 수 있다. 아래쪽에서 읽는 동안에는 새 줄을 따라가며,
+위쪽을 읽고 있으면 위치를 유지한다. `Clear`로 해당 창의 로그만 지운다.
+Load 실패와 assets 스캔 오류는 Library의 상태 문구에 표시한다.
 
 메모리 이미지는 `Save image as`로 PNG 경로를 정하기 전에는 Save·Reload가 비활성이다.
 PNG 저장 후 `Save`로 메타를 따로 쓴다. GL 최대 텍스처 크기를 넘으면 치수와
@@ -277,10 +283,10 @@ current인지, 텍스처·shader가 GLContext보다 먼저 해제되는지 코�
 
 ## 한계와 로컬 자산
 
-PNG만, 한 번에 시트 하나, undo 없음, 프레임 이벤트 없음, 상태머신·타일맵 배치 없음이다.
+PNG만, undo 없음, 프레임 이벤트 없음, 상태머신·타일맵 배치 없음이다.
 Find regions·Suggest from objects·Analyze의 동기 실행과 앱 종료 시 미저장 변경 유실도 현재 한계다.
 사람의 원본 `/home/raven/Works/splites/`와 결과 `assets/splites/`는 로컬 전용이다.
 `/assets/splites/`는 gitignore에 있으며 이미지·결과 PNG·사이드카를 커밋하지 않는다.
 라이선스는 이 문서에서 단정하지 않는다. 자동 검사·웹 예제는 코드가 만든 이미지로만 동작한다.
 
-Decided in: rn-fcuz
+Decided in: rn-fcuz, rn-hk1c

@@ -1,3 +1,4 @@
+use super::log;
 use super::{
     SheetEditor, edit, format_props, format_tags, parse_props, parse_tags, tiles::mode_combo,
     view::input_u32,
@@ -32,7 +33,10 @@ impl SheetEditor {
                 frames: vec![],
             });
             sheet.dirty = true;
-            self.status = "New clip needs at least one frame before Save".into();
+            log::append(
+                &mut self.log,
+                "New clip needs at least one frame before Save".into(),
+            );
         }
         for clip in &sheet.meta.clips {
             if ui
@@ -70,7 +74,10 @@ impl SheetEditor {
                     .enumerate()
                     .any(|(i, c)| i != index && c.name == name)
             {
-                self.status = format!("empty or duplicate clip name: {name:?}");
+                log::append(
+                    &mut self.log,
+                    format!("empty or duplicate clip name: {name:?}"),
+                );
             } else {
                 if self.preview.target == super::preview::PreviewTarget::Clip(clip.name.clone()) {
                     self.preview.target = super::preview::PreviewTarget::Clip(name.clone());
@@ -99,7 +106,7 @@ impl SheetEditor {
                     clip.props = props;
                     changed = true;
                 }
-                Err(error) => self.status = error,
+                Err(error) => log::append(&mut self.log, error),
             }
         }
         let names: Vec<_> = sheet.meta.sprites.iter().map(|s| s.name.as_str()).collect();
@@ -157,7 +164,7 @@ impl SheetEditor {
         if changed {
             sheet.meta.clips[index] = clip;
             sheet.dirty = true;
-            self.status = "Clip updated".into();
+            log::append(&mut self.log, "Clip updated".into());
         }
         if ui.button("Delete clip") {
             sheet.meta.clips.remove(index);

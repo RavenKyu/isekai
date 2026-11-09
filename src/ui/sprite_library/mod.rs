@@ -2,6 +2,7 @@ mod clips;
 mod edit;
 mod extract;
 mod guess;
+mod log;
 mod model;
 mod preview;
 mod regions;
@@ -55,8 +56,9 @@ pub struct SheetEditor {
     pub show_grid: bool,
     pub guess: Option<GridGuess>,
     guess_job: Option<guess::GuessJob>,
-    /// Latest message for the library status line; the library takes it after drawing.
-    pub status: String,
+    pub log: Vec<String>,
+    log_view: log::LogView,
+    guess_logged_percent: u32,
     /// Actions this editor queued; the library takes them after drawing.
     pub pending: Vec<Action>,
     /// Where Save image as wrote the memory image, for the library's PNG path field.
@@ -108,8 +110,16 @@ impl SpriteLibrary {
             editor.poll_guess();
         }
         for action in std::mem::take(&mut self.pending) {
+            let target = match &action {
+                Action::Save(id) | Action::Reload(id) | Action::Close(id) => Some(*id),
+                _ => None,
+            };
             if let Err(error) = self.apply_action(action, gl, renderer) {
-                self.status = error.replace(['\n', '\r'], " ");
+                if let Some(editor) = target.and_then(|id| self.editor_mut(id)) {
+                    editor.log(error);
+                } else {
+                    self.status = error.replace(['\n', '\r'], " ");
+                }
             }
         }
     }
@@ -197,7 +207,7 @@ impl SpriteLibrary {
                     renderer,
                 )?;
                 editor.replace_sheet(opened, renderer)?;
-                self.status = "Image reloaded; metadata retained".into();
+                editor.log("Image reloaded; metadata retained");
             }
             Action::Close(id) => {
                 self.close(id, renderer)?;
@@ -208,7 +218,7 @@ impl SpriteLibrary {
                     return Ok(());
                 };
                 let message = editor.save()?;
-                self.status = message;
+                editor.log(message);
             }
         }
         Ok(())
@@ -217,7 +227,12 @@ impl SpriteLibrary {
     fn install(&mut self, opened: OpenSheet) {
         let id = self.next_id;
         self.next_id += 1;
-        self.sheets.push(SheetEditor::new(id, opened));
+        let mut editor = SheetEditor::new(id, opened);
+        match &editor.sheet.source {
+            SheetSource::File(path) => editor.log(format!("Opened {}", path.display())),
+            SheetSource::Memory { .. } => editor.log("Memory image: save the image first"),
+        }
+        self.sheets.push(editor);
     }
     /// Releases one sheet's texture and drops its editor. On error the editor stays.
     pub fn close(&mut self, id: SheetId, renderer: &mut GlowRenderer) -> Result<(), String> {
@@ -259,9 +274,6 @@ impl SpriteLibrary {
     /// Moves what the editors produced while drawing into the library.
     fn collect_editor_output(&mut self) {
         for editor in &mut self.sheets {
-            if !editor.status.is_empty() {
-                self.status = std::mem::take(&mut editor.status);
-            }
             self.pending.append(&mut editor.pending);
             if let Some(path) = editor.saved_path.take() {
                 self.path_input = path.to_string_lossy().into_owned();
@@ -323,7 +335,9 @@ impl SheetEditor {
             show_grid: true,
             guess: None,
             guess_job: None,
-            status: String::new(),
+            log: vec![],
+            log_view: Default::default(),
+            guess_logged_percent: 0,
             pending: vec![],
             saved_path: None,
             tile_draft: Default::default(),
@@ -349,7 +363,7 @@ impl SheetEditor {
             }
             return Err(error);
         }
-        self.guess_job = None;
+        self.cancel_guess();
         self.sheet = opened;
         self.selected_sprite = None;
         self.selected_clip = None;
@@ -427,11 +441,17 @@ impl SheetEditor {
             window = window.collapsed(false, Condition::Always);
         }
         window.build(|| {
-            if self.confirm_close {
-                ui.open_popup("Discard changes?");
-                self.confirm_close = false;
-            }
-            self.draw_contents(ui, now_ms);
+            let footer = log::HEIGHT + ui.frame_height_with_spacing() + 12.0;
+            ui.child_window("Editor controls")
+                .size([0.0, -footer])
+                .build(ui, || {
+                    if self.confirm_close {
+                        ui.open_popup(format!("Discard changes?###discard-sheet-{}", self.id));
+                        self.confirm_close = false;
+                    }
+                    self.draw_contents(ui, now_ms);
+                });
+            self.log_view.draw(&mut self.log, ui);
         });
         if !open {
             self.request_close();
@@ -457,17 +477,20 @@ impl SheetEditor {
             ui.text("Memory image: save the image first");
             regions::memory_header(self, ui);
         }
-        ui.modal_popup("Discard changes?", || {
-            ui.text("Discard unsaved changes?");
-            if ui.button("Discard") {
-                self.pending.push(Action::Close(self.id));
-                ui.close_current_popup();
-            }
-            ui.same_line();
-            if ui.button("Cancel") {
-                ui.close_current_popup();
-            }
-        });
+        ui.modal_popup(
+            format!("Discard changes?###discard-sheet-{}", self.id),
+            || {
+                ui.text("Discard unsaved changes?");
+                if ui.button("Discard") {
+                    self.pending.push(Action::Close(self.id));
+                    ui.close_current_popup();
+                }
+                ui.same_line();
+                if ui.button("Cancel") {
+                    ui.close_current_popup();
+                }
+            },
+        );
         self.grid_panel(ui);
         let overlays = self.sprite_overlays();
         regions::sheet_view(self, ui, overlays);
@@ -488,6 +511,9 @@ impl SheetEditor {
             extract::tab(self, ui);
         }
     }
+    fn log(&mut self, message: impl Into<String>) {
+        log::append(&mut self.log, message.into());
+    }
     fn start_guess(&mut self) {
         if self.guess_job.is_some() {
             return;
@@ -496,14 +522,15 @@ impl SheetEditor {
         match guess::GuessJob::start(self.sheet.image.clone()) {
             Ok(job) => {
                 self.guess_job = Some(job);
-                self.status = "Guess started".into();
+                self.guess_logged_percent = 0;
+                self.log("Guess started (0%)");
             }
-            Err(error) => self.status = error,
+            Err(error) => log::append(&mut self.log, error),
         }
     }
     fn cancel_guess(&mut self) {
         if self.guess_job.take().is_some() {
-            self.status = "Guess cancelled".into();
+            log::append(&mut self.log, "Guess cancelled".into());
         }
     }
     fn poll_guess(&mut self) {
@@ -512,14 +539,34 @@ impl SheetEditor {
         };
         match job.poll() {
             Ok(Some(result)) => {
+                self.log("Guess completed (100%)");
+                for score in &result.scores {
+                    self.log(format!(
+                        "{} px offset ({}, {}): {}/{} unique ({:.3})",
+                        score.tile,
+                        score.offset.0,
+                        score.offset.1,
+                        score.unique,
+                        score.total,
+                        score.ratio
+                    ));
+                }
+                if result.pick.is_none() {
+                    self.log("No strong grid suggestion; keep manual values");
+                }
                 self.guess = Some(result);
                 self.guess_job = None;
-                self.status = "Guess completed (100%)".into();
             }
-            Ok(None) => {}
+            Ok(None) => {
+                let percent = ((job.fraction() * 100.0) as u32 / 10) * 10;
+                if percent > self.guess_logged_percent && percent < 100 {
+                    self.guess_logged_percent = percent;
+                    self.log(format!("Guessing... {percent}%"));
+                }
+            }
             Err(error) => {
                 self.guess_job = None;
-                self.status = error;
+                log::append(&mut self.log, error);
             }
         }
     }
@@ -556,17 +603,6 @@ impl SheetEditor {
         ui.set_next_item_width(160.0);
         ui.slider("Zoom", 1, 16, &mut self.zoom);
         if let Some(guess) = &self.guess {
-            for score in &guess.scores {
-                ui.text(format!(
-                    "{} px offset ({}, {}): {}/{} unique ({:.3})",
-                    score.tile,
-                    score.offset.0,
-                    score.offset.1,
-                    score.unique,
-                    score.total,
-                    score.ratio
-                ));
-            }
             if let Some(pick) = guess.pick {
                 if ui.button(format!(
                     "Apply {} px, offset ({}, {})",
@@ -584,9 +620,9 @@ impl SheetEditor {
                 Ok(()) => {
                     self.tile_draft = Default::default();
                     self.extract.invalidate();
-                    self.status = "Grid updated".into();
+                    log::append(&mut self.log, "Grid updated".into());
                 }
-                Err(error) => self.status = error,
+                Err(error) => log::append(&mut self.log, error),
             }
         }
         let cells = self
@@ -731,6 +767,13 @@ mod tests {
         assert!(first.guess_job.is_some());
         assert!(second.guess_job.is_none());
         first.cancel_guess();
+        assert!(first.log.iter().any(|line| line.contains("Guess started")));
+        assert!(
+            first
+                .log
+                .iter()
+                .any(|line| line.contains("Guess cancelled"))
+        );
         assert!(first.guess_job.is_none());
         first.poll_guess();
         assert!(first.guess.is_none());
@@ -749,6 +792,14 @@ mod tests {
                 true
             ))
         );
+        assert!(
+            first
+                .log
+                .iter()
+                .any(|line| line.contains("Guess completed (100%)"))
+        );
+        assert!(first.log.iter().any(|line| line.contains("unique (")));
+        assert!(second.log.is_empty());
         assert!(second.guess.is_none());
     }
     #[test]
@@ -818,15 +869,19 @@ mod tests {
             "an editor with nothing to say keeps the line"
         );
         let editor = &mut library.sheets[0];
-        editor.status = "Grid updated".into();
+        editor.log("Grid updated");
         editor.pending.push(Action::Save(7));
         editor.saved_path = Some("assets/splites/map/map.png".into());
         library.collect_editor_output();
-        assert_eq!(library.status, "Grid updated");
+        assert_eq!(
+            library.status, "old",
+            "sheet logs do not replace Library status"
+        );
         assert!(matches!(library.pending[..], [Action::Save(7)]));
         assert_eq!(library.path_input, "assets/splites/map/map.png");
         let editor = &library.sheets[0];
-        assert!(editor.status.is_empty() && editor.pending.is_empty());
+        assert!(editor.log.last().unwrap().ends_with("Grid updated"));
+        assert!(editor.pending.is_empty());
         assert!(editor.saved_path.is_none());
     }
     #[test]
@@ -943,6 +998,7 @@ mod tests {
             single >= baseline + 4 && double >= single + 4,
             "baseline={baseline}, one={single}, two={double}"
         );
+        log::LogView::check_interactions(&mut context, &consumer);
         context
             .prepare_renderer_texture_reset(&consumer)
             .unwrap()
@@ -1091,6 +1147,38 @@ mod tests {
         assert!(
             library.sheets[0].guess_job.is_none() && library.sheets[0].guess.is_none(),
             "reload cancels and clears results for the previous image"
+        );
+        assert!(
+            library.sheets[0]
+                .log
+                .iter()
+                .any(|line| line.contains("Image reloaded"))
+        );
+        let second_log = library.sheets[1].log.clone();
+        let library_status = library.status.clone();
+        library.sheets[0].sheet.meta.grid.tile = 0;
+        library.pending.push(Action::Save(first_id));
+        library.apply_pending(&gl, &mut renderer);
+        assert_eq!(
+            library.status, library_status,
+            "sheet validation errors stay out of Library status"
+        );
+        assert_eq!(
+            library.sheets[1].log, second_log,
+            "a sibling never receives the error"
+        );
+        assert!(library.sheets[0].log.last().unwrap().contains("tile"));
+        library.sheets[0].sheet.meta.grid.tile = 16;
+        library.pending.push(Action::Save(first_id));
+        library.apply_pending(&gl, &mut renderer);
+        assert!(library.sheets[0].log.last().unwrap().contains("Saved"));
+        library
+            .pending
+            .push(Action::Load(temp.0.join("missing.png")));
+        library.apply_pending(&gl, &mut renderer);
+        assert_ne!(
+            library.status, library_status,
+            "Load errors still use Library status"
         );
         library.close_all(&mut renderer).unwrap();
         renderer.shutdown(&mut imgui).unwrap();

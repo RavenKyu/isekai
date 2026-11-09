@@ -1,3 +1,4 @@
+use super::log;
 use super::{Action, OpenSheet, SheetEditor, SheetSource, view};
 use crate::{
     raster::{self, Dedupe, RgbaImage},
@@ -306,14 +307,14 @@ pub(super) fn tab(editor: &mut SheetEditor, ui: &Ui) {
     let SheetEditor {
         sheet,
         extract: state,
-        status,
+        log,
         pending,
         ..
     } = editor;
     let checkout = match std::env::current_dir() {
         Ok(path) => path,
         Err(e) => {
-            *status = e.to_string();
+            log::append(log, e.to_string());
             return;
         }
     };
@@ -355,10 +356,10 @@ pub(super) fn tab(editor: &mut SheetEditor, ui: &Ui) {
             .and_then(|plan| write_plan(&plan).map(|message| format!("{message}; {}", plan.report)))
             {
                 Ok(message) => {
-                    *status = message;
+                    log::append(log, message);
                     state.written = absolute_output(Path::new(&state.output), &checkout).ok();
                 }
-                Err(error) => *status = error,
+                Err(error) => log::append(log, error),
             }
         }
     }
