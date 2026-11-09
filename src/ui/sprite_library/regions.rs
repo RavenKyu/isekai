@@ -116,7 +116,7 @@ fn plan_batch(
     }
     // Only after all conflicts have been inspected may a directory be created.
     if let Some((_, first)) = targets.first() {
-        extract::ensure_output_dir(first, checkout).map_err(|e| e.to_string())?;
+        extract::create_output_dir(first, checkout).map_err(|e| e.to_string())?;
     }
     Ok(targets)
 }
@@ -328,8 +328,7 @@ fn save_memory(
     if !matches!(sheet.source, SheetSource::Memory { .. }) {
         return Err("only memory images need Save image as".into());
     }
-    let output = extract::absolute_output(path, checkout).map_err(|e| e.to_string())?;
-    extract::refuse_open_output(&output, open_files)?;
+    let output = extract::checked_output(path, checkout, open_files)?;
     // Save would then replace this sidecar with the crop's empty metadata.
     let sidecar = store::sidecar_for(&output);
     if match std::fs::symlink_metadata(&sidecar) {
@@ -348,7 +347,7 @@ fn save_memory(
         .and_then(|s| s.to_str())
         .ok_or("image file name must be valid UTF-8")?
         .to_owned();
-    let output = extract::ensure_output_dir(&output, checkout).map_err(|e| e.to_string())?;
+    extract::create_output_dir(&output, checkout).map_err(|e| e.to_string())?;
     store::publish_new(&output, &sheet.image.to_png()?).map_err(|e| match e {
         store::StoreError::Io(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
             format!(
