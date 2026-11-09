@@ -316,28 +316,35 @@ mod tests {
     }
     #[test]
     fn memory_save_button_in_its_own_process() {
-        let output = std::process::Command::new(std::env::current_exe().unwrap())
-            .args([
-                "--exact",
-                "ui::sprite_library::regions::tests::memory_save_button_preserves_state_on_refusal",
-                "--ignored",
-                "--nocapture",
-            ])
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "{}{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+        memory_save_button_preserves_state_on_refusal();
     }
     #[test]
     #[ignore = "run by memory_save_button_in_its_own_process"]
     fn memory_save_button_preserves_state_on_refusal() {
         use super::super::tests::{context, item_center, vertices};
         use std::cell::{Cell, RefCell};
+        // Both the default wrapper and bulk --ignored runs must enter a fresh
+        // process before creating ImGui's single-thread-owned context.
+        if std::env::var_os("RN_MEMORY_SAVE_CHILD").is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .env("RN_MEMORY_SAVE_CHILD", "1")
+                .args([
+                    "--exact",
+                    "ui::sprite_library::regions::tests::memory_save_button_preserves_state_on_refusal",
+                    "--ignored",
+                    "--nocapture",
+                ])
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+            return;
+        }
         let temp = super::super::extract::tests::Temp::new();
         let path = temp.0.join("existing.png");
         std::fs::write(&path, b"existing PNG without metadata").unwrap();
