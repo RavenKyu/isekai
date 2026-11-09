@@ -245,16 +245,16 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn assets_skip_hidden_entries_and_symlinks() {
-        let root = std::env::temp_dir().join(format!("rn-assets-{}", std::process::id()));
+        let temp = crate::test_support::TempDir::new("assets");
+        let root = &temp.0;
         std::fs::create_dir_all(root.join("sub")).unwrap();
         std::fs::write(root.join("sub/a.PNG"), b"").unwrap();
         std::fs::write(root.join(".hidden.png"), b"").unwrap();
         std::os::unix::fs::symlink(root.join("sub"), root.join("loop")).unwrap();
-        assert_eq!(list_assets(&root).unwrap(), vec![root.join("sub/a.PNG")]);
+        assert_eq!(list_assets(root).unwrap(), vec![root.join("sub/a.PNG")]);
         assert_eq!(
             list_assets(&root.join("missing")).unwrap(),
             Vec::<PathBuf>::new()
         );
-        std::fs::remove_dir_all(root).unwrap();
     }
 }

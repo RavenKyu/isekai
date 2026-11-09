@@ -848,7 +848,7 @@ mod tests {
         // A private cwd exercises the empty parent of "example.png" without
         // changing the process-wide directory used by concurrently running tests.
         if std::env::var_os("RN_LOAD_PATH_CHILD").is_none() {
-            let fixture = extract::tests::Temp::new();
+            let fixture = crate::test_support::TempDir::new("extract");
             let output = std::process::Command::new(std::env::current_exe().unwrap())
                 .env("RN_LOAD_PATH_CHILD", "1")
                 .current_dir(&fixture.0)
@@ -869,7 +869,7 @@ mod tests {
             return;
         }
         let dir = std::env::current_dir().unwrap();
-        let outside = extract::tests::Temp::new();
+        let outside = crate::test_support::TempDir::new("extract");
         let (image, mut meta) = crate::sprite::example();
         let png = image.to_png().unwrap();
         let image_path = Path::new("example.png");
@@ -1013,7 +1013,7 @@ mod tests {
         // Both the normal wrapper and bulk --ignored runs enter here. Only
         // the exact-test child owns an ImGui context and scans the fixture.
         if std::env::var_os("RN_IMPORT_PANEL_CHILD").is_none() {
-            let fixture = extract::tests::Temp::new();
+            let fixture = crate::test_support::TempDir::new("extract");
             std::fs::create_dir(fixture.0.join("assets")).unwrap();
             // Refresh only lists the name; no PNG decoding, GL or local assets.
             std::fs::write(fixture.0.join("assets/from-refresh.png"), []).unwrap();
@@ -1430,7 +1430,7 @@ mod tests {
     }
     #[test]
     fn save_state_tracks_edits_success_failure_and_memory_images() {
-        let temp = extract::tests::Temp::new();
+        let temp = crate::test_support::TempDir::new("extract");
         let path = temp.0.join("example.png");
         let (image, meta) = crate::sprite::example();
         let bytes = image.to_png().unwrap();
@@ -1731,7 +1731,7 @@ mod tests {
         library.close_all(&mut renderer).unwrap();
         assert!(library.sheets.is_empty());
         assert!(renderer.unregister_external_texture(latest).is_err());
-        let temp = extract::tests::Temp::new();
+        let temp = crate::test_support::TempDir::new("extract");
         let first = temp.0.join("first.png");
         let second = temp.0.join("second.png");
         let bytes = crate::sprite::example().0.to_png().unwrap();
@@ -1843,8 +1843,8 @@ mod tests {
         renderer: &mut GlowRenderer,
     ) {
         use std::{fs, os::unix::fs::symlink};
-        let links = extract::tests::Temp::new();
-        let outside = extract::tests::Temp::new();
+        let links = crate::test_support::TempDir::new("extract");
+        let outside = crate::test_support::TempDir::new("extract");
         let SheetSource::File(opened) = &library.sheets[0].sheet.source else {
             panic!("expected a file-backed editor")
         };

@@ -195,23 +195,6 @@ pub fn publish_new(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
 mod tests {
     use super::*;
     use std::io::Read;
-    struct Temp(PathBuf);
-    impl Temp {
-        fn new() -> Self {
-            let path = std::env::temp_dir().join(format!(
-                "rusty-nails-store-{}-{}",
-                std::process::id(),
-                NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
-            ));
-            fs::create_dir(&path).unwrap();
-            Self(path)
-        }
-    }
-    impl Drop for Temp {
-        fn drop(&mut self) {
-            fs::remove_dir_all(&self.0).unwrap();
-        }
-    }
     #[test]
     fn lexical_paths_are_portable_and_strict() {
         for bad in [
@@ -245,7 +228,7 @@ mod tests {
     }
     #[test]
     fn atomic_replacement_preserves_old_inode_and_cleans_failures() {
-        let dir = Temp::new();
+        let dir = crate::test_support::TempDir::new("store");
         let path = dir.0.join("sheet.json");
         fs::write(&path, b"old complete content").unwrap();
         let mut old_handle = fs::File::open(&path).unwrap();
@@ -279,7 +262,7 @@ mod tests {
     }
     #[test]
     fn publication_is_exclusive_and_cleans_success_and_failure() {
-        let dir = Temp::new();
+        let dir = crate::test_support::TempDir::new("store");
         let path = dir.0.join("image.png");
         publish_new(&path, b"complete PNG").unwrap();
         assert_eq!(fs::read(&path).unwrap(), b"complete PNG");
@@ -302,8 +285,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn publication_refuses_live_and_dangling_symlink_names() {
-        let dir = Temp::new();
-        let outside = Temp::new();
+        let dir = crate::test_support::TempDir::new("store");
+        let outside = crate::test_support::TempDir::new("store");
         let target = outside.0.join("target.png");
         fs::write(&target, b"original").unwrap();
         for (name, target) in [
@@ -324,7 +307,7 @@ mod tests {
     }
     #[test]
     fn concurrent_publication_has_one_winner_and_keeps_its_complete_bytes() {
-        let dir = Temp::new();
+        let dir = crate::test_support::TempDir::new("store");
         let path = dir.0.join("image.png");
         let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
         let writers: Vec<_> = (0..2)
@@ -353,7 +336,7 @@ mod tests {
     }
     #[test]
     fn canonical_roundtrip_and_load() {
-        let dir = Temp::new();
+        let dir = crate::test_support::TempDir::new("store");
         let path = super::super::example::write_example(&dir.0).unwrap();
         let loaded = load(&path).unwrap();
         assert_eq!(
@@ -371,8 +354,8 @@ mod tests {
     #[test]
     fn image_directory_check_matches_loader_for_symlinks_and_missing_files() {
         use std::os::unix::fs::symlink;
-        let dir = Temp::new();
-        let outside = Temp::new();
+        let dir = crate::test_support::TempDir::new("store");
+        let outside = crate::test_support::TempDir::new("store");
         let image = dir.0.join("example.png");
         let target = outside.0.join("out.png");
         fs::write(&target, b"outside image").unwrap();
@@ -441,8 +424,8 @@ mod tests {
     #[test]
     fn checked_image_paths_keep_the_resolved_target_after_alias_replacement() {
         use std::os::unix::fs::symlink;
-        let dir = Temp::new();
-        let outside = Temp::new();
+        let dir = crate::test_support::TempDir::new("store");
+        let outside = crate::test_support::TempDir::new("store");
         let local = dir.0.join("local.png");
         let foreign = outside.0.join("foreign.png");
         fs::write(&local, b"checked local image").unwrap();
@@ -470,8 +453,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn existing_image_symlink_cannot_escape_sidecar_directory() {
-        let dir = Temp::new();
-        let outside = Temp::new();
+        let dir = crate::test_support::TempDir::new("store");
+        let outside = crate::test_support::TempDir::new("store");
         fs::write(outside.0.join("out.png"), b"image").unwrap();
         std::os::unix::fs::symlink(outside.0.join("out.png"), dir.0.join("example.png")).unwrap();
         let path = dir.0.join("example.sprites.json");
