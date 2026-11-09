@@ -14,7 +14,7 @@ PNG 시트를 격자로 나누어 타일 메타데이터, 여러 타일로 된 s
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "image": "cave-01-wall.png",
   "grid": { "tile": 16, "offset": [0, 0], "spacing": 0 },
   "tiles": [
@@ -32,7 +32,7 @@ PNG 시트를 격자로 나누어 타일 메타데이터, 여러 타일로 된 s
   "sprites": [
     { "name": "door", "kind": "rect", "col": 0, "row": 2, "cols": 2, "rows": 3, "pivot": [16.0, 48.0] },
     { "name": "tree", "kind": "set",
-      "parts": [ { "col": 5, "row": 0, "dx": 0, "dy": 0 }, { "col": 6, "row": 1, "dx": 16, "dy": 16 } ],
+      "parts": [ { "col": 5, "row": 0, "dx": 0, "dy": 0 }, { "col": 6, "row": 1, "dx": 16, "dy": 16, "flip_x": true, "rotation": 90 } ],
       "pivot": [8.0, 24.0] }
   ],
   "clips": [
@@ -44,15 +44,19 @@ PNG 시트를 격자로 나누어 타일 메타데이터, 여러 타일로 된 s
 
 | 필드 | 의미 |
 | --- | --- |
-| `version` | 현재 `1`만 읽는다. 다른 버전은 오류이며 자동 변환하지 않는다. |
+| `version` | 1과 2를 읽으며 항상 2로 저장한다. 다른 버전은 오류다. |
 | `image` | 사이드카 디렉터리를 기준으로 한 이미지 상대 경로. |
 | `grid` | 정사각 타일 한 변 `tile`, 왼쪽·위 여백 `offset: [x, y]`, 타일 사이 `spacing`(px). |
 | `tiles` | 메타가 있는 셀만 저장한다. `(col,row)`, 선택적 `name`, 문자열 목록 `tags`, 문자열 값 맵 `props`, 선택적 `animation`. |
 | `sprites` | 유일한 `name`, `rect` 또는 `set`, 경계 상자 왼쪽 위 기준 픽셀 `pivot`. |
+| `part.flip_x` | 가로 반전 여부. 기본 false는 생략한다. |
+| `part.rotation` | 화면 기준 시계 방향 회전(0, 90, 180, 270도). 기본 0은 생략한다. |
 | `clips` | 유일한 `name`, `mode`, `tags`, `props`, `{sprite, ms}` 프레임 목록. 상태머신 대신 이름만 남긴다. |
 
 `rect`는 시작 셀과 `cols × rows`이며, `set`은 셀마다 픽셀 오프셋 `dx,dy`를 둔다.
-음수 오프셋도 허용한다. 두 종류 모두 셀 단위로 그려서 원본 시트의 spacing이 조합한
+음수 오프셋도 허용한다. set의 part는 가로 반전 후 회전한다. rect와 타일 애니메이션 프레임에는 변형이 없다.
+v1의 part에 변형 필드가 명시되면 false나 0이라도 거부한다. null과 허용되지 않은 각도도 오류다.
+두 종류 모두 셀 단위로 그려서 원본 시트의 spacing이 조합한
 오브젝트의 틈으로 들어가지 않는다. 타일 애니메이션은 sprite 이름 대신 `(col,row,ms)`를 쓴다.
 모드는 `loop`(반복), `once`(끝에서 마지막 프레임 유지), `pingpong`(양 끝을 중복하지 않고 왕복)이다.
 길이 1·2의 pingpong도 지원한다. 프레임의 `ms`는 1 이상이며 프레임 이벤트는 없다.
@@ -142,7 +146,7 @@ Library 창을 닫아도 편집 창은 유지된다. 웹 dev에는 Assets 메뉴
    격자를 바꾸거나 시트를 다시 열면 고정이 풀린다.
 7. `Sprites`의 `New rect from selection` 또는 `New set from selection`으로 오브젝트를 만든다.
    rect는 선택의 경계 사각, set은 선택 셀만 담는다. pivot 기본값은 경계 상자 중심이며 수정할 수 있다.
-   rect 좌표·크기, set 각 part의 셀과 음수도 가능한 dx/dy를 편집한다.
+   rect 좌표·크기, set 각 part의 셀과 음수도 가능한 dx/dy, Flip X와 Rotation을 편집한다.
    `Suggest from objects`는 연결된 픽셀 덩어리를 셀 사각으로 제안하며 `Add`를 눌러야 sprite가 된다.
    이름 변경은 clip 참조도 갱신한다. clip이 참조하는 sprite는 삭제할 수 없다.
 8. `Clips`에서 clip을 만들고 이름·mode·태그·속성·프레임(sprite와 ms)을 편집한다.
@@ -168,7 +172,7 @@ PNG 저장 후 `Save`로 메타를 따로 쓴다. 다른 편집 창이 열고 �
 ## 영역 후보와 타일셋 추출
 
 사람의 로컬 작업 흐름은 큰 시트 → 패널 후보 선택 → 맵 이미지 → 고유 타일셋이다.
-큰 시트에서 패널을 자동으로 확정하거나 맵 배치를 저장하지 않는다.
+큰 시트에서 후보를 직접 확인한 뒤 개별 또는 일괄 저장할 수 있다.
 
 1. 큰 PNG를 열고 `Regions`에서 배경 `Auto`/`Transparent`/`Color`, hex, `Min size`를 정해
    `Find regions`를 누른다. Auto는 투명 픽셀이 있으면 알파를, 없으면 좌상단 색을 배경으로 쓴다.
@@ -176,6 +180,11 @@ PNG 저장 후 `Save`로 메타를 따로 쓴다. 다른 편집 창이 열고 �
 2. 후보를 선택하고 `Crop to new image`를 누른다. 선택 영역은 다음 프레임에 새 창의
    메모리 이미지로 열리며, 원본 창의 변경은 유지된다.
    격자는 유지하고 타일·sprite·clip 메타는 빈 상태로 시작한다.
+   또는 `Output dir`과 `Save all regions`로 후보 전체를 `<stem>-region-<n>.png`로 저장한다.
+   기본 폴더는 `assets/splites/<stem>/`이며 번호는 1부터 목록 순이다. 대상 중 사이드카가
+   하나라도 있거나 출력 이름이 심볼릭 링크면 전체를 거부한다. 기존 PNG는 교체한다.
+   백그라운드 진행률과 `Cancel region save`를 표시한다. 취소는 파일 사이에서 확인하므로
+   이미 쓴 파일은 남는다. 일괄 저장은 사이드카와 창을 만들지 않고 키 색도 적용하지 않는다.
 3. `Image output`을 확인하고 `Save image as`로 crop PNG를 쓴다. 기본은
    `assets/splites/<crop 이름>/<crop 이름>.png`다. 이 버튼은 JSON을 만들지 않는다.
    그 경로에 PNG나 사이드카가 이미 있으면 쓰지 않고 거부한다. 심볼릭 링크 이름도 포함한다.
@@ -183,10 +192,12 @@ PNG 저장 후 `Save`로 메타를 따로 쓴다. 다른 편집 창이 열고 �
 4. 배경을 제거하려면 그 PNG를 저장한 다음 `Key color`를 켜고 해당 창의 `Reload image`를 누른다.
    이어 격자를 직접 입력하거나 Guess/Apply로 정한다. crop과 키 색 제거는 이 두 단계다.
 5. `Extract`의 `Analyze`를 누른다. 완전 투명 픽셀의 RGB를 0으로 정규화한 뒤
-   바이트가 같은 타일만 묶고 첫 등장 순서를 유지한다. 완전 투명 타일도 하나의 고유 타일이다.
+   기본적으로 바이트가 같은 타일만 묶고 첫 등장 순서를 유지한다. `Group rotations/flips`는
+   기본 꺼짐이며 켜면 회전·반전 8종도 묶는다. 대칭 타일은 변형 없음이 우선이다.
+   이 선택은 동기 분석을 느리게 하며 변경하면 이전 분석이 무효화된다. 완전 투명 타일도 하나의 고유 타일이다.
    unique 수와 원래 격자 셀 영역의 `rebuild` 동일 여부를 확인한다. 자투리는 비교에서 제외한다.
    `Columns`(기본 16)와 `Output`을 정한다. 격자·이미지가 바뀌면 분석을 다시 해야 한다.
-6. `Write tileset`으로 PNG와 빈 메타의 사이드카를 쓴다. 기본 출력은
+6. `Write tileset`으로 PNG와 빈 메타의 사이드카, 맵 배치 파일을 쓴다. 기본 출력은
    `assets/splites/<맵 stem>/<맵 stem>-tileset.png`다. tile은 유지하고 offset·spacing은 0이 된다.
    현재 창의 원본 PNG를 포함해 어느 편집 창에든 열린 PNG는 Output으로 쓸 수 없다.
    그 PNG를 가리키는 심볼릭 링크도 파일이나 디렉터리를 만들기 전에 거부한다.
@@ -199,7 +210,8 @@ Find regions·Suggest from objects·Analyze는 버튼에서만 동기로 실행�
 저장소 안이면서 이 ignore 폴더 밖이면 커밋 대상이 될 수 있다는 상태 줄을 표시한다.
 
 `Write tileset`의 PNG는 재생성 결과로서 원자적으로 교체한다. JSON은 기존 파일이나 동시에 다른 쓰기가 만든
-파일을 덮지 않도록 배타적으로 게시한다. 둘은 하나의 트랜잭션이 아니다.
+파일을 덮지 않도록 배타적으로 게시한다. 맵 파일은 PNG처럼 원자적으로 교체한다.
+세 파일은 하나의 트랜잭션이 아니며 사이드카가 이미 있어도 맵은 갱신한다.
 배타 게시에는 하드 링크를 지원하는 파일시스템이 필요하다. FAT/exFAT나 하드 링크를 지원하지 않는
 일부 네트워크 마운트에서는 `Save image as`와 타일셋 JSON 게시가 IO 오류로 실패한다.
 `Write tileset`은 이때도 PNG를 이미 교체했고 `PNG written: ...; sidecar not written: sprite file IO: ...`를 표시한다.
@@ -209,6 +221,39 @@ Find regions·Suggest from objects·Analyze는 버튼에서만 동기로 실행�
 이 경우 기존 JSON과 새 PNG의 격자가 맞는지 확인하고, 다른 출력 이름을 사용하거나
 필요한 메타를 보존한 뒤 다시 시도한다. JSON을 무조건 지우지는 않는다.
 
+맵 파일은 타일셋과 같은 디렉터리의 `<원본 stem>.map.json`이다. 원본의 offset·spacing과
+자투리는 저장하지 않고 완전한 셀을 행 우선으로 담는다. 타일셋 이름은 파일 이름 하나다.
+
+| 맵 필드 | 의미 |
+| --- | --- |
+| `version` | 맵 형식 버전 1. |
+| `tileset` | 타일셋 PNG 파일 이름. |
+| `tile` | 정사각 타일의 한 변. |
+| `cols`, `rows` | 원본에서 완전한 격자의 열과 행 수. |
+| `cells` | 행 우선 셀 목록. `index`는 타일셋 번호, `flip_x`와 `rotation`은 선택적 변형이다. |
+
+기본 변형은 생략한다. 예를 들어 두 셀의 정규형은 다음과 같다.
+
+```json
+{
+  "version": 1,
+  "tileset": "map-tileset.png",
+  "tile": 16,
+  "cols": 2,
+  "rows": 1,
+  "cells": [
+    {
+      "index": 0
+    },
+    {
+      "index": 0,
+      "flip_x": true,
+      "rotation": 90
+    }
+  ]
+}
+```
+
 ## 런타임 재생
 
 다음은 저장소의 코드 생성 fixture로 실행된다. 일반 실행은 창을 닫을 때까지 계속된다.
@@ -216,6 +261,7 @@ Find regions·Suggest from objects·Analyze는 버튼에서만 동기로 실행�
 ```sh
 cargo run -- --play tests/fixtures/example.sprites.json
 cargo run -- --play tests/fixtures/example.sprites.json cycle
+cargo run -- --play tests/fixtures/example-turned.sprites.json
 ```
 
 인자 순서는 `[--play <sidecar.json> [clip]] [--smoke-frames N]`이다. clip을 생략하면
@@ -284,13 +330,14 @@ current인지, 텍스처·shader가 GLContext보다 먼저 해제되는지 코�
 | `apply_key_color` | `RgbaImage::apply_key_color`, 정확한 RGB 키. |
 | `slice_grid` | `Grid::cells/origin` + `RgbaImage::tile`, offset x·y와 spacing 포함. |
 | `find_offset`, `guess_tile_size` | `raster::guess_grid`, 적용 전 후보·점수만 반환. |
-| `dedupe`, `count_unique` | `raster::dedupe`, unique·map·counts와 진단. |
+| `dedupe`, `count_unique`, `--transform` | `raster::dedupe_with`, 선택적 8변형과 unique·map·counts. |
+| `map.json` | `sprite::tilemap`, 셀별 타일 번호·변형. |
 | `build_sheet` | `raster::build_sheet`, Columns에 맞춰 PNG용 RGBA 이미지 생성. |
 | `rebuild` | `raster::rebuild_matches`, 원래 격자 셀 영역 복원 비교. |
-| `extract_objects` | `raster::find_objects`, `ObjectBox::snap`, Regions와 sprite 후보. |
+| `extract_objects` | `raster::find_objects`, `ObjectBox::snap`, Regions 후보와 Save all regions. |
 
 기반 이미지 처리는 `src/raster.rs`, 분석은 `src/raster/analysis.rs`에 있다.
-회전·반전 묶기, map.csv·맵 배치 저장, 맵 에디터, 패널 자동 오려 내기, JPEG, CLI 추출은
+map.csv, 맵 에디터·런타임 타일맵, 레이어 자동 분류, 개별 tiles PNG, preview.png, JPEG, CLI 추출은
 이번 범위 밖이다. 남겨 둔 제안은 트래커 백로그에서 다루며 이 화면에서 지원하지 않는다.
 
 ## 한계와 로컬 자산
@@ -301,4 +348,4 @@ Find regions·Suggest from objects·Analyze의 동기 실행과 앱 종료 시 �
 `/assets/splites/`는 gitignore에 있으며 이미지·결과 PNG·사이드카를 커밋하지 않는다.
 라이선스는 이 문서에서 단정하지 않는다. 자동 검사·웹 예제는 코드가 만든 이미지로만 동작한다.
 
-Decided in: rn-fcuz, rn-hk1c, rn-aw9h
+Decided in: rn-fcuz, rn-hk1c, rn-aw9h, rn-ut06
