@@ -121,7 +121,11 @@ fn run_crop_batch(
         let result = image
             .crop(bbox.x, bbox.y, bbox.w, bbox.h)
             .ok_or_else(|| "region outside image".to_string())
-            .and_then(|crop| crop.to_png())
+            .and_then(|crop| crop.to_png());
+        if cancel.load(Ordering::Relaxed) {
+            break;
+        }
+        let result = result
             .and_then(|png| store::write_atomic(&path, &png).map_err(|e| e.to_string()))
             .map(|()| path.clone())
             .map_err(|e| format!("{}: {e}", path.display()));
@@ -502,6 +506,27 @@ mod tests {
             assert!(plan_batch(&boxes, "map", &link.join("new"), &temp.0).is_err());
             assert!(!temp.0.join("new").exists());
         }
+    }
+    #[test]
+    fn cancelled_editor_discards_late_results_independently() {
+        let mut first = SheetEditor::new(1, super::super::extract::tests::memory_sheet());
+        let second = SheetEditor::new(2, super::super::extract::tests::memory_sheet());
+        let (tx, result) = mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        first.regions.batch_job = Some(CropJob {
+            cancel: Arc::clone(&cancel),
+            done: Arc::new(AtomicU64::new(0)),
+            total: 1,
+            result,
+            saved: 0,
+        });
+        first.cancel_batch();
+        assert!(cancel.load(Ordering::Relaxed));
+        assert!(tx.send(Ok(PathBuf::from("late.png"))).is_err());
+        first.poll_batch();
+        assert!(first.regions.batch_job.is_none());
+        assert!(second.regions.batch_job.is_none());
+        assert!(!first.log.iter().any(|line| line.contains("late.png")));
     }
     #[test]
     fn cancelled_batch_writes_nothing() {
