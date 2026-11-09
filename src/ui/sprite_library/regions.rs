@@ -8,7 +8,14 @@ use crate::{
     sprite::{Grid, store},
 };
 use dear_imgui_rs::{TextureId, Ui};
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::{
+        Arc, Mutex, PoisonError,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        mpsc::{self, Receiver, TryRecvError},
+    },
+};
 
 pub(super) struct RegionsState {
     source: Option<TextureId>,
@@ -18,6 +25,8 @@ pub(super) struct RegionsState {
     candidates: Vec<ObjectBox>,
     selected: Option<usize>,
     save_path: String,
+    batch_dir: String,
+    batch_job: Option<CropJob>,
 }
 impl Default for RegionsState {
     fn default() -> Self {
@@ -29,6 +38,8 @@ impl Default for RegionsState {
             candidates: vec![],
             selected: None,
             save_path: String::new(),
+            batch_dir: String::new(),
+            batch_job: None,
         }
     }
 }
@@ -39,6 +50,7 @@ impl RegionsState {
             self.candidates.clear();
             self.selected = None;
             self.save_path.clear();
+            self.batch_dir.clear();
         }
     }
     fn background(&self) -> Result<Background, String> {
@@ -52,6 +64,210 @@ impl RegionsState {
 }
 fn region_name(stem: &str, n: usize) -> String {
     format!("{stem}-region-{n}")
+}
+type CropTarget = (ObjectBox, PathBuf);
+fn plan_batch(
+    candidates: &[ObjectBox],
+    stem: &str,
+    dir: &Path,
+    checkout: &Path,
+    open_files: &[PathBuf],
+) -> Result<Vec<CropTarget>, String> {
+    let mut targets = Vec::new();
+    let mut conflicts = Vec::new();
+    for (i, &bbox) in candidates.iter().enumerate() {
+        let name = format!("{}.png", region_name(stem, i + 1));
+        if !store::image_path_is_safe(&name) || Path::new(&name).components().count() != 1 {
+            return Err("invalid region name".into());
+        }
+        let output =
+            extract::absolute_output(&dir.join(name), checkout).map_err(|e| e.to_string())?;
+        for path in [store::sidecar_for(&output), output.clone()] {
+            match std::fs::symlink_metadata(&path) {
+                Ok(meta) if path != output || meta.file_type().is_symlink() => conflicts.push(path),
+                Ok(_) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e.to_string()),
+            }
+        }
+        // As for Write tileset: the editor holding it would keep the old pixels.
+        if extract::refuse_open_output(&output, open_files).is_err() {
+            conflicts.push(output.clone());
+        }
+        targets.push((bbox, output));
+    }
+    conflicts.dedup();
+    if !conflicts.is_empty() {
+        return Err(format!(
+            "sidecar, symlink or open image conflicts: {}",
+            conflicts
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    // Only after all conflicts have been inspected may a directory be created.
+    if let Some((_, first)) = targets.first() {
+        extract::ensure_output_dir(first, checkout).map_err(|e| e.to_string())?;
+    }
+    Ok(targets)
+}
+fn run_crop_batch(
+    image: &RgbaImage,
+    targets: Vec<CropTarget>,
+    cancel: &AtomicBool,
+    writing: &Mutex<()>,
+    done: &AtomicU64,
+    tx: &mpsc::Sender<Result<PathBuf, String>>,
+) {
+    for (bbox, path) in targets {
+        if cancel.load(Ordering::Relaxed) {
+            break;
+        }
+        let result = image
+            .crop(bbox.x, bbox.y, bbox.w, bbox.h)
+            .ok_or_else(|| "region outside image".to_string())
+            .and_then(|crop| crop.to_png());
+        // CropJob::stop sets cancel and then takes this lock, so a write either
+        // finishes and is sent before stop returns, or never starts.
+        let _writing = writing.lock().unwrap_or_else(PoisonError::into_inner);
+        if cancel.load(Ordering::Relaxed) {
+            break;
+        }
+        let result = result
+            .and_then(|png| store::write_atomic(&path, &png).map_err(|e| e.to_string()))
+            .map(|()| path.clone())
+            .map_err(|e| format!("{}: {e}", path.display()));
+        let _ = tx.send(result);
+        done.fetch_add(1, Ordering::Relaxed);
+    }
+}
+struct CropJob {
+    cancel: Arc<AtomicBool>,
+    writing: Arc<Mutex<()>>,
+    done: Arc<AtomicU64>,
+    total: usize,
+    result: Receiver<Result<PathBuf, String>>,
+    saved: usize,
+}
+impl CropJob {
+    fn start(image: RgbaImage, targets: Vec<CropTarget>) -> Result<Self, String> {
+        let cancel = Arc::new(AtomicBool::new(false));
+        let writing = Arc::new(Mutex::new(()));
+        let done = Arc::new(AtomicU64::new(0));
+        let total = targets.len();
+        let (tx, result) = mpsc::channel();
+        let worker_cancel = Arc::clone(&cancel);
+        let worker_writing = Arc::clone(&writing);
+        let worker_done = Arc::clone(&done);
+        std::thread::Builder::new()
+            .name("sprite-region-crop".into())
+            .spawn(move || {
+                run_crop_batch(
+                    &image,
+                    targets,
+                    &worker_cancel,
+                    &worker_writing,
+                    &worker_done,
+                    &tx,
+                );
+            })
+            .map_err(|e| format!("Cannot start region save: {e}"))?;
+        Ok(Self {
+            cancel,
+            writing,
+            done,
+            total,
+            result,
+            saved: 0,
+        })
+    }
+    /// Signals cancellation and waits only for a file write already in progress,
+    /// never for the rest of the job; the detached worker is not joined. Afterwards
+    /// no write starts, and every finished write is in `result`.
+    fn stop(&self) {
+        self.cancel.store(true, Ordering::Relaxed);
+        drop(self.writing.lock().unwrap_or_else(PoisonError::into_inner));
+    }
+    fn fraction(&self) -> f32 {
+        if self.total == 0 {
+            1.0
+        } else {
+            self.done.load(Ordering::Relaxed) as f32 / self.total as f32
+        }
+    }
+}
+impl Drop for CropJob {
+    fn drop(&mut self) {
+        // Closing the window or the app leaves no half-staged file behind.
+        self.stop();
+    }
+}
+impl SheetEditor {
+    pub(super) fn cancel_batch(&mut self) {
+        let Some(job) = &self.regions.batch_job else {
+            return;
+        };
+        job.stop();
+        // Files already written reach this log before the image changes; the
+        // receiver is dropped below, so nothing of this job arrives afterwards.
+        self.poll_batch();
+        if let Some(job) = self.regions.batch_job.take() {
+            log::append(
+                &mut self.log,
+                format!(
+                    "Region save cancelled; saved {} of {} regions",
+                    job.saved, job.total
+                ),
+            );
+        }
+    }
+    pub(super) fn poll_batch(&mut self) {
+        let Some(job) = &mut self.regions.batch_job else {
+            return;
+        };
+        let mut messages = Vec::new();
+        let finished = loop {
+            match job.result.try_recv() {
+                Ok(Ok(path)) => {
+                    job.saved += 1;
+                    messages.push(format!("Saved region {}", path.display()));
+                }
+                Ok(Err(error)) => messages.push(format!("Region not saved: {error}")),
+                Err(TryRecvError::Empty) => break false,
+                Err(TryRecvError::Disconnected) => break true,
+            }
+        };
+        if finished {
+            messages.push(format!("Saved {} of {} regions", job.saved, job.total));
+        }
+        for message in messages {
+            log::append(&mut self.log, message);
+        }
+        if finished {
+            self.regions.batch_job = None;
+        }
+    }
+}
+#[cfg(test)]
+impl SheetEditor {
+    /// Installs a running region save whose results the caller sends.
+    pub(super) fn attach_test_batch(
+        &mut self,
+        total: usize,
+    ) -> mpsc::Sender<Result<PathBuf, String>> {
+        let (tx, result) = mpsc::channel();
+        self.regions.batch_job = Some(CropJob {
+            cancel: Arc::default(),
+            writing: Arc::default(),
+            done: Arc::default(),
+            total,
+            result,
+            saved: 0,
+        });
+        tx
+    }
 }
 fn crop_action(
     image: &RgbaImage,
@@ -183,7 +399,7 @@ pub(super) fn sheet_view(editor: &mut SheetEditor, ui: &Ui, mut overlays: Vec<Ov
     overlays.extend(regions);
     editor.sheet_view(ui, &overlays);
 }
-pub(super) fn tab(editor: &mut SheetEditor, ui: &Ui) {
+pub(super) fn tab(editor: &mut SheetEditor, ui: &Ui, open_files: &[PathBuf]) {
     let Some(_tab) = ui.tab_item("Regions") else {
         return;
     };
@@ -250,12 +466,356 @@ pub(super) fn tab(editor: &mut SheetEditor, ui: &Ui) {
             }
         }
     }
+    let checkout = match std::env::current_dir() {
+        Ok(path) => path,
+        Err(e) => {
+            log::append(log, e.to_string());
+            return;
+        }
+    };
+    let stem = extract::source_stem(&sheet.source);
+    if state.batch_dir.is_empty() {
+        state.batch_dir = checkout
+            .join("assets/splites")
+            .join(&stem)
+            .to_string_lossy()
+            .into_owned();
+    }
+    ui.input_text("Output dir", &mut state.batch_dir).build();
+    if let Some(job) = &state.batch_job {
+        let fraction = job.fraction();
+        ui.progress_bar(fraction)
+            .size([240.0, 0.0])
+            .overlay_text(format!("Saving regions... {:.0}%", fraction * 100.0))
+            .build();
+        ui.same_line();
+        if ui.button("Cancel region save") {
+            job.cancel.store(true, Ordering::Relaxed);
+        }
+    } else {
+        let _disabled = ui.begin_disabled_with_cond(state.candidates.is_empty());
+        if ui.button("Save all regions") && !state.candidates.is_empty() {
+            match plan_batch(
+                &state.candidates,
+                &stem,
+                Path::new(&state.batch_dir),
+                &checkout,
+                open_files,
+            )
+            .and_then(|targets| {
+                // Judge the checked absolute path, as Write tileset does; a relative
+                // Output dir would otherwise never get the repo note.
+                let note = targets
+                    .first()
+                    .map_or("", |(_, path)| extract::path_note(path, &checkout));
+                CropJob::start(sheet.image.clone(), targets).map(|job| (job, note))
+            }) {
+                Ok((job, note)) => {
+                    log::append(log, format!("Saving {} regions{note}", job.total));
+                    state.batch_job = Some(job);
+                }
+                Err(error) => log::append(log, error),
+            }
+        }
+    }
     ui.text_wrapped("Crops keep the grid and start empty metadata. Save the image, then turn on Key color and Reload image in its window to remove a panel background.");
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn batch_preflight_rejects_sidecars_and_unsafe_directories_without_writes() {
+        let temp = super::super::extract::tests::Temp::new();
+        let boxes = vec![
+            ObjectBox {
+                x: 0,
+                y: 0,
+                w: 2,
+                h: 2
+            };
+            2
+        ];
+        let dir = temp.0.join("assets/splites/map");
+        std::fs::create_dir_all(&dir).unwrap();
+        let sidecar = store::sidecar_for(&dir.join("map-region-2.png"));
+        std::fs::write(&sidecar, b"existing").unwrap();
+        assert!(plan_batch(&boxes, "map", &dir, &temp.0, &[]).is_err());
+        assert!(!dir.join("map-region-1.png").exists());
+        assert_eq!(std::fs::read(&sidecar).unwrap(), b"existing");
+        let outside = temp.0.join("outside");
+        assert!(plan_batch(&boxes, "map", &outside, &temp.0, &[]).is_err());
+        assert!(!outside.exists());
+        assert!(
+            plan_batch(
+                &boxes,
+                "map",
+                &temp.0.join("assets/splites/../bad"),
+                &temp.0,
+                &[]
+            )
+            .is_err()
+        );
+        #[cfg(unix)]
+        {
+            let link = temp.0.join("assets/splites/link");
+            std::os::unix::fs::symlink(&temp.0, &link).unwrap();
+            assert!(plan_batch(&boxes, "map", &link.join("new"), &temp.0, &[]).is_err());
+            assert!(!temp.0.join("new").exists());
+            // With the sidecar gone, a region name that is a symlink is the only conflict.
+            std::fs::remove_file(&sidecar).unwrap();
+            let target = temp.0.join("untouched.png");
+            std::fs::write(&target, b"untouched").unwrap();
+            std::os::unix::fs::symlink(&target, dir.join("map-region-1.png")).unwrap();
+            let error = plan_batch(&boxes, "map", &dir, &temp.0, &[]).unwrap_err();
+            assert!(error.contains("map-region-1.png"), "{error}");
+            assert_eq!(std::fs::read(&target).unwrap(), b"untouched");
+        }
+    }
+    #[test]
+    fn batch_preflight_refuses_a_png_open_in_any_editor() {
+        let temp = super::super::extract::tests::Temp::new();
+        let boxes = vec![
+            ObjectBox {
+                x: 0,
+                y: 0,
+                w: 2,
+                h: 2
+            };
+            2
+        ];
+        let dir = temp.0.join("assets/splites/map");
+        std::fs::create_dir_all(&dir).unwrap();
+        let open = dir.join("map-region-2.png");
+        std::fs::write(&open, b"open png").unwrap();
+        let open_files = [open.canonicalize().unwrap()];
+        // The relative form resolves to the same file as the canonical open path.
+        for dir in [dir.clone(), PathBuf::from("assets/splites/map")] {
+            let error = plan_batch(&boxes, "map", &dir, &temp.0, &open_files).unwrap_err();
+            assert!(error.contains("map-region-2.png"), "{error}");
+        }
+        assert_eq!(std::fs::read(&open).unwrap(), b"open png");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+        // Not held by an editor, the same PNG is an ordinary replaceable target.
+        assert_eq!(
+            plan_batch(&boxes, "map", &dir, &temp.0, &[]).unwrap().len(),
+            2
+        );
+    }
+    #[test]
+    fn cancelled_editor_discards_late_results_independently() {
+        let mut first = SheetEditor::new(1, super::super::extract::tests::memory_sheet());
+        let second = SheetEditor::new(2, super::super::extract::tests::memory_sheet());
+        let tx = first.attach_test_batch(1);
+        let cancel = Arc::clone(&first.regions.batch_job.as_ref().unwrap().cancel);
+        first.cancel_batch();
+        assert!(cancel.load(Ordering::Relaxed));
+        assert!(tx.send(Ok(PathBuf::from("late.png"))).is_err());
+        first.poll_batch();
+        assert!(first.regions.batch_job.is_none());
+        assert!(second.regions.batch_job.is_none());
+        assert!(!first.log.iter().any(|line| line.contains("late.png")));
+        assert!(
+            first
+                .log
+                .iter()
+                .any(|line| line.contains("Region save cancelled; saved 0 of 1"))
+        );
+        assert!(second.log.is_empty());
+    }
+    /// Stands in for the worker inside `write_atomic`: it holds the write lock until
+    /// cancel is set, then finishes one file late and reports it.
+    fn write_in_progress(
+        editor: &SheetEditor,
+        tx: mpsc::Sender<Result<PathBuf, String>>,
+    ) -> (
+        std::thread::JoinHandle<mpsc::Sender<Result<PathBuf, String>>>,
+        Arc<AtomicBool>,
+    ) {
+        let job = editor.regions.batch_job.as_ref().unwrap();
+        let (cancel, writing) = (Arc::clone(&job.cancel), Arc::clone(&job.writing));
+        let finished = Arc::new(AtomicBool::new(false));
+        let (locked_tx, locked) = mpsc::channel();
+        let worker_finished = Arc::clone(&finished);
+        let worker = std::thread::spawn(move || {
+            let _writing = writing.lock().unwrap();
+            locked_tx.send(()).unwrap();
+            while !cancel.load(Ordering::Relaxed) {
+                std::thread::yield_now();
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            tx.send(Ok(PathBuf::from("in-flight.png"))).unwrap();
+            worker_finished.store(true, Ordering::Relaxed);
+            tx
+        });
+        locked.recv().unwrap();
+        (worker, finished)
+    }
+    #[test]
+    fn cancel_logs_a_write_in_progress_and_nothing_after() {
+        let mut editor = SheetEditor::new(1, super::super::extract::tests::memory_sheet());
+        let tx = editor.attach_test_batch(2);
+        let (worker, _) = write_in_progress(&editor, tx);
+        editor.cancel_batch();
+        assert!(
+            editor
+                .log
+                .iter()
+                .any(|line| line.contains("Saved region in-flight.png")),
+            "{:?}",
+            editor.log
+        );
+        assert!(
+            editor
+                .log
+                .iter()
+                .any(|line| line.contains("Region save cancelled; saved 1 of 2"))
+        );
+        assert!(editor.regions.batch_job.is_none());
+        let tx = worker.join().unwrap();
+        assert!(tx.send(Ok(PathBuf::from("late.png"))).is_err());
+    }
+    #[test]
+    fn dropping_a_job_waits_for_the_write_in_progress() {
+        let mut editor = SheetEditor::new(1, super::super::extract::tests::memory_sheet());
+        let tx = editor.attach_test_batch(2);
+        let (worker, finished) = write_in_progress(&editor, tx);
+        drop(editor);
+        assert!(finished.load(Ordering::Relaxed));
+        worker.join().unwrap();
+    }
+    #[test]
+    fn cancelled_batch_writes_nothing() {
+        let temp = super::super::extract::tests::Temp::new();
+        let bbox = ObjectBox {
+            x: 0,
+            y: 0,
+            w: 2,
+            h: 2,
+        };
+        let targets = plan_batch(
+            &[bbox, bbox],
+            "map",
+            &temp.0.join("assets/splites/map"),
+            &temp.0,
+            &[],
+        )
+        .unwrap();
+        let cancel = AtomicBool::new(true);
+        let done = AtomicU64::new(0);
+        let (tx, rx) = mpsc::channel();
+        run_crop_batch(
+            &RgbaImage::new(2, 2),
+            targets.clone(),
+            &cancel,
+            &Mutex::new(()),
+            &done,
+            &tx,
+        );
+        assert!(rx.try_recv().is_err());
+        assert_eq!(done.load(Ordering::Relaxed), 0);
+        assert!(targets.iter().all(|(_, path)| !path.exists()));
+    }
+    #[test]
+    fn cancel_during_encoding_starts_no_write() {
+        let temp = super::super::extract::tests::Temp::new();
+        let bbox = ObjectBox {
+            x: 0,
+            y: 0,
+            w: 2,
+            h: 2,
+        };
+        let targets = plan_batch(
+            &[bbox, bbox],
+            "map",
+            &temp.0.join("assets/splites/map"),
+            &temp.0,
+            &[],
+        )
+        .unwrap();
+        // Holding the lock keeps the worker between encoding and writing.
+        let writing = Arc::new(Mutex::new(()));
+        let held = writing.lock().unwrap();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let (tx, rx) = mpsc::channel();
+        let worker = {
+            let (targets, cancel, writing) =
+                (targets.clone(), Arc::clone(&cancel), Arc::clone(&writing));
+            std::thread::spawn(move || {
+                let done = AtomicU64::new(0);
+                run_crop_batch(
+                    &RgbaImage::new(2, 2),
+                    targets,
+                    &cancel,
+                    &writing,
+                    &done,
+                    &tx,
+                );
+            })
+        };
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        cancel.store(true, Ordering::Relaxed);
+        drop(held);
+        worker.join().unwrap();
+        assert!(rx.try_recv().is_err());
+        assert!(targets.iter().all(|(_, path)| !path.exists()));
+    }
+    #[test]
+    fn batch_worker_saves_exact_crops_and_drop_signals_cancel() {
+        let temp = super::super::extract::tests::Temp::new();
+        let mut image = RgbaImage::new(4, 2);
+        for y in 0..2 {
+            for x in 0..4 {
+                image.set_pixel(x, y, [x as u8, y as u8, 7, 255]);
+            }
+        }
+        let boxes = vec![
+            ObjectBox {
+                x: 0,
+                y: 0,
+                w: 2,
+                h: 2,
+            },
+            ObjectBox {
+                x: 2,
+                y: 0,
+                w: 2,
+                h: 2,
+            },
+        ];
+        let targets = plan_batch(
+            &boxes,
+            "map",
+            &temp.0.join("assets/splites/map"),
+            &temp.0,
+            &[],
+        )
+        .unwrap();
+        let job = CropJob::start(image.clone(), targets.clone()).unwrap();
+        for (bbox, path) in &targets {
+            assert_eq!(
+                job.result
+                    .recv_timeout(std::time::Duration::from_secs(5))
+                    .unwrap()
+                    .unwrap(),
+                *path
+            );
+            assert_eq!(
+                RgbaImage::from_png(&std::fs::read(path).unwrap()).unwrap(),
+                image.crop(bbox.x, bbox.y, bbox.w, bbox.h).unwrap()
+            );
+        }
+        let flag = Arc::clone(&job.cancel);
+        drop(job);
+        assert!(flag.load(Ordering::Relaxed));
+        for (_, path) in targets {
+            assert!(
+                std::fs::read_dir(path.parent().unwrap())
+                    .unwrap()
+                    .all(|e| !e.unwrap().file_name().to_string_lossy().contains(".tmp-"))
+            );
+        }
+    }
     #[test]
     fn regions_are_proposals_and_crop_is_a_queued_image() {
         let mut image = RgbaImage::new(200, 160);

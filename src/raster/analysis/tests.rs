@@ -82,11 +82,14 @@ fn dedupe_is_normalized_ordered_and_spacing_aware() {
         let (image, grid) = tiled(&tiles, 4, 2, &[0, 1, 0, 2, 1, 0, 2, 2], [3, 5], spacing);
         let result = dedupe(&image, &grid);
         assert_eq!(result.unique, tiles);
-        assert_eq!(result.map, [0, 1, 0, 2, 1, 0, 2, 2]);
+        assert_eq!(
+            result.map,
+            [0, 1, 0, 2, 1, 0, 2, 2].map(|i| (i, Transform::IDENTITY))
+        );
         assert_eq!(result.counts, [3, 2, 3]);
         assert_eq!(rebuild_matches(&image, &grid, &result), Ok(()));
         let mut wrong = result.clone();
-        wrong.map[2] = 1;
+        wrong.map[2] = (1, Transform::IDENTITY);
         assert_eq!(rebuild_matches(&image, &grid, &wrong), Err(vec![(2, 0)]));
         let mut wrong = result.clone();
         wrong.unique[0].set_pixel(0, 0, [9; 4]);
@@ -95,7 +98,7 @@ fn dedupe_is_normalized_ordered_and_spacing_aware() {
             Err(vec![(0, 0), (2, 0), (1, 1)])
         );
         let mut wrong = result.clone();
-        wrong.map[0] = usize::MAX;
+        wrong.map[0] = (usize::MAX, Transform::IDENTITY);
         assert_eq!(rebuild_matches(&image, &grid, &wrong), Err(vec![(0, 0)]));
     }
     let (image, grid) = tiled(
@@ -108,7 +111,7 @@ fn dedupe_is_normalized_ordered_and_spacing_aware() {
     );
     let result = dedupe(&image, &grid);
     assert_eq!(result.unique, vec![solid(2, 2, [0; 4])]);
-    assert_eq!(result.map, [0, 0]);
+    assert_eq!(result.map, [(0, Transform::IDENTITY); 2]);
     assert_eq!(result.counts, [2]);
 }
 
@@ -543,4 +546,31 @@ fn guess_cancellation_discards_partial_scores() {
     );
     assert!(result.is_none());
     assert_eq!(visited.get(), 1);
+}
+
+#[test]
+fn dedupe_groups_eight_transforms_and_rebuild_checks_them() {
+    let tile = patterned_tiles().remove(0);
+    let variants: Vec<_> = Transform::ALL
+        .into_iter()
+        .map(|t| tile.transformed(t))
+        .collect();
+    let (image, grid) = tiled(&variants, 8, 1, &[0, 1, 2, 3, 4, 5, 6, 7], [0, 0], 0);
+    let mut grouped = dedupe_with(&image, &grid, true);
+    assert_eq!(grouped.unique, vec![tile]);
+    assert_eq!(grouped.map, Transform::ALL.map(|t| (0, t)));
+    assert_eq!(rebuild_matches(&image, &grid, &grouped), Ok(()));
+    grouped.map[1].1 = Transform::IDENTITY;
+    assert_eq!(rebuild_matches(&image, &grid, &grouped), Err(vec![(1, 0)]));
+    let plain = dedupe_with(&image, &grid, false);
+    assert_eq!(plain.unique.len(), 8);
+    assert_eq!(
+        plain.map,
+        (0..8).map(|i| (i, Transform::IDENTITY)).collect::<Vec<_>>()
+    );
+    let (image, grid) = tiled(&[solid(2, 2, [1, 2, 3, 255])], 2, 1, &[0, 0], [0, 0], 0);
+    assert_eq!(
+        dedupe_with(&image, &grid, true).map,
+        [(0, Transform::IDENTITY); 2]
+    );
 }

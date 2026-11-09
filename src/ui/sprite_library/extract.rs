@@ -5,6 +5,7 @@ use crate::{
     sprite::{
         Grid, SpriteSheet,
         store::{self, StoreError},
+        tilemap::{self, Cell, TileMap},
     },
 };
 use dear_imgui_rs::{TextureId, Ui};
@@ -16,12 +17,17 @@ use std::{
 struct Analysis {
     dedupe: Dedupe,
     rebuild: Result<(), Vec<(u32, u32)>>,
+    grouped: bool,
 }
 impl Analysis {
-    fn new(image: &RgbaImage, grid: &Grid) -> Self {
-        let dedupe = raster::dedupe(image, grid);
+    fn new(image: &RgbaImage, grid: &Grid, grouped: bool) -> Self {
+        let dedupe = raster::dedupe_with(image, grid, grouped);
         let rebuild = raster::rebuild_matches(image, grid, &dedupe);
-        Self { dedupe, rebuild }
+        Self {
+            dedupe,
+            rebuild,
+            grouped,
+        }
     }
     fn report(&self) -> String {
         let d = &self.dedupe;
@@ -40,13 +46,18 @@ impl Analysis {
             d.rows,
             u64::from(d.cols) * u64::from(d.rows),
             d.unique.len()
-        )
+        ) + if self.grouped {
+            " (rotations/flips grouped)"
+        } else {
+            ""
+        }
     }
 }
 pub(super) struct ExtractState {
     source: Option<(TextureId, String)>,
     grid: Option<Grid>,
     columns: u32,
+    group_transforms: bool,
     output: String,
     analysis: Option<Analysis>,
     written: Option<PathBuf>,
@@ -57,6 +68,7 @@ impl Default for ExtractState {
             source: None,
             grid: None,
             columns: raster::DEFAULT_SHEET_COLUMNS,
+            group_transforms: false,
             output: String::new(),
             analysis: None,
             written: None,
@@ -78,6 +90,12 @@ impl ExtractState {
             self.analysis = None;
             self.written = None;
             self.grid = Some(sheet.meta.grid);
+        }
+    }
+    fn set_group_transforms(&mut self, grouped: bool) {
+        if self.group_transforms != grouped {
+            self.group_transforms = grouped;
+            self.invalidate();
         }
     }
     pub(super) fn invalidate(&mut self) {
@@ -198,6 +216,8 @@ struct ExtractPlan {
     checkout: PathBuf,
     png: Vec<u8>,
     sidecar_path: PathBuf,
+    map_path: PathBuf,
+    map_json: String,
     sheet: SpriteSheet,
     report: String,
 }
@@ -207,6 +227,7 @@ fn plan_from_analysis(
     columns: u32,
     output: &Path,
     checkout: &Path,
+    source_stem: &str,
 ) -> Result<ExtractPlan, String> {
     if analysis.dedupe.unique.is_empty() {
         return Err("no full grid cells to extract".into());
@@ -229,7 +250,33 @@ fn plan_from_analysis(
     sheet
         .validate_bounds(image.width, image.height)
         .map_err(|e| e.join("; "))?;
+    let map_path = tilemap::map_path_for(&output, source_stem);
+    if map_path.parent() != output.parent()
+        || !store::image_path_is_safe(&format!("{source_stem}.map.json"))
+    {
+        return Err("invalid source name for map file".into());
+    }
+    let map = TileMap {
+        version: 1,
+        tileset: name.to_owned(),
+        tile: grid.tile,
+        cols: analysis.dedupe.cols,
+        rows: analysis.dedupe.rows,
+        cells: analysis
+            .dedupe
+            .map
+            .iter()
+            .map(|&(index, transform)| Cell {
+                index,
+                flip_x: transform.flip_x(),
+                rotation: transform.rotation(),
+            })
+            .collect(),
+    };
+    map.validate_against(image.width, image.height)?;
     Ok(ExtractPlan {
+        map_path,
+        map_json: tilemap::to_json(&map),
         sidecar_path: store::sidecar_for(&output),
         sheet,
         output,
@@ -246,7 +293,14 @@ fn plan_extract(
     output: &Path,
     checkout: &Path,
 ) -> Result<ExtractPlan, String> {
-    plan_from_analysis(&Analysis::new(image, grid), grid, columns, output, checkout)
+    plan_from_analysis(
+        &Analysis::new(image, grid, false),
+        grid,
+        columns,
+        output,
+        checkout,
+        "map",
+    )
 }
 
 fn save_sidecar_new(path: &Path, sheet: &SpriteSheet) -> Result<(), StoreError> {
@@ -258,27 +312,36 @@ fn write_plan(plan: &ExtractPlan, open_files: &[PathBuf]) -> Result<String, Stri
     refuse_open_output(&output, open_files)?;
     let output = ensure_output_dir(&output, &plan.checkout).map_err(|e| e.to_string())?;
     store::write_atomic(&output, &plan.png).map_err(|e| format!("PNG not written: {e}"))?;
-    // PNG is a regenerated artifact and is replaced even when edited metadata exists.
-    // These two files are not a transaction: after any JSON error the PNG remains.
-    if let Err(error) = save_sidecar_new(&plan.sidecar_path, &plan.sheet) {
-        let reason = if matches!(&error,StoreError::Io(e) if e.kind()==io::ErrorKind::AlreadyExists)
-        {
-            "sidecar exists; remove it first".into()
-        } else {
-            error.to_string()
-        };
-        return Err(format!(
-            "PNG written: {}; sidecar not written: {reason}{}",
-            output.display(),
-            path_note(&output, &plan.checkout)
-        ));
-    }
-    Ok(format!(
-        "Wrote {} and {}{}",
+    // PNG and map are regenerated artifacts, replaced even when edited metadata exists.
+    // The three files are not a transaction: after any JSON error the PNG remains.
+    let sidecar = match save_sidecar_new(&plan.sidecar_path, &plan.sheet) {
+        Ok(()) => format!("sidecar written: {}", plan.sidecar_path.display()),
+        Err(error) if matches!(&error,StoreError::Io(e) if e.kind()==io::ErrorKind::AlreadyExists) => {
+            "sidecar not written: sidecar exists; remove it first".into()
+        }
+        Err(error) => format!("sidecar not written: {error}"),
+    };
+    let map_write = match fs::symlink_metadata(&plan.map_path) {
+        Ok(meta) if meta.file_type().is_symlink() => Err("map output is a symlink".to_string()),
+        Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e.to_string()),
+        _ => {
+            store::write_atomic(&plan.map_path, plan.map_json.as_bytes()).map_err(|e| e.to_string())
+        }
+    };
+    let map = match map_write {
+        Ok(()) => format!("map written: {}", plan.map_path.display()),
+        Err(error) => format!("map not written: {error}"),
+    };
+    let message = format!(
+        "PNG written: {}; {sidecar}; {map}{}",
         output.display(),
-        plan.sidecar_path.display(),
         path_note(&output, &plan.checkout)
-    ))
+    );
+    if sidecar.starts_with("sidecar not") || map.starts_with("map not") {
+        Err(message)
+    } else {
+        Ok(message)
+    }
 }
 
 pub(super) fn tab(editor: &mut SheetEditor, ui: &Ui, open_files: &[PathBuf]) {
@@ -305,9 +368,17 @@ pub(super) fn tab(editor: &mut SheetEditor, ui: &Ui, open_files: &[PathBuf]) {
     if changed {
         state.written = None;
     }
+    let mut grouped = state.group_transforms;
+    if ui.checkbox("Group rotations/flips", &mut grouped) {
+        state.set_group_transforms(grouped);
+    }
     if ui.button("Analyze") {
         // Synchronous, explicit action. Large sheets pause this dev tool.
-        state.analysis = Some(Analysis::new(&sheet.image, &sheet.meta.grid));
+        state.analysis = Some(Analysis::new(
+            &sheet.image,
+            &sheet.meta.grid,
+            state.group_transforms,
+        ));
         state.written = None;
     }
     if let Some(analysis) = &state.analysis {
@@ -333,6 +404,7 @@ pub(super) fn tab(editor: &mut SheetEditor, ui: &Ui, open_files: &[PathBuf]) {
                 state.columns,
                 Path::new(&state.output),
                 &checkout,
+                &source_stem(&sheet.source),
             )
             .and_then(|plan| {
                 write_plan(&plan, open_files).map(|message| format!("{message}; {}", plan.report))
@@ -452,8 +524,8 @@ pub(super) mod tests {
                 png,
                 raster::build_sheet(&raster::dedupe(&image, &grid).unique, 16, 16)
             );
-            let mut analysis = Analysis::new(&image, &grid);
-            analysis.dedupe.map[0] = 1;
+            let mut analysis = Analysis::new(&image, &grid, false);
+            analysis.dedupe.map[0] = (1, crate::sprite::Transform::IDENTITY);
             analysis.rebuild = raster::rebuild_matches(&image, &grid, &analysis.dedupe);
             assert!(analysis.report().contains("1 cells differ (first 0,0)"));
         }
@@ -481,6 +553,61 @@ pub(super) mod tests {
             )
             .is_err()
         );
+    }
+    #[test]
+    fn grouped_map_rebuilds_all_eight_variants() {
+        let temp = Temp::new();
+        let mut tile = RgbaImage::new(2, 2);
+        for y in 0..2 {
+            for x in 0..2 {
+                tile.set_pixel(x, y, [(1 + x + 2 * y) as u8, 0, 0, 255]);
+            }
+        }
+        let mut image = RgbaImage::new(16, 2);
+        for (index, transform) in crate::sprite::Transform::ALL.into_iter().enumerate() {
+            let variant = tile.transformed(transform);
+            for y in 0..2 {
+                for x in 0..2 {
+                    image.set_pixel(index as u32 * 2 + x, y, variant.pixel(x, y));
+                }
+            }
+        }
+        let grid = Grid {
+            tile: 2,
+            offset: [0, 0],
+            spacing: 0,
+        };
+        let analysis = Analysis::new(&image, &grid, true);
+        let plan = plan_from_analysis(
+            &analysis,
+            &grid,
+            16,
+            &temp.0.join("tiles.png"),
+            &temp.0,
+            "map",
+        )
+        .unwrap();
+        write_plan(&plan, &[]).unwrap();
+        let map = tilemap::parse(&fs::read_to_string(&plan.map_path).unwrap()).unwrap();
+        assert_eq!(
+            map.rebuild(&RgbaImage::from_png(&plan.png).unwrap())
+                .unwrap(),
+            image
+        );
+    }
+    #[cfg(unix)]
+    #[test]
+    fn map_destination_symlink_is_refused() {
+        let temp = Temp::new();
+        let (image, grid) = map(0, [0, 0]);
+        let plan = plan_extract(&image, &grid, 16, &temp.0.join("tiles.png"), &temp.0).unwrap();
+        let target = temp.0.join("untouched");
+        fs::write(&target, b"untouched").unwrap();
+        std::os::unix::fs::symlink(&target, &plan.map_path).unwrap();
+        let error = write_plan(&plan, &[]).unwrap_err();
+        assert!(error.contains("map not written: map output is a symlink"));
+        assert_eq!(fs::read(target).unwrap(), b"untouched");
+        assert_no_temps(&temp.0);
     }
     #[test]
     fn defaults_and_output_directory_boundaries() {
@@ -590,6 +717,10 @@ pub(super) mod tests {
         let output = temp.0.join("assets/splites/map/tiles.png");
         let first = plan_extract(&image, &grid, 16, &output, &temp.0).unwrap();
         write_plan(&first, &[]).unwrap();
+        assert_eq!(first.map_path, output.with_file_name("map.map.json"));
+        let stored_map = tilemap::parse(&fs::read_to_string(&first.map_path).unwrap()).unwrap();
+        let tileset = RgbaImage::from_png(&fs::read(&output).unwrap()).unwrap();
+        assert_eq!(stored_map.rebuild(&tileset).unwrap(), map(0, [0, 0]).0);
         let saved = store::load(&first.sidecar_path).unwrap();
         assert_eq!(saved.sheet, first.sheet);
         assert_eq!(
@@ -614,6 +745,11 @@ pub(super) mod tests {
             "{error}"
         );
         assert_eq!(fs::read(&first.sidecar_path).unwrap(), original_json);
+        assert_eq!(
+            fs::read_to_string(&second.map_path).unwrap(),
+            second.map_json
+        );
+        assert!(error.contains("map written:"));
         assert_eq!(fs::read(&output).unwrap(), second.png);
         let mut original_png = Vec::new();
         old_inode.read_to_end(&mut original_png).unwrap();
@@ -678,25 +814,56 @@ pub(super) mod tests {
         assert_no_temps(&temp.0);
     }
     #[test]
+    fn grouping_toggle_invalidates_results_and_is_reported() {
+        let sheet = memory_sheet();
+        let mut state = ExtractState::default();
+        assert!(!state.group_transforms);
+        state.analysis = Some(Analysis::new(&sheet.image, &sheet.meta.grid, false));
+        state.written = Some("old.png".into());
+        state.set_group_transforms(true);
+        assert!(state.analysis.is_none() && state.written.is_none());
+        assert!(
+            Analysis::new(&sheet.image, &sheet.meta.grid, true)
+                .report()
+                .contains("rotations/flips grouped")
+        );
+    }
+    #[test]
     fn grid_and_image_changes_invalidate_analysis_and_written_result() {
         let temp = Temp::new();
         let mut sheet = memory_sheet();
         let mut state = ExtractState::default();
         state.sync(&sheet, &temp.0);
-        state.analysis = Some(Analysis::new(&sheet.image, &sheet.meta.grid));
+        state.analysis = Some(Analysis::new(
+            &sheet.image,
+            &sheet.meta.grid,
+            state.group_transforms,
+        ));
         state.written = Some("old.png".into());
         sheet.meta.grid.offset = [2, 0];
         state.sync(&sheet, &temp.0);
         assert!(state.analysis.is_none() && state.written.is_none());
-        state.analysis = Some(Analysis::new(&sheet.image, &sheet.meta.grid));
+        state.analysis = Some(Analysis::new(
+            &sheet.image,
+            &sheet.meta.grid,
+            state.group_transforms,
+        ));
         sheet.meta.grid.spacing = 1;
         state.sync(&sheet, &temp.0);
         assert!(state.analysis.is_none());
-        state.analysis = Some(Analysis::new(&sheet.image, &sheet.meta.grid));
+        state.analysis = Some(Analysis::new(
+            &sheet.image,
+            &sheet.meta.grid,
+            state.group_transforms,
+        ));
         sheet.meta.grid.tile = 8;
         state.sync(&sheet, &temp.0);
         assert!(state.analysis.is_none());
-        state.analysis = Some(Analysis::new(&sheet.image, &sheet.meta.grid));
+        state.analysis = Some(Analysis::new(
+            &sheet.image,
+            &sheet.meta.grid,
+            state.group_transforms,
+        ));
         sheet.imgui_id = TextureId::new(51);
         state.sync(&sheet, &temp.0);
         assert!(state.analysis.is_none());
