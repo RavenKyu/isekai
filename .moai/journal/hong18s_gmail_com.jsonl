@@ -586,3 +586,16 @@
 {"ts":"2026-11-09T14:50:45Z","id":"isk-9tfj","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"게임 오브젝트·컴포넌트 기반"}
 {"ts":"2026-11-09T14:50:45Z","id":"isk-fy7v","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"게임 프리팹 파일과 맵 인스턴스"}
 {"ts":"2026-11-09T14:50:51Z","id":"isk-aqpa","kind":"note","by":"Raven","by_email":"hong18s@gmail.com","text":"결정 추가(2026-11-09, 사람 \"(a)로 v3에 id 넣자\"): 형식 v3에서 sprite·animation마다 이름을 바꿔도 변하지 않는 안정 id를 둔다. 바깥 파일(프리팹·맵)은 id로 참조한다. 후속 backlog: isk-9tfj, isk-fy7v. 계획 초안 작업에 전달함."}
+{"ts":"2026-11-09T15:04:11Z","id":"isk-79ss","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"Sheet Editor UX 개편: 세 탭·상시 Preview·형식 v3"}
+{"ts":"2026-11-09T15:04:11Z","id":"isk-79ss.73y","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"이름: Asset Library·Sheet Editor와 assets/sprites"}
+{"ts":"2026-11-09T15:04:11Z","id":"isk-79ss.4zy","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"형식 v3: id·canvas·Animation·수정 시각·sprite props"}
+{"ts":"2026-11-09T15:04:11Z","id":"isk-79ss.6lv","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"편집기: 수정 시각 기록·항목별 검증·v2 타일 애니메이션 경고"}
+{"ts":"2026-11-09T15:04:11Z","id":"isk-79ss.ddz","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"Sheet Editor 세 열 배치와 상시 Preview·Import 탭"}
+{"ts":"2026-11-09T15:04:11Z","id":"isk-79ss.565","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"Tileset 탭과 공용 props 표"}
+{"ts":"2026-11-09T15:04:11Z","id":"isk-79ss.cp7","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"Sprites 탭: 목록·New from selection·Suggest 삭제"}
+{"ts":"2026-11-09T15:04:11Z","id":"isk-79ss.zvd","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"Sprites 탭: 격자 캔버스와 드래그 앤 드롭"}
+{"ts":"2026-11-09T15:04:11Z","id":"isk-79ss.h0o","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"Animations 탭: 프레임 띠와 재생 강조"}
+{"ts":"2026-11-09T15:04:11Z","id":"isk-79ss.lp2","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"문서: 새 용어·Sheet Editor·형식 v3"}
+{"ts":"2026-11-09T15:04:11Z","id":"isk-79ss","kind":"note","by":"Raven","by_email":"hong18s@gmail.com","text":"Unfolded from isk-aqpa — Sheet Editor UX 개편: Tileset/Sprites/Animations 탭과 상시 Preview"}
+{"ts":"2026-11-09T15:04:11Z","id":"isk-aqpa","kind":"status","by":"Raven","by_email":"hong18s@gmail.com","from":"todo","to":"done","note":"Unfolded into isk-79ss, 9 issues"}
+{"ts":"2026-11-09T15:04:22Z","id":"isk-79ss","kind":"note","by":"Raven","by_email":"hong18s@gmail.com","text":"model: anthropic/claude-opus-5-5 (high — plan: interview and detailed plan)"}
