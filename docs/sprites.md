@@ -335,7 +335,14 @@ native 스모크는 fixture를 `target/` 아래에 복사해 재생 성공과 �
 RN_LOCAL_ASSETS=1 cargo test --locked local_assets_report -- --ignored --nocapture
 ```
 
-텍스처 크기·필터·Drop 삭제와 외부 ID 해제는 실제 GL 검사로 본다. App 필드 선언 순서와
+텍스처 크기·필터·Drop 삭제와 외부 ID 해제는 실제 GL 검사로 본다.
+`transformed_pixels_match_gpu_readback`은 코드로 만든 비대칭 4×4 타일의 여덟 변형을
+`SpriteQuad`로 그려 GPU에서 읽은 픽셀을 `RgbaImage::transformed`와 비교하고,
+90도 회전과 반전 후 90도 회전은 수기 기대값과도 비교한다. 방향 규약은 사이드카 형식 절을 따른다.
+이 검사는 디스플레이가 필요해 일반 테스트에서 무시되며 `scripts/smoke-native.sh`와
+`scripts/smoke-native.sh --dev`에서 실행된다. `Playback::draw`의 dest·pivot 계산,
+`Grid::uv`의 부분 시트 호출과 웹 ES 300의 실제 픽셀 방향은 측정하지 않는다.
+App 필드 선언 순서와
 전체 shutdown 순서가 잘못되는 변이를 자동으로 잡는 검사는 아직 없다. 리뷰에서 컨텍스트가
 current인지, 텍스처·shader가 GLContext보다 먼저 해제되는지 코드를 확인해야 한다.
 
