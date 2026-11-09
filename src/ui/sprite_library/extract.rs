@@ -11,7 +11,6 @@ use dear_imgui_rs::{TextureId, Ui};
 use std::{
     fs, io,
     path::{Component, Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
 };
 
 struct Analysis {
@@ -103,7 +102,7 @@ pub(super) fn default_output(source: &SheetSource, checkout: &Path) -> PathBuf {
         .join(&stem)
         .join(format!("{stem}-tileset.png"))
 }
-fn absolute_output(path: &Path, checkout: &Path) -> Result<PathBuf, StoreError> {
+pub(super) fn absolute_output(path: &Path, checkout: &Path) -> Result<PathBuf, StoreError> {
     if path.components().any(|c| matches!(c, Component::ParentDir)) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -249,44 +248,9 @@ fn plan_extract(
     plan_from_analysis(&Analysis::new(image, grid), grid, columns, output, checkout)
 }
 
-static NEXT_STAGE: AtomicU64 = AtomicU64::new(0);
-struct Staged(PathBuf);
-impl Drop for Staged {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.0);
-    }
-}
 fn save_sidecar_new(path: &Path, sheet: &SpriteSheet) -> Result<(), StoreError> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "sidecar needs a parent"))?;
-    let name = path.file_name().unwrap();
-    let stage = loop {
-        let mut name = name.to_os_string();
-        name.push(format!(
-            ".tmp-sidecar-{}-{}",
-            std::process::id(),
-            NEXT_STAGE.fetch_add(1, Ordering::Relaxed)
-        ));
-        let candidate = parent.join(name);
-        match fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&candidate)
-        {
-            Ok(file) => {
-                drop(file);
-                break Staged(candidate);
-            }
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
-            Err(e) => return Err(e.into()),
-        }
-    };
-    store::save(&stage.0, sheet)?;
-    // Hard-link publication is atomic and refuses an existing destination. Unlike
-    // rename, it cannot overwrite metadata created between existence check/save.
-    fs::hard_link(&stage.0, path)?;
-    Ok(())
+    sheet.validate().map_err(StoreError::Invalid)?;
+    store::publish_new(path, store::to_json(sheet).as_bytes())
 }
 fn write_plan(plan: &ExtractPlan, open_files: &[PathBuf]) -> Result<String, String> {
     let output = absolute_output(&plan.output, &plan.checkout).map_err(|e| e.to_string())?;
@@ -390,7 +354,11 @@ pub(super) fn tab(editor: &mut SheetEditor, ui: &Ui, open_files: &[PathBuf]) {
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
-    use std::io::Read;
+    use std::{
+        io::Read,
+        sync::atomic::{AtomicU64, Ordering},
+    };
+    static NEXT_STAGE: AtomicU64 = AtomicU64::new(0);
     pub(crate) struct Temp(pub PathBuf);
     impl Temp {
         pub(crate) fn new() -> Self {
@@ -663,6 +631,18 @@ pub(super) mod tests {
                 .contains("PNG written:")
         );
         assert_no_temps(&temp.0);
+    }
+    #[test]
+    fn sidecar_publication_validates_before_creating_files() {
+        let temp = Temp::new();
+        let path = temp.0.join("invalid.sprites.json");
+        let mut sheet = memory_sheet().meta;
+        sheet.grid.tile = 0;
+        assert!(matches!(
+            save_sidecar_new(&path, &sheet),
+            Err(StoreError::Invalid(_))
+        ));
+        assert_eq!(fs::read_dir(&temp.0).unwrap().count(), 0);
     }
     #[test]
     fn sidecar_publication_cannot_clobber_a_concurrent_writer() {

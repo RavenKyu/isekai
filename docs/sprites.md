@@ -173,7 +173,8 @@ PNG 저장 후 `Save`로 메타를 따로 쓴다. 다른 편집 창이 열고 �
    격자는 유지하고 타일·sprite·clip 메타는 빈 상태로 시작한다.
 3. `Image output`을 확인하고 `Save image as`로 crop PNG를 쓴다. 기본은
    `assets/splites/<crop 이름>/<crop 이름>.png`다. 이 버튼은 JSON을 만들지 않는다.
-   그 경로의 사이드카가 이미 있으면 Save가 그 메타를 덮게 되므로 PNG도 쓰지 않고 거부한다.
+   그 경로에 PNG나 사이드카가 이미 있으면 쓰지 않고 거부한다. 심볼릭 링크 이름도 포함한다.
+   PNG는 배타적으로 게시하므로 동시에 다른 쓰기가 만든 파일도 덮지 않는다.
 4. 배경을 제거하려면 그 PNG를 저장한 다음 `Key color`를 켜고 해당 창의 `Reload image`를 누른다.
    이어 격자를 직접 입력하거나 Guess/Apply로 정한다. crop과 키 색 제거는 이 두 단계다.
 5. `Extract`의 `Analyze`를 누른다. 완전 투명 픽셀의 RGB를 0으로 정규화한 뒤
@@ -192,7 +193,7 @@ Find regions·Suggest from objects·Analyze는 버튼에서만 동기로 실행�
 밖에서는 이미 존재하는 디렉터리만 쓸 수 있다. `..`와 심볼릭 링크를 거치는 출력 디렉터리는 거부한다.
 저장소 안이면서 이 ignore 폴더 밖이면 커밋 대상이 될 수 있다는 상태 줄을 표시한다.
 
-PNG는 재생성 결과로서 원자적으로 교체한다. JSON은 기존 파일이나 동시에 다른 쓰기가 만든
+`Write tileset`의 PNG는 재생성 결과로서 원자적으로 교체한다. JSON은 기존 파일이나 동시에 다른 쓰기가 만든
 파일을 덮지 않도록 배타적으로 게시한다. 둘은 하나의 트랜잭션이 아니다.
 기존 사이드카 때문에 JSON 저장이 거부돼도 PNG는 이미 새 내용일 수 있다.
 `PNG written: ...; sidecar not written: sidecar exists; remove it first`가 그 상태다.
@@ -291,4 +292,4 @@ Find regions·Suggest from objects·Analyze의 동기 실행과 앱 종료 시 �
 `/assets/splites/`는 gitignore에 있으며 이미지·결과 PNG·사이드카를 커밋하지 않는다.
 라이선스는 이 문서에서 단정하지 않는다. 자동 검사·웹 예제는 코드가 만든 이미지로만 동작한다.
 
-Decided in: rn-fcuz, rn-hk1c
+Decided in: rn-fcuz, rn-hk1c, rn-aw9h

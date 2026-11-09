@@ -109,7 +109,13 @@ pub fn save(sidecar: &Path, sheet: &SpriteSheet) -> Result<(), StoreError> {
 }
 
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
-pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
+struct Staged(PathBuf);
+impl Drop for Staged {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
+fn stage_bytes(path: &Path, bytes: &[u8]) -> Result<Staged, StoreError> {
     let name = path.file_name().ok_or_else(|| {
         std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -131,22 +137,27 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
         ));
         let temp = parent.join(filename);
         match OpenOptions::new().write(true).create_new(true).open(&temp) {
-            Ok(file) => break (temp, file),
+            Ok(file) => break (Staged(temp), file),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(e) => return Err(e.into()),
         }
     };
-    let result = (|| {
-        file.write_all(bytes)?;
-        file.sync_all()?;
-        // Close before rename also supports platforms disallowing open-file moves.
-        drop(file);
-        fs::rename(&temp, path)
-    })();
-    if let Err(error) = result {
-        let _ = fs::remove_file(&temp);
-        return Err(error.into());
-    }
+    file.write_all(bytes)?;
+    file.sync_all()?;
+    // Close before publication also supports platforms disallowing open-file moves.
+    drop(file);
+    Ok(temp)
+}
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
+    let temp = stage_bytes(path, bytes)?;
+    fs::rename(&temp.0, path)?;
+    Ok(())
+}
+/// Publish complete, synced bytes without replacing any existing destination,
+/// including a dangling symlink. Competing publishers cannot both succeed.
+pub fn publish_new(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
+    let temp = stage_bytes(path, bytes)?;
+    fs::hard_link(&temp.0, path)?;
     Ok(())
 }
 
@@ -235,6 +246,80 @@ mod tests {
                 .to_string_lossy()
                 .contains(".tmp-"))
         );
+    }
+    #[test]
+    fn publication_is_exclusive_and_cleans_success_and_failure() {
+        let dir = Temp::new();
+        let path = dir.0.join("image.png");
+        publish_new(&path, b"complete PNG").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"complete PNG");
+        assert!(matches!(
+            publish_new(&path, b"replacement"),
+            Err(StoreError::Io(e)) if e.kind() == std::io::ErrorKind::AlreadyExists
+        ));
+        assert_eq!(fs::read(&path).unwrap(), b"complete PNG");
+        let directory = dir.0.join("directory.png");
+        fs::create_dir(&directory).unwrap();
+        assert!(matches!(
+            publish_new(&directory, b"replacement"),
+            Err(StoreError::Io(e)) if e.kind() == std::io::ErrorKind::AlreadyExists
+        ));
+        assert!(directory.is_dir());
+        assert!(publish_new(&dir.0.join("missing/image.png"), b"no parent").is_err());
+        assert!(!dir.0.join("missing").exists());
+        assert_eq!(fs::read_dir(&dir.0).unwrap().count(), 2);
+    }
+    #[cfg(unix)]
+    #[test]
+    fn publication_refuses_live_and_dangling_symlink_names() {
+        let dir = Temp::new();
+        let outside = Temp::new();
+        let target = outside.0.join("target.png");
+        fs::write(&target, b"original").unwrap();
+        for (name, target) in [
+            ("live.png", target.clone()),
+            ("dangling.png", outside.0.join("missing.png")),
+        ] {
+            let link = dir.0.join(name);
+            std::os::unix::fs::symlink(&target, &link).unwrap();
+            assert!(matches!(
+                publish_new(&link, b"replacement"),
+                Err(StoreError::Io(e)) if e.kind() == std::io::ErrorKind::AlreadyExists
+            ));
+            assert_eq!(fs::read_link(&link).unwrap(), target);
+        }
+        assert_eq!(fs::read(&target).unwrap(), b"original");
+        assert_eq!(fs::read_dir(&dir.0).unwrap().count(), 2);
+        assert_eq!(fs::read_dir(&outside.0).unwrap().count(), 1);
+    }
+    #[test]
+    fn concurrent_publication_has_one_winner_and_keeps_its_complete_bytes() {
+        let dir = Temp::new();
+        let path = dir.0.join("image.png");
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let writers: Vec<_> = (0..2)
+            .map(|i| {
+                let path = path.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    let bytes = vec![i; 16_384];
+                    barrier.wait();
+                    (bytes.clone(), publish_new(&path, &bytes))
+                })
+            })
+            .collect();
+        let results: Vec<_> = writers.into_iter().map(|w| w.join().unwrap()).collect();
+        let winners: Vec<_> = results
+            .iter()
+            .filter(|(_, result)| result.is_ok())
+            .collect();
+        assert_eq!(winners.len(), 1);
+        assert_eq!(fs::read(&path).unwrap(), winners[0].0);
+        assert!(results.iter().any(|(_, result)| matches!(
+            result,
+            Err(StoreError::Io(e)) if e.kind() == std::io::ErrorKind::AlreadyExists
+        )));
+        assert_eq!(fs::read_dir(&dir.0).unwrap().count(), 1);
     }
     #[test]
     fn canonical_roundtrip_and_load() {
