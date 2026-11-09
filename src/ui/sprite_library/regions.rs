@@ -71,11 +71,22 @@ fn default_image_output(source: &SheetSource, checkout: &Path) -> PathBuf {
         .join(&stem)
         .join(format!("{stem}.png"))
 }
-fn save_memory(sheet: &mut OpenSheet, path: &Path, checkout: &Path) -> Result<String, String> {
+fn save_memory(
+    sheet: &mut OpenSheet,
+    path: &Path,
+    checkout: &Path,
+    open_files: &[PathBuf],
+) -> Result<String, String> {
     if !matches!(sheet.source, SheetSource::Memory { .. }) {
         return Err("only memory images need Save image as".into());
     }
     let output = extract::ensure_output_dir(path, checkout).map_err(|e| e.to_string())?;
+    if open_files.contains(&output) {
+        return Err(format!(
+            "image {} is already open; choose another image path",
+            output.display()
+        ));
+    }
     // Save would then replace this sidecar with the crop's empty metadata.
     let sidecar = store::sidecar_for(&output);
     if sidecar.try_exists().map_err(|e| e.to_string())? {
@@ -100,7 +111,7 @@ fn save_memory(sheet: &mut OpenSheet, path: &Path, checkout: &Path) -> Result<St
     ))
 }
 
-pub(super) fn memory_header(editor: &mut SheetEditor, ui: &Ui) {
+pub(super) fn memory_header(editor: &mut SheetEditor, ui: &Ui, open_files: &[PathBuf]) {
     let SheetEditor {
         sheet,
         regions: state,
@@ -126,7 +137,7 @@ pub(super) fn memory_header(editor: &mut SheetEditor, ui: &Ui) {
     }
     ui.input_text("Image output", &mut state.save_path).build();
     if ui.button("Save image as") {
-        match save_memory(sheet, Path::new(&state.save_path), &checkout) {
+        match save_memory(sheet, Path::new(&state.save_path), &checkout, open_files) {
             Ok(message) => {
                 if let SheetSource::File(path) = &sheet.source {
                     *saved_path = Some(path.clone());
@@ -297,9 +308,19 @@ mod tests {
         let mut sheet = super::super::extract::tests::memory_sheet();
         let output = default_image_output(&sheet.source, &temp.0);
         assert_eq!(output, temp.0.join("assets/splites/map/map.png"));
-        assert!(save_memory(&mut sheet, &output.with_extension("jpg"), &temp.0).is_err());
+        assert!(save_memory(&mut sheet, &output.with_extension("jpg"), &temp.0, &[]).is_err());
         assert!(matches!(sheet.source, SheetSource::Memory { .. }));
-        save_memory(&mut sheet, &output, &temp.0).unwrap();
+        std::fs::create_dir_all(output.parent().unwrap()).unwrap();
+        std::fs::write(&output, b"open sibling PNG").unwrap();
+        let canonical = output.canonicalize().unwrap();
+        assert!(
+            save_memory(&mut sheet, &output, &temp.0, &[canonical])
+                .unwrap_err()
+                .contains("already open")
+        );
+        assert_eq!(std::fs::read(&output).unwrap(), b"open sibling PNG");
+        assert!(matches!(sheet.source, SheetSource::Memory { .. }));
+        save_memory(&mut sheet, &output, &temp.0, &[]).unwrap();
         assert!(matches!(&sheet.source,SheetSource::File(path) if path==&output));
         assert_eq!(sheet.meta.image, "map.png");
         assert!(sheet.dirty);
@@ -314,7 +335,7 @@ mod tests {
         let mut other = super::super::extract::tests::memory_sheet();
         other.image.set_pixel(0, 0, [1, 2, 3, 255]);
         assert!(
-            save_memory(&mut other, &output, &temp.0)
+            save_memory(&mut other, &output, &temp.0, &[])
                 .unwrap_err()
                 .contains("exists")
         );

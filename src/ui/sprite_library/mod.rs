@@ -52,6 +52,8 @@ pub struct SheetEditor {
     pub sheet: OpenSheet,
     focus_requested: bool,
     confirm_close: bool,
+    #[cfg(test)]
+    close_controls: [[f32; 2]; 3],
     pub zoom: u32,
     pub show_grid: bool,
     pub guess: Option<GridGuess>,
@@ -266,8 +268,16 @@ impl SpriteLibrary {
                 });
             self.open = open;
         }
+        let open_files: Vec<_> = self
+            .sheets
+            .iter()
+            .filter_map(|editor| match &editor.sheet.source {
+                SheetSource::File(path) => Some(path.clone()),
+                SheetSource::Memory { .. } => None,
+            })
+            .collect();
         for editor in &mut self.sheets {
-            editor.draw(ui, now_ms);
+            editor.draw(ui, now_ms, &open_files);
         }
         self.collect_editor_output();
     }
@@ -331,6 +341,8 @@ impl SheetEditor {
             sheet,
             focus_requested: true,
             confirm_close: false,
+            #[cfg(test)]
+            close_controls: [[0.0; 2]; 3],
             zoom: 2,
             show_grid: true,
             guess: None,
@@ -422,7 +434,7 @@ impl SheetEditor {
             self.pending.push(Action::Close(self.id));
         }
     }
-    fn draw(&mut self, ui: &Ui, now_ms: u64) {
+    fn draw(&mut self, ui: &Ui, now_ms: u64, open_files: &[PathBuf]) {
         let mut open = true;
         let focus = std::mem::take(&mut self.focus_requested);
         let mut window = ui
@@ -441,6 +453,14 @@ impl SheetEditor {
             window = window.collapsed(false, Condition::Always);
         }
         window.build(|| {
+            #[cfg(test)]
+            {
+                let pos = ui.window_pos();
+                self.close_controls[0] = [
+                    pos[0] + ui.window_size()[0] - ui.frame_height() * 0.5,
+                    pos[1] + ui.frame_height() * 0.5,
+                ];
+            }
             let footer = log::HEIGHT + ui.frame_height_with_spacing() + 12.0;
             ui.child_window("Editor controls")
                 .size([0.0, -footer])
@@ -449,7 +469,7 @@ impl SheetEditor {
                         ui.open_popup(format!("Discard changes?###discard-sheet-{}", self.id));
                         self.confirm_close = false;
                     }
-                    self.draw_contents(ui, now_ms);
+                    self.draw_contents(ui, now_ms, open_files);
                 });
             self.log_view.draw(&mut self.log, ui);
         });
@@ -457,7 +477,7 @@ impl SheetEditor {
             self.request_close();
         }
     }
-    fn draw_contents(&mut self, ui: &Ui, now_ms: u64) {
+    fn draw_contents(&mut self, ui: &Ui, now_ms: u64, open_files: &[PathBuf]) {
         let sheet = &self.sheet;
         let memory = matches!(sheet.source, SheetSource::Memory { .. });
         {
@@ -475,7 +495,7 @@ impl SheetEditor {
         }
         if memory {
             ui.text("Memory image: save the image first");
-            regions::memory_header(self, ui);
+            regions::memory_header(self, ui, open_files);
         }
         ui.modal_popup(
             format!("Discard changes?###discard-sheet-{}", self.id),
@@ -485,9 +505,17 @@ impl SheetEditor {
                     self.pending.push(Action::Close(self.id));
                     ui.close_current_popup();
                 }
+                #[cfg(test)]
+                {
+                    self.close_controls[1] = tests::item_center(ui);
+                }
                 ui.same_line();
                 if ui.button("Cancel") {
                     ui.close_current_popup();
+                }
+                #[cfg(test)]
+                {
+                    self.close_controls[2] = tests::item_center(ui);
                 }
             },
         );
@@ -731,6 +759,70 @@ mod tests {
                 .total_vtx_count();
         }
         count
+    }
+    pub(super) fn item_center(ui: &Ui) -> [f32; 2] {
+        let min = ui.item_rect_min();
+        let size = ui.item_rect_size();
+        [min[0] + size[0] * 0.5, min[1] + size[1] * 0.5]
+    }
+    fn check_window_close_interactions(
+        context: &mut Context,
+        consumer: &SynchronousRendererConsumer,
+    ) {
+        use std::cell::RefCell;
+        let library = RefCell::new(SpriteLibrary::default());
+        library.borrow_mut().sheets.extend([
+            SheetEditor::new(10, fake_sheet()),
+            SheetEditor::new(11, fake_sheet()),
+        ]);
+        library.borrow_mut().sheets[0].sheet.dirty = true;
+        let render = |context: &mut Context| {
+            vertices(context, consumer, |ui| library.borrow_mut().draw(ui, 0));
+        };
+        let click = |context: &mut Context, point| {
+            context.io_mut().add_mouse_pos_event(point);
+            render(context);
+            context
+                .io_mut()
+                .add_mouse_button_event(dear_imgui_rs::MouseButton::Left, true);
+            render(context);
+            context
+                .io_mut()
+                .add_mouse_button_event(dear_imgui_rs::MouseButton::Left, false);
+            render(context);
+        };
+        render(context);
+        library.borrow_mut().sheets[0].focus_requested = true;
+        render(context);
+        let first_x = library.borrow().sheets[0].close_controls[0];
+        click(context, first_x);
+        assert!(
+            library.borrow().pending.is_empty(),
+            "dirty x waits for confirmation"
+        );
+        let cancel = library.borrow().sheets[0].close_controls[2];
+        assert!(cancel[0] > 0.0, "the discard modal was rendered");
+        click(context, cancel);
+        assert!(
+            library.borrow().pending.is_empty(),
+            "Cancel keeps the editor"
+        );
+        click(context, first_x);
+        let discard = library.borrow().sheets[0].close_controls[1];
+        click(context, discard);
+        assert!(
+            matches!(library.borrow().pending[..], [Action::Close(10)]),
+            "Discard targets its sheet"
+        );
+        library.borrow_mut().pending.clear();
+        library.borrow_mut().sheets.remove(0);
+        render(context);
+        let second_x = library.borrow().sheets[0].close_controls[0];
+        click(context, second_x);
+        assert!(
+            matches!(library.borrow().pending[..], [Action::Close(11)]),
+            "clean x closes immediately"
+        );
     }
     #[test]
     fn invalid_grid_edit_preserves_metadata_and_selection() {
@@ -998,6 +1090,7 @@ mod tests {
             single >= baseline + 4 && double >= single + 4,
             "baseline={baseline}, one={single}, two={double}"
         );
+        check_window_close_interactions(&mut context, &consumer);
         log::LogView::check_interactions(&mut context, &consumer);
         context
             .prepare_renderer_texture_reset(&consumer)

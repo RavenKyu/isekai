@@ -156,7 +156,7 @@ Guess의 진행·점수가 시스템 현지 시각 `HH:MM:SS`와 함께 쌓인�
 Load 실패와 assets 스캔 오류는 Library의 상태 문구에 표시한다.
 
 메모리 이미지는 `Save image as`로 PNG 경로를 정하기 전에는 Save·Reload가 비활성이다.
-PNG 저장 후 `Save`로 메타를 따로 쓴다. GL 최대 텍스처 크기를 넘으면 치수와
+PNG 저장 후 `Save`로 메타를 따로 쓴다. 다른 편집 창이 열고 있는 PNG 경로에는 저장할 수 없다. GL 최대 텍스처 크기를 넘으면 치수와
 `GL_MAX_TEXTURE_SIZE` 오류를 한 줄로 표시하고 기존 시트를 유지한다.
 라벨은 ASCII 영어이고 한글 폰트·undo·배치 설정 저장은 제공하지 않는다.
 
