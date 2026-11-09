@@ -486,9 +486,6 @@ impl Sprite {
             Shape::Set { parts, .. } => parts.clone(),
         }
     }
-    pub fn bounds_origin(&self) -> (i32, i32) {
-        (0, 0)
-    }
     pub fn bounds(&self, grid: &Grid) -> (u32, u32) {
         let [w, h] = match &self.shape {
             Shape::Rect { cols, rows, .. } => [*cols, *rows],
@@ -559,8 +556,13 @@ impl SpriteSheet {
             self.sprite_shape_errors(sprite, complete, &mut errors);
         }
         let mut ids = BTreeSet::new();
-        if self.next_id == 0 {
-            errors.push("next_id must be at least 1".into());
+        // The upper bound leaves allocate_id room, so a hand-edited next_id cannot overflow it.
+        if self.next_id == 0 || self.next_id > i64::MAX as u64 {
+            errors.push(format!(
+                "next_id must be between 1 and {}, got {}",
+                i64::MAX,
+                self.next_id
+            ));
         }
         for id in self
             .sprites
@@ -591,11 +593,7 @@ impl SpriteSheet {
             }
             self.animation_frame_errors(animation, &mut errors);
         }
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(errors)
-        }
+        into_result(errors)
     }
     fn sprite_shape_errors(&self, sprite: &Sprite, complete: bool, errors: &mut Vec<String>) {
         if sprite.pivot.iter().any(|p| !p.is_finite()) {
@@ -711,10 +709,21 @@ impl SpriteSheet {
         }
         self.sprite_shape_errors(sprite, false, &mut errors);
         self.sprite_bounds_errors(sprite, width, height, &mut errors);
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(errors)
+        into_result(errors)
+    }
+    /// Checks a tile name against the other tiles; `None` clears the name and is always valid.
+    pub fn validate_tile_name(&self, cell: (u32, u32), name: Option<&str>) -> Result<(), String> {
+        match name {
+            Some(name)
+                if name.trim().is_empty()
+                    || self
+                        .tiles
+                        .iter()
+                        .any(|t| (t.col, t.row) != cell && t.name.as_deref() == Some(name)) =>
+            {
+                Err(format!("empty or duplicate tile name: {name:?}"))
+            }
+            _ => Ok(()),
         }
     }
     pub fn validate_tile_edit(
@@ -724,20 +733,11 @@ impl SpriteSheet {
         height: u32,
     ) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
-        if let Some(name) = &tile.name
-            && (name.trim().is_empty()
-                || self.tiles.iter().any(|t| {
-                    (t.col, t.row) != (tile.col, tile.row) && t.name.as_ref() == Some(name)
-                }))
-        {
-            errors.push(format!("empty or duplicate tile name: {name:?}"));
+        if let Err(error) = self.validate_tile_name((tile.col, tile.row), tile.name.as_deref()) {
+            errors.push(error);
         }
         self.tile_bounds_errors(tile, width, height, &mut errors);
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(errors)
-        }
+        into_result(errors)
     }
     pub fn validate_animation_edit(&self, animation: &Animation) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
@@ -753,11 +753,7 @@ impl SpriteSheet {
             ));
         }
         self.animation_frame_errors(animation, &mut errors);
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(errors)
-        }
+        into_result(errors)
     }
     fn animation_frame_errors(&self, animation: &Animation, errors: &mut Vec<String>) {
         for frame in &animation.frames {
@@ -794,11 +790,14 @@ impl SpriteSheet {
         for sprite in &self.sprites {
             self.sprite_bounds_errors(sprite, width, height, &mut errors);
         }
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(errors)
-        }
+        into_result(errors)
+    }
+}
+fn into_result(errors: Vec<String>) -> Result<(), Vec<String>> {
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
     }
 }
 
@@ -838,7 +837,7 @@ mod tests {
         assert!(store::parse(&v.to_string()).is_err());
         let mut v = fixture();
         v["sprites"][1]["name"] = "a".into();
-        // Without clips only the duplicate name, not cycle's frame "b", can reject this.
+        // Without animations only the duplicate name can reject this.
         v["animations"] = serde_json::json!([]);
         assert!(store::parse(&v.to_string()).is_err());
         let mut v = fixture();
@@ -948,7 +947,6 @@ mod tests {
             },
         };
         assert_eq!(set.bounds(&sheet.grid), (48, 32));
-        assert_eq!(set.bounds_origin(), (0, 0));
         let mut sheet = SpriteSheet::new_for("x.png", Grid::DEFAULT);
         for (col, row) in [(16, 0), (0, 9)] {
             sheet.tiles = vec![TileMeta {
@@ -1171,6 +1169,10 @@ mod v3_contract_tests {
         let mut x = v3();
         x.as_object_mut().unwrap().remove("next_id");
         cases.push(x);
+        // Accepting this would let the next allocate_id overflow and panic.
+        let mut x = v3();
+        x["next_id"] = u64::MAX.into();
+        cases.push(x);
         let mut x = v3();
         x["animations"][0]["frames"][0]
             .as_object_mut()
@@ -1187,9 +1189,13 @@ mod v3_contract_tests {
             x["sprites"][0]["modified"] = value;
             cases.push(x);
         }
+        // An extra sprite no frame points at, so only the id rules can reject it.
         for id in [0, 2, 5, 6, 999] {
             let mut x = v3();
-            x["sprites"][0]["id"] = id.into();
+            let mut extra = x["sprites"][0].clone();
+            extra["id"] = id.into();
+            extra["name"] = "extra".into();
+            x["sprites"].as_array_mut().unwrap().push(extra);
             cases.push(x);
         }
         for id in [0, 5, 999] {

@@ -65,9 +65,7 @@ impl SheetEditor {
         let create = ui.button("+ New animation");
         #[cfg(test)]
         {
-            let min = ui.item_rect_min();
-            let size = ui.item_rect_size();
-            self.animation_new_input = [min[0] + size[0] * 0.5, min[1] + size[1] * 0.5];
+            self.animation_new_input = super::tests::item_center(ui);
         }
         if create {
             let name = edit::next_name(
@@ -83,12 +81,17 @@ impl SheetEditor {
                 frames: vec![],
                 modified: None,
             };
-            self.selected_animation = Some(sheet.meta.add_animation(animation, now));
-            sheet.dirty = true;
-            log::append(
-                &mut self.log,
-                "New animation needs at least one frame before Save".into(),
-            );
+            match sheet.meta.add_animation(animation, now) {
+                Ok(id) => {
+                    self.selected_animation = Some(id);
+                    sheet.dirty = true;
+                    log::append(
+                        &mut self.log,
+                        "New animation needs at least one frame before Save".into(),
+                    );
+                }
+                Err(error) => log::append(&mut self.log, error),
+            }
         }
         ui.child_window("Animation list")
             .size([220.0, 0.0])
@@ -236,10 +239,7 @@ impl SheetEditor {
                                 #[cfg(test)]
                                 {
                                     if i == 0 {
-                                        let min = ui.item_rect_min();
-                                        let size = ui.item_rect_size();
-                                        self.frame_remove_input =
-                                            [min[0] + size[0] * 0.5, min[1] + size[1] * 0.5];
+                                        self.frame_remove_input = super::tests::item_center(ui);
                                     }
                                 }
                                 if remove {
@@ -258,9 +258,7 @@ impl SheetEditor {
                         let add_frame = ui.button("+ frame");
                         #[cfg(test)]
                         {
-                            let min = ui.item_rect_min();
-                            let size = ui.item_rect_size();
-                            self.frame_add_input = [min[0] + size[0] * 0.5, min[1] + size[1] * 0.5];
+                            self.frame_add_input = super::tests::item_center(ui);
                         }
                         if add_frame
                             && let Some(frame) =

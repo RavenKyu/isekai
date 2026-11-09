@@ -372,7 +372,12 @@ impl AssetLibrary {
             Ok(root) => match list_assets(&root.join("assets")) {
                 Ok(files) => {
                     self.assets = files;
-                    self.status = old_output_folder_hint(&root).unwrap_or_default();
+                    // The first scan runs after a dropped file's Load, so keep that result.
+                    match old_output_folder_hint(&root) {
+                        Some(hint) => self.status = hint,
+                        None if self.status == OLD_OUTPUT_FOLDER_HINT => self.status.clear(),
+                        None => {}
+                    }
                 }
                 Err(error) => {
                     self.assets.clear();
@@ -875,7 +880,8 @@ impl OpenSheet {
         gl: &Rc<glow::Context>,
         renderer: &mut GlowRenderer,
     ) -> Result<Self, String> {
-        meta.validate_bounds(image.width, image.height)
+        // Like open_sheet: Reload keeps in-progress edits, which Save alone must complete.
+        meta.validate_edit_bounds(image.width, image.height)
             .map_err(|e| e.join("; "))?;
         let texture = SheetTexture::upload(gl, &image)?;
         let external = renderer
@@ -1680,7 +1686,7 @@ mod tests {
                 props: Default::default(),
                 modified: None,
             };
-            let id = a.sheet.meta.add_sprite(sprite, 100);
+            let id = a.sheet.meta.add_sprite(sprite, 100).unwrap();
             a.selected_sprite = Some(id);
         }
         b.borrow_mut().zoom = 1;
@@ -1802,19 +1808,28 @@ mod tests {
         use dear_imgui_rs::Condition;
         let mut editor = SheetEditor::new(22, fake_sheet());
         editor.selected_sprite = Some(1);
-        editor.preview.target = preview::PreviewTarget::Sprite(1);
+        editor.active_tab = EditorTab::Sprites;
         editor.now = || 12345;
         let animation_before = editor.sheet.meta.animations[0].clone();
         let editor = std::cell::RefCell::new(editor);
+        // The Preview panel draws too, so its target comes from the editor, not the test.
         let render = |context: &mut Context| {
             vertices(context, consumer, |ui| {
                 ui.window("Sprite input test")
                     .position([40.0, 40.0], Condition::Always)
                     .size([900.0, 400.0], Condition::Always)
-                    .build(|| editor.borrow_mut().sprites_tab(ui));
+                    .build(|| {
+                        let mut editor = editor.borrow_mut();
+                        editor.sprites_tab(ui);
+                        editor.preview_panel(ui, 0);
+                    });
             });
         };
         render(context);
+        assert_eq!(
+            editor.borrow().preview.target,
+            preview::PreviewTarget::Sprite(1)
+        );
         let at = editor.borrow().sprite_name_input;
         type_into(context, render, at, "mnopqrstuv");
         let editor = editor.borrow();
@@ -1914,6 +1929,29 @@ mod tests {
         assert!(sheet.meta.validate().is_err());
         assert!(sheet.set_grid(sheet.meta.grid).is_ok());
         assert!(sheet.meta.validate().is_err());
+    }
+    #[test]
+    fn incomplete_edits_do_not_block_reload() {
+        // Reload passes the in-memory metadata back through open_sheet.
+        let (image, mut meta) = crate::sprite::example();
+        meta.animations[0].frames.clear();
+        let blank = crate::sprite::Sprite {
+            id: 0,
+            name: "blank".into(),
+            shape: crate::sprite::format::Shape::Set {
+                canvas: [2, 2],
+                parts: vec![],
+            },
+            pivot: [16.0, 32.0],
+            props: Default::default(),
+            modified: None,
+        };
+        meta.add_sprite(blank, 1).unwrap();
+        assert!(meta.validate().is_err());
+        let bytes = image.to_png().unwrap();
+        let (_, reloaded, _) =
+            open_sheet(Path::new("example.png"), &bytes, None, Some(meta.clone())).unwrap();
+        assert_eq!(reloaded, meta);
     }
     #[test]
     fn invalid_grid_edit_preserves_metadata_and_selection() {

@@ -49,12 +49,18 @@ pub fn set_from_cells(name: String, cells: &BTreeSet<(u32, u32)>, grid: &Grid) -
     })
 }
 impl SpriteSheet {
-    pub fn add_sprite(&mut self, mut sprite: Sprite, now: u64) -> u64 {
-        sprite.id = self.allocate_id();
+    fn allocate_editor_id(&mut self) -> Result<u64, String> {
+        if self.next_id >= i64::MAX as u64 {
+            return Err("No sprite or animation IDs remain in this sheet".into());
+        }
+        Ok(self.allocate_id())
+    }
+    pub fn add_sprite(&mut self, mut sprite: Sprite, now: u64) -> Result<u64, String> {
+        sprite.id = self.allocate_editor_id()?;
         sprite.modified = Some(now);
         let id = sprite.id;
         self.sprites.push(sprite);
-        id
+        Ok(id)
     }
     pub fn put_sprite(
         &mut self,
@@ -81,12 +87,12 @@ impl SpriteSheet {
         self.sprites[index] = sprite;
         Ok(true)
     }
-    pub fn add_animation(&mut self, mut animation: Animation, now: u64) -> u64 {
-        animation.id = self.allocate_id();
+    pub fn add_animation(&mut self, mut animation: Animation, now: u64) -> Result<u64, String> {
+        animation.id = self.allocate_editor_id()?;
         animation.modified = Some(now);
         let id = animation.id;
         self.animations.push(animation);
-        id
+        Ok(id)
     }
     pub fn put_animation(
         &mut self,
@@ -128,13 +134,12 @@ impl SpriteSheet {
         sprite.name = name.into();
         self.put_sprite(id, sprite, now, size)
     }
-    pub fn remove_sprite(&mut self, name: &str) -> Result<(), String> {
-        let id = self
+    pub fn remove_sprite(&mut self, id: u64) -> Result<(), String> {
+        let index = self
             .sprites
             .iter()
-            .find(|s| s.name == name)
-            .ok_or("sprite no longer exists")?
-            .id;
+            .position(|s| s.id == id)
+            .ok_or("sprite no longer exists")?;
         let references: Vec<_> = self
             .animations
             .iter()
@@ -143,15 +148,11 @@ impl SpriteSheet {
             .collect();
         if !references.is_empty() {
             return Err(format!(
-                "sprite {name:?} is used by animations: {}",
+                "sprite {:?} is used by animations: {}",
+                self.sprites[index].name,
                 references.join(", ")
             ));
         }
-        let index = self
-            .sprites
-            .iter()
-            .position(|s| s.name == name)
-            .ok_or("sprite no longer exists")?;
         self.sprites.remove(index);
         Ok(())
     }
@@ -160,11 +161,33 @@ impl SpriteSheet {
 mod tests {
     use super::*;
     #[test]
+    fn exhausted_id_space_rejects_creation_without_changing_the_sheet() {
+        let (_, mut sheet) = crate::sprite::example();
+        sheet.next_id = i64::MAX as u64 - 1;
+        let sprite = sheet.sprites[0].clone();
+        assert_eq!(
+            sheet.add_sprite(sprite.clone(), 1).unwrap(),
+            i64::MAX as u64 - 1
+        );
+        assert!(
+            sheet.validate().is_err(),
+            "duplicate name is unrelated to ID exhaustion"
+        );
+        sheet.sprites.last_mut().unwrap().name = "last".into();
+        sheet.validate().unwrap();
+        let before = sheet.clone();
+        assert!(sheet.add_sprite(sprite, 2).is_err());
+        assert!(sheet.add_animation(sheet.animations[0].clone(), 2).is_err());
+        assert_eq!(sheet, before);
+        let json = crate::sprite::store::to_json(&sheet);
+        assert!(crate::sprite::store::parse(&json).is_ok());
+    }
+    #[test]
     fn edits_track_real_changes_and_validate_only_the_item() {
         let (_, mut sheet) = crate::sprite::example();
         let sprite =
             set_from_cells("new".into(), &[(0, 0)].into_iter().collect(), &sheet.grid).unwrap();
-        let id = sheet.add_sprite(sprite, 10);
+        let id = sheet.add_sprite(sprite, 10).unwrap();
         assert_eq!(id, 6);
         assert_eq!(sheet.next_id, 7);
         assert_eq!(sheet.sprites.last().unwrap().modified, Some(10));
@@ -177,7 +200,7 @@ mod tests {
             frames: vec![],
             modified: None,
         };
-        let aid = sheet.add_animation(animation, 11);
+        let aid = sheet.add_animation(animation, 11).unwrap();
         assert_eq!(aid, 7);
         assert_eq!(sheet.animations.last().unwrap().modified, Some(11));
         let old_anim = sheet.animations[0].clone();
@@ -221,10 +244,11 @@ mod tests {
         animation.frames[0].ms = 100;
         animation.frames[0].sprite_id = 999;
         assert!(sheet.put_animation(aid, animation, 32).is_err());
-        assert_eq!(
-            crate::sprite::store::to_json(&sheet),
-            crate::sprite::store::to_json(&sheet)
-        );
+        // Saving, reading and saving again keeps ids, next_id, modified and the bytes.
+        let saved = crate::sprite::store::to_json(&sheet);
+        let read = crate::sprite::store::parse(&saved).unwrap();
+        assert_eq!(read, sheet);
+        assert_eq!(crate::sprite::store::to_json(&read), saved);
     }
     #[test]
     fn selections_names_and_references() {
@@ -257,10 +281,12 @@ mod tests {
         assert_eq!(next_name("sprite", ["sprite-1", "sprite-3"]), "sprite-2");
         let (_, mut sheet) = crate::sprite::example();
         assert!(sheet.rename_sprite(1, "b", 1, (64, 16)).is_err());
-        assert!(sheet.remove_sprite("a").is_err());
+        assert!(sheet.remove_sprite(1).is_err());
         sheet.rename_sprite(1, "renamed", 1, (64, 16)).unwrap();
         assert_eq!(sheet.animations[0].frames[0].sprite_id, 1);
-        assert!(sheet.remove_sprite("renamed").is_err());
+        let error = sheet.remove_sprite(1).unwrap_err();
+        assert!(error.contains("\"renamed\""), "{error}");
+        assert!(sheet.remove_sprite(999).is_err());
         sheet.rename_sprite(1, "a", 1, (64, 16)).unwrap();
         sheet.sprites[0].modified = None;
         assert_eq!(
@@ -268,7 +294,7 @@ mod tests {
             crate::sprite::example::EXAMPLE_JSON
         );
         sheet.animations.clear();
-        sheet.remove_sprite("a").unwrap();
+        sheet.remove_sprite(1).unwrap();
         assert_eq!(sheet.sprites.len(), 3);
     }
     #[test]

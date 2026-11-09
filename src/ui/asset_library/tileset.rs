@@ -19,15 +19,7 @@ impl TileDraft {
             return Ok(());
         };
         self.props.validate()?;
-        if !self.name.is_empty()
-            && (self.name.trim().is_empty()
-                || meta.tiles.iter().any(|t| {
-                    (t.col, t.row) != cell && t.name.as_deref() == Some(self.name.as_str())
-                }))
-        {
-            return Err(format!("empty or duplicate tile name: {:?}", self.name));
-        }
-        Ok(())
+        meta.validate_tile_name(cell, (!self.name.is_empty()).then_some(self.name.as_str()))
     }
 }
 /// The format keeps only tiles with metadata: a cleared tile leaves the list.

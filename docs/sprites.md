@@ -121,13 +121,13 @@ PNG 시트의 타일 메타데이터, sprite와 animation을 편집한다. 편�
 | `version` | v1·v2·v3를 읽고 항상 v3로 저장한다. 다른 버전은 오류다. |
 | `image` | 사이드카 디렉터리 기준 이미지 상대 경로. |
 | `grid` | 정사각 타일 한 변 `tile`, 왼쪽·위 여백 `offset: [x, y]`, 타일 사이 `spacing`(px). |
-| `next_id` | v3에서 다음에 부여할 양의 정수. 삭제해도 내려가지 않는다. |
+| `next_id` | v3에서 다음에 부여할 양의 정수(1 이상 9223372036854775807 이하). 삭제해도 내려가지 않는다. |
 | `tiles` | 메타가 있는 셀의 `(col,row)`, 선택적 `name`, `tags`, 문자열 맵 `props`. v3에는 타일 `animation`이 없다. |
 | `sprites` | `id`, 유일한 `name`, `rect` 또는 `set`, 픽셀 `pivot`, 필수 문자열 맵 `props`, 선택적 `modified`. |
 | `animations` | `id`, 유일한 `name`, `mode`, `tags`, `props`, `{sprite_id, ms}` 프레임과 선택적 `modified`. |
 | `part.flip_x`, `part.rotation` | 가로 반전 후 화면 기준 시계 방향 회전(0·90·180·270도). 기본 false와 0은 생략한다. |
 
-sprite와 animation은 시트 내에서 하나의 ID 공간을 공유한다. ID는 1 이상이며 `next_id`보다 작고 서로 중복되지 않는다. 이름을 바꿔도 ID와 프레임의 `sprite_id`는 그대로다. 한 번 삭제한 ID는 재사용하지 않는다. 앞으로 사이드카 밖 prefab·맵이 이 ID를 참조하도록 하기 위한 값이며 그 파일 형식은 아직 없다. `--play`는 animation 이름으로 고른다.
+sprite와 animation은 시트 내에서 하나의 ID 공간을 공유한다. ID는 1 이상이며 `next_id`보다 작고 서로 중복되지 않는다. 이름을 바꿔도 ID와 프레임의 `sprite_id`는 그대로다. 한 번 삭제한 ID는 재사용하지 않는다. `next_id`가 상한에 도달하면 새 항목 생성은 거부된다. 앞으로 사이드카 밖 prefab·맵이 이 ID를 참조하도록 하기 위한 값이며 그 파일 형식은 아직 없다. `--play`는 animation 이름으로 고른다.
 
 `rect` 틀은 `cols x rows`이고 `canvas`가 없다. `set`은 `canvas: [w, h]`를 칸 단위로 저장한다. 틀은 오프셋 `(0,0)`에서 시작하고 모든 part는 틀 안에 있어야 한다. 음수 오프셋은 v3에서 허용하지 않는다. pivot은 틀 왼쪽 위 기준이며 빈 칸은 투명하다. set part는 가로 반전 후 회전한다. spacing은 조합된 그림의 틈이 되지 않는다. 편집기는 W·H를 각 1~8로 만들고 바꾸며, 새 sprite의 pivot은 바닥 가운데 `(w*tile/2, h*tile)`다. 기존 pivot은 그대로 지킨다.
 

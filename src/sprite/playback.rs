@@ -112,13 +112,11 @@ impl Playback {
             .ok_or_else(|| format!("no sprite with id {id}"))?;
         let (_, sprite_h) = sprite.bounds(&self.sheet.grid);
         let scale = (height / 4 / sprite_h.max(1)).max(1) as f32;
-        let (origin_x, origin_y) = sprite.bounds_origin();
         let tile = self.sheet.grid.tile as f32 * scale;
+        // v3 frames start at (0,0), so the pivot is measured from the part offsets' origin.
         for part in sprite.parts(&self.sheet.grid) {
-            let x =
-                width as f32 / 2.0 + (part.dx as f32 - origin_x as f32 - sprite.pivot[0]) * scale;
-            let y =
-                height as f32 / 2.0 + (part.dy as f32 - origin_y as f32 - sprite.pivot[1]) * scale;
+            let x = width as f32 / 2.0 + (part.dx as f32 - sprite.pivot[0]) * scale;
+            let y = height as f32 / 2.0 + (part.dy as f32 - sprite.pivot[1]) * scale;
             let dest = [
                 2.0 * x / width as f32 - 1.0,
                 1.0 - 2.0 * y / height as f32,

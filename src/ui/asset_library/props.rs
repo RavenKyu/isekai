@@ -79,9 +79,7 @@ impl PropsDraft {
         let add = ui.button("+ property");
         #[cfg(test)]
         {
-            let min = ui.item_rect_min();
-            let size = ui.item_rect_size();
-            self.add_button = Some([min[0] + size[0] * 0.5, min[1] + size[1] * 0.5]);
+            self.add_button = Some(super::tests::item_center(ui));
         }
         if add {
             self.rows.push((String::new(), String::new()));

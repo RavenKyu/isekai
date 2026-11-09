@@ -12,6 +12,6 @@
 /.claude/settings.local.json
 
 # 로컬 전용 스프라이트 원본 (라이선스 미확인, 커밋하지 않는다)
+/assets/sprites/
 # Previous output folder
 /assets/splites/
-/assets/sprites/

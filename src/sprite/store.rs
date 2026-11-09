@@ -71,21 +71,20 @@ pub fn image_path_is_safe(rel: &str) -> bool {
             .components()
             .all(|c| matches!(c, Component::Normal(_)))
 }
-pub fn parse(text: &str) -> Result<SpriteSheet, StoreError> {
-    let (sheet, _) = super::format::decode(text)?;
+/// Decodes and validates a sidecar, keeping the cells whose legacy tile animation was dropped.
+fn decode_checked(text: &str) -> Result<(SpriteSheet, Vec<(u32, u32)>), StoreError> {
+    let (sheet, dropped) = super::format::decode(text)?;
     if !image_path_is_safe(&sheet.image) {
         return Err(StoreError::UnsafeImagePath(sheet.image));
     }
     sheet.validate().map_err(StoreError::Invalid)?;
-    Ok(sheet)
+    Ok((sheet, dropped))
+}
+pub fn parse(text: &str) -> Result<SpriteSheet, StoreError> {
+    decode_checked(text).map(|(sheet, _)| sheet)
 }
 pub fn load(sidecar: &Path) -> Result<Loaded, StoreError> {
-    let text = fs::read_to_string(sidecar)?;
-    let (sheet, dropped_tile_animations) = super::format::decode(&text)?;
-    if !image_path_is_safe(&sheet.image) {
-        return Err(StoreError::UnsafeImagePath(sheet.image));
-    }
-    sheet.validate().map_err(StoreError::Invalid)?;
+    let (sheet, dropped_tile_animations) = decode_checked(&fs::read_to_string(sidecar)?)?;
     let parent = sidecar
         .parent()
         .filter(|p| !p.as_os_str().is_empty())

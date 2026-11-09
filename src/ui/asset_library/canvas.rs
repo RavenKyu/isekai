@@ -139,7 +139,8 @@ pub fn draw(
     ui.same_line();
     ui.set_next_item_width(70.0);
     resize |= ui.combo_simple_string("H", &mut hi, &options);
-    if resize {
+    // Re-picking the current size is not an edit; committing it would turn a rect into a set.
+    if resize && (wi as u32 + 1, hi as u32 + 1) != (canvas.w, canvas.h) {
         let dropped = canvas.resize(wi as u32 + 1, hi as u32 + 1);
         if dropped > 0 {
             super::log::append(log, format!("{dropped} cells dropped by resize"));
@@ -244,9 +245,7 @@ pub fn draw(
                             ui.menu_item_enabled_selected_no_shortcut("Flip X", cell.flip_x, true);
                         #[cfg(test)]
                         {
-                            let min = ui.item_rect_min();
-                            let size = ui.item_rect_size();
-                            canvas.flip_input = [min[0] + size[0] * 0.5, min[1] + size[1] * 0.5];
+                            canvas.flip_input = super::tests::item_center(ui);
                         }
                         if flipped {
                             cell.flip_x = !cell.flip_x;
@@ -262,13 +261,10 @@ pub fn draw(
                             #[cfg(test)]
                             {
                                 if angle == 90 {
-                                    let min = ui.item_rect_min();
-                                    let size = ui.item_rect_size();
-                                    canvas.rotate_input =
-                                        [min[0] + size[0] * 0.5, min[1] + size[1] * 0.5];
+                                    canvas.rotate_input = super::tests::item_center(ui);
                                 }
                             }
-                            if rotated {
+                            if rotated && cell.rotation != angle {
                                 cell.rotation = angle;
                                 canvas.cells[index] = Some(cell);
                                 changed = true;

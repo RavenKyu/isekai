@@ -41,9 +41,7 @@ impl SheetEditor {
             let create = ui.button("New from selection");
             #[cfg(test)]
             {
-                let min = ui.item_rect_min();
-                let size = ui.item_rect_size();
-                self.sprite_new_input = [min[0] + size[0] * 0.5, min[1] + size[1] * 0.5];
+                self.sprite_new_input = super::tests::item_center(ui);
             }
             if create {
                 let name =
@@ -51,8 +49,13 @@ impl SheetEditor {
                 if let Some(sprite) =
                     edit::set_from_cells(name, &sheet.selection.cells, &sheet.meta.grid)
                 {
-                    self.selected_sprite = Some(sheet.meta.add_sprite(sprite, now));
-                    sheet.dirty = true;
+                    match sheet.meta.add_sprite(sprite, now) {
+                        Ok(id) => {
+                            self.selected_sprite = Some(id);
+                            sheet.dirty = true;
+                        }
+                        Err(error) => log::append(&mut self.log, error),
+                    }
                 } else {
                     log::append(
                         &mut self.log,
@@ -65,9 +68,7 @@ impl SheetEditor {
         let new_blank = ui.button("+ New sprite");
         #[cfg(test)]
         {
-            let min = ui.item_rect_min();
-            let size = ui.item_rect_size();
-            self.sprite_blank_input = [min[0] + size[0] * 0.5, min[1] + size[1] * 0.5];
+            self.sprite_blank_input = super::tests::item_center(ui);
         }
         if new_blank {
             let name =
@@ -83,12 +84,17 @@ impl SheetEditor {
                 props: Default::default(),
                 modified: None,
             };
-            self.selected_sprite = Some(sheet.meta.add_sprite(sprite, now));
-            sheet.dirty = true;
-            log::append(
-                &mut self.log,
-                "New sprite needs at least one tile before Save".into(),
-            );
+            match sheet.meta.add_sprite(sprite, now) {
+                Ok(id) => {
+                    self.selected_sprite = Some(id);
+                    sheet.dirty = true;
+                    log::append(
+                        &mut self.log,
+                        "New sprite needs at least one tile before Save".into(),
+                    );
+                }
+                Err(error) => log::append(&mut self.log, error),
+            }
         }
         ui.child_window("Sprite list")
             .size([220.0, 0.0])
@@ -197,10 +203,18 @@ impl SheetEditor {
                         .is_some_and(|(id, shape, grid, _)| {
                             *id == sprite.id && *shape == sprite.shape && *grid == sheet.meta.grid
                         });
+                // A sprite the canvas cannot edit never caches, so keep why for the message.
+                let mut not_editable = None;
                 if !cache_matches {
-                    self.canvas_cache = Canvas::from_sprite(&sprite, &sheet.meta.grid)
-                        .ok()
-                        .map(|canvas| (sprite.id, sprite.shape.clone(), sheet.meta.grid, canvas));
+                    self.canvas_cache = match Canvas::from_sprite(&sprite, &sheet.meta.grid) {
+                        Ok(canvas) => {
+                            Some((sprite.id, sprite.shape.clone(), sheet.meta.grid, canvas))
+                        }
+                        Err(reason) => {
+                            not_editable = Some(reason);
+                            None
+                        }
+                    };
                 }
                 if let Some((_, _, _, canvas)) = &mut self.canvas_cache {
                     let view = PartView {
@@ -222,8 +236,8 @@ impl SheetEditor {
                         changed = true;
                     }
                 } else {
-                    let message = match Canvas::from_sprite(&sprite, &sheet.meta.grid) {
-                        Err(NotEditable::Large) => {
+                    let message = match not_editable {
+                        Some(NotEditable::Large) => {
                             "This sprite is larger than 8 x 8 tiles; edit it under Parts."
                         }
                         _ => "This sprite has parts off the tile grid; edit them under Parts.",
@@ -327,8 +341,8 @@ impl SheetEditor {
                     }
                 }
                 if ui.button("Delete sprite") {
-                    let name = sheet.meta.sprites[index].name.clone();
-                    match sheet.meta.remove_sprite(&name) {
+                    let id = sheet.meta.sprites[index].id;
+                    match sheet.meta.remove_sprite(id) {
                         Ok(()) => {
                             self.selected_sprite = None;
                             self.sprite_props_target = None;

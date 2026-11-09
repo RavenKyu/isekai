@@ -109,12 +109,14 @@ pub fn list_assets(root: &Path) -> Result<Vec<PathBuf>, String> {
     files.sort();
     Ok(files)
 }
+pub const OLD_OUTPUT_FOLDER_HINT: &str =
+    "Old output folder assets/splites/ found; move it to assets/sprites/";
 pub fn old_output_folder_hint(checkout: &Path) -> Option<String> {
     checkout
         .join("assets/splites")
         .symlink_metadata()
         .ok()
-        .map(|_| "Old output folder assets/splites/ found; move it to assets/sprites/".into())
+        .map(|_| OLD_OUTPUT_FOLDER_HINT.into())
 }
 
 pub fn is_png(path: &Path) -> bool {
@@ -162,7 +164,9 @@ pub fn open_sheet(
             meta.image
         ));
     }
-    meta.validate_bounds(image.width, image.height)
+    // A sidecar from disk already passed store::load's complete validation. Reload passes the
+    // in-memory metadata, which may still hold a blank sprite or an empty animation.
+    meta.validate_edit_bounds(image.width, image.height)
         .map_err(|errors| errors.join("; "))?;
     Ok((image, meta, dirty))
 }
