@@ -847,11 +847,12 @@ mod tests {
         use std::{fs, os::unix::fs::symlink};
         // A private cwd exercises the empty parent of "example.png" without
         // changing the process-wide directory used by concurrently running tests.
-        if std::env::var_os("RN_LOAD_PATH_CHILD").is_none() {
+        const CHILD: &str = "RN_LOAD_PATH_CHILD";
+        if std::env::var_os(CHILD).is_none() {
             let fixture = crate::test_support::TempDir::new("extract");
             crate::test_support::in_child_process(
                 "ui::sprite_library::tests::load_path_rules_in_their_own_process",
-                Some("RN_LOAD_PATH_CHILD"),
+                Some(CHILD),
                 false,
                 Some(&fixture.0),
             );
@@ -1001,14 +1002,15 @@ mod tests {
         use std::cell::{Cell, RefCell};
         // Both the normal wrapper and bulk --ignored runs enter here. Only
         // the exact-test child owns an ImGui context and scans the fixture.
-        if std::env::var_os("RN_IMPORT_PANEL_CHILD").is_none() {
+        const CHILD: &str = "RN_IMPORT_PANEL_CHILD";
+        if std::env::var_os(CHILD).is_none() {
             let fixture = crate::test_support::TempDir::new("extract");
             std::fs::create_dir(fixture.0.join("assets")).unwrap();
             // Refresh only lists the name; no PNG decoding, GL or local assets.
             std::fs::write(fixture.0.join("assets/from-refresh.png"), []).unwrap();
             crate::test_support::in_child_process(
                 "ui::sprite_library::tests::import_panel_clicks_and_layout",
-                Some("RN_IMPORT_PANEL_CHILD"),
+                Some(CHILD),
                 true,
                 Some(&fixture.0),
             );
@@ -1493,16 +1495,21 @@ mod tests {
     fn library_geometry_in_its_own_process() {
         // Dear ImGui permits one owning thread per process. Keep the original
         // UI test unchanged and run this second context in a separate process.
-        crate::test_support::in_child_process(
-            "ui::sprite_library::tests::hidden_library_grid_and_zoom_geometry",
-            None,
-            true,
-            None,
-        );
+        hidden_library_grid_and_zoom_geometry();
     }
     #[test]
     #[ignore = "run by library_geometry_in_its_own_process"]
     fn hidden_library_grid_and_zoom_geometry() {
+        // Both the default wrapper and bulk --ignored runs enter here. Only
+        // the exact-test child owns an ImGui context.
+        if !crate::test_support::in_child_process(
+            "ui::sprite_library::tests::hidden_library_grid_and_zoom_geometry",
+            Some("RN_LIBRARY_GEOMETRY_CHILD"),
+            true,
+            None,
+        ) {
+            return;
+        }
         // Same serialized CPU ImGui context style as the existing UI tests.
         let (mut context, consumer) = context();
         check_tile_log_input(&mut context, &consumer);

@@ -60,7 +60,7 @@ GL 컨텍스트가 없으면 실패로 처리하며 검사 생략이나 성공�
 
 | 파일 | 역할 |
 | --- | --- |
-| `src/test_support.rs` | 단위 테스트가 공유하는 임시 디렉터리 도우미. |
+| `src/test_support.rs` | `cfg(test)` 전용 공유 도우미: 임시 디렉터리, 숨은 SDL·GL 창 픽스처, 정확한 테스트 경로로 자식 프로세스를 다시 실행하고 종료 성공과 `1 passed`를 확인하는 래퍼. |
 | `src/main.rs` | 네이티브 반복 루프와 Emscripten RAF callback 드라이버. feature에 따라 스모크 기대 모드를 정하고 `App::frame`을 호출한다. |
 | `src/app.rs` | SDL·GL 소유, 이벤트 처리, 화면 지우기, 스모크 키 주입/도착 관측과 framebuffer 측정, 종료. |
 | `src/dev.rs` | dev 전용 renderer·platform·ImGui 소유, 모든 이벤트 전달, 백틱 토글 판정과 프레임 렌더링. |

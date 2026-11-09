@@ -227,6 +227,7 @@ mod tests {
         assert!(dirty);
         assert_eq!(new.image, "example.PNG");
         assert_eq!(new.grid.tile, 16);
+        assert_eq!((new.grid.offset, new.grid.spacing), ([0, 0], 0));
         assert!(
             !open_sheet(Path::new("example.png"), &bytes, None, Some(meta))
                 .unwrap()
