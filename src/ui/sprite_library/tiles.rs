@@ -127,6 +127,12 @@ impl SheetEditor {
         let mut changed = ui
             .input_text("Tile name", &mut self.tile_draft.name)
             .build();
+        #[cfg(test)]
+        {
+            let min = ui.item_rect_min();
+            let size = ui.item_rect_size();
+            self.tile_name_input = [min[0] + 20.0, min[1] + size[1] * 0.5];
+        }
         changed |= ui
             .input_text("Tile tags", &mut self.tile_draft.tags)
             .build();
@@ -217,7 +223,7 @@ impl SheetEditor {
                 Ok(()) => {
                     sheet.meta = candidate;
                     sheet.dirty = true;
-                    log::append(&mut self.log, "Tile metadata updated".into());
+                    log::append_repeat(&mut self.log, "Tile metadata updated");
                 }
                 Err(errors) => log::append(&mut self.log, errors.join("; ")),
             }
