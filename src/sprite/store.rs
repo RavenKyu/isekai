@@ -115,10 +115,19 @@ pub fn save(sidecar: &Path, sheet: &SpriteSheet) -> Result<(), StoreError> {
 }
 
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
-struct Staged(PathBuf);
+struct Staged(Option<PathBuf>);
+impl Staged {
+    fn rename_to(&mut self, path: &Path) -> Result<(), std::io::Error> {
+        fs::rename(self.0.as_ref().unwrap(), path)?;
+        self.0 = None;
+        Ok(())
+    }
+}
 impl Drop for Staged {
     fn drop(&mut self) {
-        let _ = fs::remove_file(&self.0);
+        if let Some(path) = &self.0 {
+            let _ = fs::remove_file(path);
+        }
     }
 }
 fn stage_bytes(path: &Path, bytes: &[u8]) -> Result<Staged, StoreError> {
@@ -143,7 +152,7 @@ fn stage_bytes(path: &Path, bytes: &[u8]) -> Result<Staged, StoreError> {
         ));
         let temp = parent.join(filename);
         match OpenOptions::new().write(true).create_new(true).open(&temp) {
-            Ok(file) => break (Staged(temp), file),
+            Ok(file) => break (Staged(Some(temp)), file),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(e) => return Err(e.into()),
         }
@@ -169,8 +178,8 @@ fn stage_bytes(path: &Path, bytes: &[u8]) -> Result<Staged, StoreError> {
 /// still show its previous state and a temporary file may remain: crash
 /// durability of the published name is not guaranteed on any platform.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
-    let temp = stage_bytes(path, bytes)?;
-    fs::rename(&temp.0, path)?;
+    let mut temp = stage_bytes(path, bytes)?;
+    temp.rename_to(path)?;
     Ok(())
 }
 /// Publish complete, synced bytes without replacing any existing destination,
@@ -187,7 +196,7 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
 /// published name is not guaranteed on any platform.
 pub fn publish_new(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
     let temp = stage_bytes(path, bytes)?;
-    fs::hard_link(&temp.0, path)?;
+    fs::hard_link(temp.0.as_ref().unwrap(), path)?;
     Ok(())
 }
 
@@ -195,6 +204,18 @@ pub fn publish_new(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
 mod tests {
     use super::*;
     use std::io::Read;
+    #[test]
+    fn renamed_stage_does_not_remove_a_reused_name() {
+        let dir = crate::test_support::TempDir::new("rename-reuse");
+        let destination = dir.0.join("destination");
+        let mut staged = stage_bytes(&destination, b"first").unwrap();
+        let old_name = staged.0.as_ref().unwrap().clone();
+        staged.rename_to(&destination).unwrap();
+        fs::write(&old_name, b"second").unwrap();
+        drop(staged);
+        assert_eq!(fs::read(&destination).unwrap(), b"first");
+        assert_eq!(fs::read(&old_name).unwrap(), b"second");
+    }
     #[test]
     fn lexical_paths_are_portable_and_strict() {
         for bad in [
