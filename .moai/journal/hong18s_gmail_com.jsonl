@@ -582,3 +582,7 @@
 {"ts":"2026-11-09T05:20:00Z","id":"isk-aw9h","kind":"note","by":"Raven","by_email":"hong18s@gmail.com","text":"Report-checked: ecd1f2f"}
 {"ts":"2026-11-09T05:20:01Z","id":"isk-pzbl","kind":"note","by":"Raven","by_email":"hong18s@gmail.com","text":"Handoff (2026-11-09): work stops on this machine. Finished and merged into milestone/isk-pzbl: isk-d69f, isk-hk1c, isk-j0ye, isk-aw9h, isk-ut06 (f6m, izb only). Next: isk-ut06 n8v -> 8dp -> zp7 -> 2mn (send from step 2), then isk-gj6w (wp8 now builds on store::publish_new) and isk-6ptr (ub9 has an open question for the person). Draft PR milestone/isk-pzbl -> develop holds the state."}
 {"ts":"2026-11-09T10:43:21Z","id":"isk-ijay","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"타일 애니메이션 런타임 재생"}
+{"ts":"2026-11-09T14:18:17Z","id":"isk-aqpa","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"Sheet Editor UX 개편: Tileset/Sprites/Animations 탭과 상시 Preview"}
+{"ts":"2026-11-09T14:50:45Z","id":"isk-9tfj","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"게임 오브젝트·컴포넌트 기반"}
+{"ts":"2026-11-09T14:50:45Z","id":"isk-fy7v","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"게임 프리팹 파일과 맵 인스턴스"}
+{"ts":"2026-11-09T14:50:51Z","id":"isk-aqpa","kind":"note","by":"Raven","by_email":"hong18s@gmail.com","text":"결정 추가(2026-11-09, 사람 \"(a)로 v3에 id 넣자\"): 형식 v3에서 sprite·animation마다 이름을 바꿔도 변하지 않는 안정 id를 둔다. 바깥 파일(프리팹·맵)은 id로 참조한다. 후속 backlog: isk-9tfj, isk-fy7v. 계획 초안 작업에 전달함."}
