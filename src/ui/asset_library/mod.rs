@@ -6,6 +6,7 @@ mod job;
 mod log;
 mod model;
 mod preview;
+mod props;
 mod regions;
 mod sprites;
 mod tileset;
@@ -1426,6 +1427,73 @@ mod tests {
         assert!(other.log.is_empty(), "other sheets have independent logs");
         assert!(other.sheet.meta.tiles.is_empty() && !other.sheet.dirty);
     }
+    fn check_tile_properties_and_marker(
+        context: &mut Context,
+        consumer: &SynchronousRendererConsumer,
+    ) {
+        use std::cell::RefCell;
+        let editor = RefCell::new(SheetEditor::new(23, fake_sheet()));
+        editor
+            .borrow_mut()
+            .sheet
+            .selection
+            .apply(Some((0, 0)), false, false);
+        let render = |context: &mut Context| {
+            vertices(context, consumer, |ui| {
+                ui.window("Tile props test")
+                    .position([40.0, 40.0], Condition::Always)
+                    .size([700.0, 400.0], Condition::Always)
+                    .build(|| editor.borrow_mut().tileset_tab(ui));
+            });
+        };
+        render(context);
+        let add = editor.borrow().tile_draft.props.add_button.unwrap();
+        click(context, render, add);
+        let key = editor.borrow().tile_draft.props.key_input.unwrap();
+        type_into(context, render, key, "abc");
+        assert_eq!(editor.borrow().tile_draft.props.rows[0].0, "abc");
+        assert_eq!(
+            editor.borrow().sheet.meta.tiles[0]
+                .props
+                .get("abc")
+                .map(String::as_str),
+            Some("")
+        );
+        editor.borrow_mut().tile_name_input = [0.0; 2];
+        editor
+            .borrow_mut()
+            .sheet
+            .selection
+            .apply(Some((1, 0)), false, true);
+        render(context);
+        assert_eq!(editor.borrow().tile_name_input, [0.0; 2]);
+        let marked = RefCell::new(SheetEditor::new(24, fake_sheet()));
+        marked.borrow_mut().show_grid = false;
+        let draw = |context: &mut Context| {
+            vertices(context, consumer, |ui| {
+                ui.window("Marker test")
+                    .position([40.0, 40.0], Condition::Always)
+                    .size([400.0, 300.0], Condition::Always)
+                    .build(|| marked.borrow_mut().sheet_view(ui, &[]));
+            })
+        };
+        draw(context);
+        let without = draw(context);
+        marked
+            .borrow_mut()
+            .sheet
+            .meta
+            .tiles
+            .push(crate::sprite::format::TileMeta {
+                col: 0,
+                row: 0,
+                name: Some("marked".into()),
+                tags: vec![],
+                props: Default::default(),
+            });
+        let with = draw(context);
+        assert!(with >= without + 4, "{without} {with}");
+    }
     fn check_sprite_rename_log_input(
         context: &mut Context,
         consumer: &SynchronousRendererConsumer,
@@ -1507,6 +1575,25 @@ mod tests {
             matches!(library.borrow().pending[..], [Action::Close(11)]),
             "clean x closes immediately"
         );
+    }
+    #[test]
+    fn invalid_tile_properties_prevent_save() {
+        let temp = crate::test_support::TempDir::new("invalid-tile-props");
+        let image = temp.0.join("example.png");
+        let sidecar = store::sidecar_for(&image);
+        std::fs::write(&sidecar, "unchanged").unwrap();
+        let mut sheet = fake_sheet();
+        sheet.source = SheetSource::File(image);
+        sheet.dirty = true;
+        let mut editor = SheetEditor::new(100, sheet);
+        editor.tile_draft.cell = Some((0, 0));
+        editor
+            .tile_draft
+            .props
+            .rows
+            .push((" ".into(), "value".into()));
+        assert!(editor.save().unwrap_err().contains("property row 1"));
+        assert_eq!(std::fs::read_to_string(sidecar).unwrap(), "unchanged");
     }
     #[test]
     fn install_warns_after_open_and_preserves_dirty() {
@@ -1730,6 +1817,7 @@ mod tests {
         // Same serialized CPU ImGui context style as the existing UI tests.
         let (mut context, consumer) = context();
         check_tile_log_input(&mut context, &consumer);
+        check_tile_properties_and_marker(&mut context, &consumer);
         check_sprite_rename_log_input(&mut context, &consumer);
         let library = std::cell::RefCell::new(AssetLibrary::default());
         assert!(!library.borrow().open);

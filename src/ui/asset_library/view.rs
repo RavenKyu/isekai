@@ -108,6 +108,22 @@ impl SheetEditor {
                         }
                     }
                 }
+                for tile in &sheet.meta.tiles {
+                    if tile.col >= first_col
+                        && tile.col < end_col
+                        && tile.row >= first_row
+                        && tile.row < end_row
+                    {
+                        let (x, y) = grid.origin(tile.col, tile.row);
+                        let min = [
+                            origin[0] + x as f32 * zoom + 2.0,
+                            origin[1] + y as f32 * zoom + 2.0,
+                        ];
+                        draw.add_rect(min, [min[0] + 5.0, min[1] + 5.0], [1.0, 0.72, 0.2, 1.0])
+                            .filled(true)
+                            .build();
+                    }
+                }
                 for overlay in overlays {
                     for row in overlay.row..overlay.row.saturating_add(overlay.rows).min(cells.rows)
                     {

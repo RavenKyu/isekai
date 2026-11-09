@@ -1,14 +1,14 @@
 use super::log;
-use super::{SheetEditor, format_props, format_tags, model::Selection, parse_props, parse_tags};
+use super::{SheetEditor, format_tags, model::Selection, parse_tags, props::PropsDraft};
 use crate::sprite::{Mode, format::TileMeta};
 use dear_imgui_rs::Ui;
 
 #[derive(Default)]
 pub struct TileDraft {
-    cell: Option<(u32, u32)>,
+    pub(super) cell: Option<(u32, u32)>,
     name: String,
     tags: String,
-    props: String,
+    pub(super) props: PropsDraft,
 }
 impl TileDraft {
     pub fn target(&self, selection: &Selection) -> Option<(u32, u32)> {
@@ -18,7 +18,7 @@ impl TileDraft {
         let Some(cell) = self.cell else {
             return Ok(());
         };
-        parse_props(&self.props)?;
+        self.props.validate()?;
         if !self.name.is_empty()
             && (self.name.trim().is_empty()
                 || meta.tiles.iter().any(|t| {
@@ -63,12 +63,33 @@ impl SheetEditor {
         let sheet = &mut self.sheet;
         let Some((col, row)) = self.tile_draft.target(&sheet.selection) else {
             self.tile_draft = Default::default();
-            ui.text(format!("{} tiles selected", sheet.selection.cells.len()));
+            if sheet.selection.cells.is_empty() {
+                ui.text("Select a tile on the sheet.");
+            } else {
+                ui.text_wrapped(format!(
+                    "{} tiles selected. Tile metadata is edited one tile at a time.",
+                    sheet.selection.cells.len()
+                ));
+                ui.text_wrapped("Use Sprites > New from selection for several cells.");
+            }
             return;
         };
+        let (uv0, uv1) = sheet
+            .meta
+            .grid
+            .uv(col, row, sheet.image.width, sheet.image.height);
+        ui.image_config(sheet.imgui_id, [48.0, 48.0])
+            .uv0(uv0)
+            .uv1(uv1)
+            .build();
+        ui.same_line();
         ui.text(format!(
-            "Tile ({col}, {row}), empty: {}",
-            sheet.image.tile_is_empty(&sheet.meta.grid, col, row)
+            "Tile ({col}, {row}){}",
+            if sheet.image.tile_is_empty(&sheet.meta.grid, col, row) {
+                " - empty"
+            } else {
+                ""
+            }
         ));
         let index = sheet
             .meta
@@ -89,7 +110,7 @@ impl SheetEditor {
                 cell: Some((col, row)),
                 name: tile.name.clone().unwrap_or_default(),
                 tags: format_tags(&tile.tags),
-                props: format_props(&tile.props),
+                props: PropsDraft::from_map(&tile.props),
             };
         }
         let mut changed = ui
@@ -104,22 +125,14 @@ impl SheetEditor {
         changed |= ui
             .input_text("Tile tags", &mut self.tile_draft.tags)
             .build();
-        changed |= ui
-            .input_text_multiline(
-                "Tile props (key=value)",
-                &mut self.tile_draft.props,
-                [0.0, 65.0],
-            )
-            .build();
+        let props = self.tile_draft.props.draw(ui, "tile-properties");
+        changed |= props.is_some();
         if changed {
             tile.name = (!self.tile_draft.name.is_empty()).then(|| self.tile_draft.name.clone());
             tile.tags = parse_tags(&self.tile_draft.tags);
-            match parse_props(&self.tile_draft.props) {
+            match self.tile_draft.props.validate() {
                 Ok(props) => tile.props = props,
-                Err(error) => {
-                    log::append(&mut self.log, error);
-                    return;
-                }
+                Err(_) => return,
             }
         }
         if changed {
@@ -128,9 +141,16 @@ impl SheetEditor {
                 .validate_tile_edit(&tile, sheet.image.width, sheet.image.height)
             {
                 Ok(()) => {
-                    put_tile(&mut sheet.meta.tiles, tile);
-                    sheet.dirty = true;
-                    log::append_repeat(&mut self.log, "Tile metadata updated");
+                    if index.map(|i| &sheet.meta.tiles[i]) != Some(&tile)
+                        && !(index.is_none()
+                            && tile.name.is_none()
+                            && tile.tags.is_empty()
+                            && tile.props.is_empty())
+                    {
+                        put_tile(&mut sheet.meta.tiles, tile);
+                        sheet.dirty = true;
+                        log::append_repeat(&mut self.log, "Tile metadata updated");
+                    }
                 }
                 Err(errors) => log::append(&mut self.log, errors.join("; ")),
             }
