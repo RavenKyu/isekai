@@ -1,77 +1,143 @@
-# 스프라이트 라이브러리
+# 스프라이트 시트: Asset Library와 Sheet Editor
 
-PNG 시트를 격자로 나누어 타일 메타데이터, 여러 타일로 된 sprite, 이름 붙은 clip을 만든다.
-편집·영역 오려 내기·타일셋 추출은 네이티브 `dev`에서만 제공한다. 런타임 재생은 모든
-빌드에서 가능하며 웹은 코드로 만든 예제의 재생만 제공한다. 명령은 checkout 최상단 기준이다.
-처음 실행 환경은 [개발 시작](README.md)을 따른다.
+PNG 시트의 타일 메타데이터, sprite와 animation을 편집한다. 편집·영역 오려 내기·타일셋 추출은 네이티브 `dev`에서만 제공한다. 런타임 재생은 모든 빌드에서 가능하며 웹은 코드로 만든 예제의 재생만 제공한다. 명령은 checkout 최상단 기준이다. 처음 실행 환경은 [개발 시작](README.md)을 따른다. [화면 시안](mockups/sheet-editor.html)도 볼 수 있다.
+
+## 용어
+
+- **타일**은 시트를 격자로 나눈 한 칸이다. **타일셋**은 바닥·벽·물처럼 칸 단위로 쓰는 타일과 이름·태그·속성의 모음이다. `Tileset`에서 편집한다.
+- **스프라이트**는 캐릭터·아이템·이펙트처럼 따로 다루는 그림 한 장이며 타일 하나 이상으로 이룬다. `Sprites`에서 편집한다.
+- **애니메이션**은 여러 스프라이트를 시간에 따라 바꾸는 프레임 묶음이다. 옛 이름은 clip이고 `Animations`에서 편집한다. 타일 애니메이션은 없다.
+- **Asset Library**는 `assets/` 아래 PNG를 찾아 여는 목록 창이다. **Sheet Editor**는 PNG마다 열리는 편집 창이다. `Import`의 Regions와 Extract tileset은 각각 큰 그림 자르기와 맵 이미지에서 타일셋 추출을 위한 전처리다.
+- PNG 한 장과 사이드카 하나가 타일셋·스프라이트·애니메이션을 함께 담는다.
 
 ## 사이드카 형식
 
-`cave-01-wall.png`의 메타데이터는 같은 디렉터리의 `cave-01-wall.sprites.json`에 저장한다.
-다음은 형식 v1의 전체 예시다. 이미지 파일 자체는 포함하지 않으며, 실제 실행에는 이 격자와
-좌표를 수용하는 PNG가 필요하다. 저장소에서 바로 재생할 수 있는 자체 제작 fixture는
-`tests/fixtures/example.png`와 `tests/fixtures/example.sprites.json`이다.
+`cave-01-wall.png`의 메타데이터는 같은 디렉터리의 `cave-01-wall.sprites.json`에 저장한다. 다음은 저장소 fixture `tests/fixtures/example.sprites.json`의 정규형 그대로다. 실제 재생에는 같은 디렉터리의 `example.png`가 필요하다.
 
 ```json
 {
-  "version": 2,
-  "image": "cave-01-wall.png",
-  "grid": { "tile": 16, "offset": [0, 0], "spacing": 0 },
-  "tiles": [
+  "version": 3,
+  "image": "example.png",
+  "grid": {
+    "tile": 16,
+    "offset": [
+      0,
+      0
+    ],
+    "spacing": 0
+  },
+  "next_id": 6,
+  "tiles": [],
+  "sprites": [
     {
-      "col": 3, "row": 1,
-      "name": "torch-a",
-      "tags": ["light"],
-      "props": { "glow": "1" },
-      "animation": {
-        "mode": "loop",
-        "frames": [ { "col": 3, "row": 1, "ms": 120 }, { "col": 4, "row": 1, "ms": 120 } ]
-      }
+      "id": 1,
+      "name": "a",
+      "kind": "rect",
+      "col": 0,
+      "row": 0,
+      "cols": 1,
+      "rows": 1,
+      "pivot": [
+        8.0,
+        8.0
+      ],
+      "props": {}
+    },
+    {
+      "id": 2,
+      "name": "b",
+      "kind": "rect",
+      "col": 1,
+      "row": 0,
+      "cols": 1,
+      "rows": 1,
+      "pivot": [
+        8.0,
+        8.0
+      ],
+      "props": {}
+    },
+    {
+      "id": 3,
+      "name": "c",
+      "kind": "rect",
+      "col": 2,
+      "row": 0,
+      "cols": 1,
+      "rows": 1,
+      "pivot": [
+        8.0,
+        8.0
+      ],
+      "props": {}
+    },
+    {
+      "id": 4,
+      "name": "d",
+      "kind": "rect",
+      "col": 3,
+      "row": 0,
+      "cols": 1,
+      "rows": 1,
+      "pivot": [
+        8.0,
+        8.0
+      ],
+      "props": {}
     }
   ],
-  "sprites": [
-    { "name": "door", "kind": "rect", "col": 0, "row": 2, "cols": 2, "rows": 3, "pivot": [16.0, 48.0] },
-    { "name": "tree", "kind": "set",
-      "parts": [ { "col": 5, "row": 0, "dx": 0, "dy": 0 }, { "col": 6, "row": 1, "dx": 16, "dy": 16, "flip_x": true, "rotation": 90 } ],
-      "pivot": [8.0, 24.0] }
-  ],
-  "clips": [
-    { "name": "door-open", "mode": "once", "tags": [], "props": {},
-      "frames": [ { "sprite": "door", "ms": 100 } ] }
+  "animations": [
+    {
+      "id": 5,
+      "name": "cycle",
+      "mode": "loop",
+      "tags": [],
+      "props": {},
+      "frames": [
+        {
+          "sprite_id": 1,
+          "ms": 150
+        },
+        {
+          "sprite_id": 2,
+          "ms": 150
+        },
+        {
+          "sprite_id": 3,
+          "ms": 150
+        },
+        {
+          "sprite_id": 4,
+          "ms": 150
+        }
+      ]
+    }
   ]
 }
 ```
 
 | 필드 | 의미 |
 | --- | --- |
-| `version` | 1과 2를 읽으며 항상 2로 저장한다. 다른 버전은 오류다. |
-| `image` | 사이드카 디렉터리를 기준으로 한 이미지 상대 경로. |
+| `version` | v1·v2·v3를 읽고 항상 v3로 저장한다. 다른 버전은 오류다. |
+| `image` | 사이드카 디렉터리 기준 이미지 상대 경로. |
 | `grid` | 정사각 타일 한 변 `tile`, 왼쪽·위 여백 `offset: [x, y]`, 타일 사이 `spacing`(px). |
-| `tiles` | 메타가 있는 셀만 저장한다. `(col,row)`, 선택적 `name`, 문자열 목록 `tags`, 문자열 값 맵 `props`, 선택적 `animation`. |
-| `sprites` | 유일한 `name`, `rect` 또는 `set`, 경계 상자 왼쪽 위 기준 픽셀 `pivot`. |
-| `part.flip_x` | 가로 반전 여부. 기본 false는 생략한다. |
-| `part.rotation` | 화면 기준 시계 방향 회전(0, 90, 180, 270도). 기본 0은 생략한다. |
-| `clips` | 유일한 `name`, `mode`, `tags`, `props`, `{sprite, ms}` 프레임 목록. 상태머신 대신 이름만 남긴다. |
+| `next_id` | v3에서 다음에 부여할 양의 정수. 삭제해도 내려가지 않는다. |
+| `tiles` | 메타가 있는 셀의 `(col,row)`, 선택적 `name`, `tags`, 문자열 맵 `props`. v3에는 타일 `animation`이 없다. |
+| `sprites` | `id`, 유일한 `name`, `rect` 또는 `set`, 픽셀 `pivot`, 필수 문자열 맵 `props`, 선택적 `modified`. |
+| `animations` | `id`, 유일한 `name`, `mode`, `tags`, `props`, `{sprite_id, ms}` 프레임과 선택적 `modified`. |
+| `part.flip_x`, `part.rotation` | 가로 반전 후 화면 기준 시계 방향 회전(0·90·180·270도). 기본 false와 0은 생략한다. |
 
-`rect`는 시작 셀과 `cols × rows`이며, `set`은 셀마다 픽셀 오프셋 `dx,dy`를 둔다.
-음수 오프셋도 허용한다. 두 종류 모두 셀 단위로 그려서 원본 시트의 spacing이 조합한
-오브젝트의 틈으로 들어가지 않는다. set의 part는 가로 반전 후 회전한다. rect와 타일 애니메이션 프레임에는 변형이 없다.
-v1의 part에 변형 필드가 명시되면 false나 0이라도 거부한다. null과 허용되지 않은 각도도 오류다.
-타일 애니메이션은 sprite 이름 대신 `(col,row,ms)`를 쓴다.
-모드는 `loop`(반복), `once`(끝에서 마지막 프레임 유지), `pingpong`(양 끝을 중복하지 않고 왕복)이다.
-길이 1·2의 pingpong도 지원한다. 프레임의 `ms`는 1 이상이며 프레임 이벤트는 없다.
+sprite와 animation은 시트 내에서 하나의 ID 공간을 공유한다. ID는 1 이상이며 `next_id`보다 작고 서로 중복되지 않는다. 이름을 바꿔도 ID와 프레임의 `sprite_id`는 그대로다. 한 번 삭제한 ID는 재사용하지 않는다. 앞으로 사이드카 밖 prefab·맵이 이 ID를 참조하도록 하기 위한 값이며 그 파일 형식은 아직 없다. `--play`는 animation 이름으로 고른다.
 
-읽기는 입력 순서를 유지한다. 저장은 복사본의 타일을 `(row,col)`, sprite·clip을 이름 순으로
-정렬하고 pretty JSON 뒤에 개행 하나를 붙인다. 속성 키는 정렬된다. 정규형은 다시 저장해도
-바이트가 같다. 위 예시의 공백·줄 배치는 설명용 원문이며 첫 Save에서 정규형으로 바뀐다.
+`rect` 틀은 `cols x rows`이고 `canvas`가 없다. `set`은 `canvas: [w, h]`를 칸 단위로 저장한다. 틀은 오프셋 `(0,0)`에서 시작하고 모든 part는 틀 안에 있어야 한다. 음수 오프셋은 v3에서 허용하지 않는다. pivot은 틀 왼쪽 위 기준이며 빈 칸은 투명하다. set part는 가로 반전 후 회전한다. spacing은 조합된 그림의 틈이 되지 않는다. 편집기는 W·H를 각 1~8로 만들고 바꾸며, 새 sprite의 pivot은 바닥 가운데 `(w*tile/2, h*tile)`다. 기존 pivot은 그대로 지킨다.
 
-다음은 실패한다. 조용히 삭제하거나 고치지 않는다.
+v1·v2는 `clips`와 프레임의 sprite 이름을 읽는다. 읽을 때 sprite를 이름 순으로 1부터, animation을 이어서 이름 순으로 ID를 매긴다. 기존 set은 part를 옮겨 옛 경계 원점을 `(0,0)`에 놓고 경계 크기를 칸 단위로 올림한 `canvas`를 부여한다. pivot 값은 바꾸지 않는다. v1의 part 변형 필드는 명시적인 false·0도 거부하며 v2·v3은 허용된 각도만 받는다. 구버전 타일 `animation`은 읽고 버리며 버린 칸을 편집기 로그와 네이티브 런타임 stderr에 경고한다. 편집기는 그 시트를 변경 있음으로 열어 v3 Save가 가능하다.
 
-- 다른 버전, 모르는 필드, 잘못된 이미지 경로, `tile=0` 또는 격자 산술 오버플로.
-- 중복 타일 좌표·빈 이름·중복 이름, 0 크기 rect, 비어 있는 set.
-  타일 이름은 아예 생략할 수 있다.
-- 빈 프레임 목록, `ms=0`, 없는 sprite를 가리키는 clip, 문자열이 아닌 속성 값.
-- 이미지 범위 밖의 타일·sprite·타일 애니메이션 프레임, 유한하지 않은 pivot.
+v3에 `clips`나 타일 `animation`, v1·v2에 `animations`, ID·`next_id`·`sprite_id`, sprite의 `props`·`modified`, set의 `canvas`가 있으면 오류다. v3는 ID·`next_id`·sprite `props`, set의 `canvas`, 프레임의 `sprite_id`가 필수다. `modified`는 Unix epoch 초이며 해당 항목이 실제로 편집될 때 기록하고 Save·Load·Reload·격자 변경만으로 바꾸지 않는다. 화면에는 시스템 현지 시각을 표시한다.
+
+모드는 `loop`(반복), `once`(마지막 프레임 유지), `pingpong`(양 끝을 중복하지 않고 왕복)이다. 프레임의 `ms`는 1 이상이다. 저장은 타일을 `(row,col)`, sprite·animation을 ID 순으로 정렬하고 pretty JSON 뒤에 개행 하나를 붙인다. 속성 키도 정렬하며 저장→읽기→저장은 바이트가 같다.
+
+다른 버전이나 알 수 없는 필드, 잘못된 경로·격자, 중복 이름·좌표·ID, ID 0이나 `next_id` 이상의 ID, 빈 set·빈 animation, 없는 sprite ID, 0ms, 틀 밖 part, 이미지 밖 타일·sprite와 유한하지 않은 pivot은 거부한다. 편집 중에는 빈 set과 빈 animation을 허용하되 Save·Load에서 거부한다.
 
 `store::parse/load`가 이미지 없는 검증을 하고, 이미지를 여는 쪽이 `validate_bounds`까지 한다.
 Save는 같은 디렉터리의 새 임시 파일에 쓰고 `sync_all` 후 rename으로 교체한다. 실패 때
@@ -121,9 +187,9 @@ UV는 셀의 픽셀 가장자리를 이미지 크기로 나눈 값이며 반 픽
 cargo run --features dev
 ```
 
-백틱을 눌러 메뉴를 열고 `Assets > Sprite Library`를 켠다. 창은 처음에는 닫혀 있다.
+백틱을 눌러 메뉴를 열고 `Assets > Asset Library`를 켠다. 창은 처음에는 닫혀 있다.
 PNG마다 별도의 편집 창이 열린다. 같은 파일을 다시 열면 기존 창이 앞으로 온다.
-Library 창을 닫아도 편집 창은 유지된다. 웹 dev에는 Assets 메뉴가 없다. `View`의 기존 개발 창은 그대로 쓸 수 있다.
+Asset Library 창을 닫아도 편집 창은 유지된다. 웹 dev에는 Assets 메뉴가 없다. `View`의 기존 개발 창은 그대로 쓸 수 있다.
 
 1. `PNG path` 입력 후 `Load`, 파일 드래그 앤 드롭, `Browse...`의 네이티브 파일
    대화상자, `assets/` 목록 중 하나로 PNG를 연다. 드롭은 도구가 숨겨져 있어도 창을 연다.
@@ -131,7 +197,7 @@ Library 창을 닫아도 편집 창은 유지된다. 웹 dev에는 Assets 메뉴
    따라서 `/`로 끝나는 경로도 꺼진다. 입력의 앞뒤 공백은 지우고 연다. 파일 존재 여부는 Load할 때 확인한다.
    `Browse...`와 `assets/` 목록은 선택 즉시 열며 Load 버튼이 필요 없다.
    디렉터리 밖을 가리키는 PNG 심볼릭 링크는 이미 열린 파일을 가리켜도 포커스 전에 거부한다.
-   오류는 Library 상태 줄에 남고, 열린 창과 입력 경로 및 디스크는 유지된다.
+   오류는 Asset Library 상태 줄에 남고, 열린 창과 입력 경로 및 디스크는 유지된다.
    목록은 현재 checkout의 assets 아래를 재귀 탐색하며 숨김 항목·심볼릭 링크를 따르지 않는다.
    `Refresh assets/`로 다시 읽는다. 확장자 대소문자는 무시하고 PNG만 받는다.
 2. 마젠타 등을 투명하게 만들려면 `Key color`를 켜고 `RGB hex`에 `ff00ff` 같은 값을
@@ -148,20 +214,10 @@ Library 창을 닫아도 편집 창은 유지된다. 웹 dev에는 Assets 메뉴
 5. `Show grid`, 배율 1–16(`Zoom` 또는 이미지 위 Ctrl+휠)을 조정한다.
    클릭은 한 셀, Shift+클릭은 앵커부터 사각 범위, Ctrl+클릭은 토글이다.
    이미지 안의 격자 밖을 클릭하면 선택을 비운다.
-6. `Tiles`는 단일 선택의 이름·쉼표 구분 태그·한 줄씩 `key=value` 속성을 편집한다.
-   `=`가 없는 속성은 오류다. `Tile animation`을 켜고 mode, col/row/ms, 프레임 추가·위아래·삭제를 편집한다.
-   다른 셀을 프레임으로 넣으려면 `Pin tile`을 켠다. 켜 두면 시트에서 다른 셀을 골라도 편집 대상이 그대로이고,
-   `Add selected cells`가 고른 셀들을 행 순서, 같은 행에서는 왼쪽부터 프레임에 더한다. 끄면 다시 단일 선택을 따른다.
-   격자를 바꾸거나 시트를 다시 열면 고정이 풀린다.
-7. `Sprites`의 `New rect from selection` 또는 `New set from selection`으로 오브젝트를 만든다.
-   rect는 선택의 경계 사각, set은 선택 셀만 담는다. pivot 기본값은 경계 상자 중심이며 수정할 수 있다.
-   rect 좌표·크기, set 각 part의 셀과 음수도 가능한 dx/dy, Flip X와 Rotation을 편집한다.
-   `Suggest from objects`는 연결된 픽셀 덩어리를 셀 사각으로 제안하며 `Add`를 눌러야 sprite가 된다.
-   이름 변경은 clip 참조도 갱신한다. clip이 참조하는 sprite는 삭제할 수 없다.
-8. `Clips`에서 clip을 만들고 이름·mode·태그·속성·프레임(sprite와 ms)을 편집한다.
-   새 clip은 빈 프레임 목록으로 시작하므로 최소 하나를 추가해야 Save된다.
-9. `Preview`에서 clip, 타일 애니메이션, 정지 sprite를 고른다. `Play`/`Pause`, `Restart`,
-   배율 1–8, 프레임 번호·경과 ms, pivot 십자를 확인한다. once는 마지막 프레임에 머문다.
+6. `Tileset`에서 한 타일의 이름, 쉼표 구분 태그, `Properties`의 key/value 행을 편집한다. 빈 행은 무시하고 빈 키나 중복 키는 오류다. 메타가 있는 칸에는 격자 표시와 무관하게 금색 표시가 나온다.
+7. `Sprites` 목록에서 썸네일·크기·수정 시각을 보고 고른다. `New from selection`은 선택한 칸으로 set을 만들고 선택이 없으면 비활성이다. 선택 경계가 8 x 8보다 크면 거부한다. `+ New sprite`는 빈 2 x 2 틀을 만들며 타일을 하나 넣기 전에는 Save할 수 없다. 캔버스 W·H는 1~8이고 시트의 타일을 칸으로 끌어 놓는다. 칸의 `x` 또는 우클릭 `Clear`로 비우고 우클릭 메뉴에서 `Flip X`와 `Rotation`을 바꾼다. 크기를 줄이면 밖의 칸 수를 로그에 남긴다. 저장된 틀 덕분에 가장자리 빈 칸도 다시 열린다. 겹친 part, 격자에 맞지 않는 part 또는 8칸을 넘는 틀은 캔버스에서 읽기 전용이며 `Parts`에서 편집한다. 이름 변경은 ID 참조를 바꾸지 않고, 참조 중인 sprite는 삭제할 수 없다.
+8. `Animations`에서 이름·mode·태그·속성과 sprite ID를 가리키는 프레임을 편집한다. 프레임마다 썸네일·sprite·ms와 `<`·`x`·`>`가 있고 현재 재생 프레임에 테두리가 표시된다. 새 animation은 프레임을 하나 이상 넣어야 Save할 수 있다.
+9. 오른쪽 Preview는 항상 보인다. Tileset·Import는 선택 타일, Sprites는 선택 sprite와 pivot, Animations는 선택 animation을 표시한다. 선택이 256칸을 넘으면 이미지 대신 안내만 보인다. `Play`/`Pause`와 `Restart`는 Animations에서만 제공한다.
 10. 창 제목의 `*`는 변경 표시다. `Save`는 변경이 있을 때만 켜지고 JSON 저장에 성공하면
     다시 꺼진다. 사이드카가 없는 PNG는 열자마자 켜진다. `Reload image`는 현재 메타를
     유지하며 PNG만 다시 읽는다. 메타까지 다시 읽으려면 저장 후 편집 창의 닫기(x)로 닫고 PNG를 다시 Load한다.
@@ -171,12 +227,12 @@ Library 창을 닫아도 편집 창은 유지된다. 웹 dev에는 Assets 메뉴
 Guess의 진행·점수가 시스템 현지 시각 `HH:MM:SS`와 함께 쌓인다. 최대 500줄을 유지한다.
 스크롤해서 읽고 텍스트를 선택해 복사할 수 있다. 아래쪽에서 읽는 동안에는 새 줄을 따라가며,
 위쪽을 읽고 있으면 스크롤 위치를 유지한다. `Clear`로 해당 창의 로그만 지운다.
-Load 실패와 assets 스캔 오류는 Library의 상태 문구에 표시한다.
+Load 실패와 assets 스캔 오류는 Asset Library의 상태 문구에 표시한다.
 
 `Grid updated`, `Tile metadata updated`, `Sprite updated`,
-`Sprite renamed and clip references updated`, `Clip updated` 중 같은 기록이 바로 이어지면
+`Sprite renamed`, `Animation updated` 중 같은 기록이 바로 이어지면
 새 줄 대신 마지막 줄의 시각과 횟수 `(xN)`을 갱신한다. 오류·Save·Reload·Guess 등 다른 기록이나
-`Clear`는 묶음을 끊는다. 묶음은 문구만 비교하므로 편집 대상이 바뀌어도 이어지며, 로그를 남기지 않는 선택 변경과 sprite·clip 삭제는 묶음을 끊지 않는다. 로그의 500줄 상한은 유지된다.
+`Clear`는 묶음을 끊는다. 묶음은 문구만 비교하므로 편집 대상이 바뀌어도 이어지며, 로그를 남기지 않는 선택 변경과 sprite·animation 삭제는 묶음을 끊지 않는다. 로그의 500줄 상한은 유지된다.
 
 메모리 이미지는 `Save image as`로 PNG 경로를 정하기 전에는 Save·Reload가 비활성이다.
 PNG 저장 후 `Save`로 메타를 따로 쓴다. 다른 편집 창이 열고 있는 PNG 경로에는 저장할 수 없다. GL 최대 텍스처 크기를 넘으면 치수와
@@ -186,16 +242,16 @@ PNG 저장 후 `Save`로 메타를 따로 쓴다. 다른 편집 창이 열고 �
 ## 영역 후보와 타일셋 추출
 
 사람의 로컬 작업 흐름은 큰 시트 → 패널 후보 선택 → 맵 이미지 → 고유 타일셋이다.
-큰 시트에서 후보를 직접 확인한 뒤 개별 또는 일괄 저장할 수 있다.
+큰 시트에서 후보를 직접 확인한 뒤 개별 또는 일괄 저장할 수 있다. Sheet Editor의 `Import` 탭에서 `Regions` 또는 `Extract tileset` 머리를 연다.
 
 1. 큰 PNG를 열고 `Regions`에서 배경 `Auto`/`Transparent`/`Color`, hex, `Min size`를 정해
    `Find regions`를 누른다. Auto는 투명 픽셀이 있으면 알파를, 없으면 좌상단 색을 배경으로 쓴다.
    기본 Min size는 32이며 8방향 연결 덩어리의 bbox를 제안한다. 후보는 JSON에 저장하지 않는다.
 2. 후보를 선택하고 `Crop to new image`를 누른다. 선택 영역은 다음 프레임에 새 창의
    메모리 이미지로 열리며, 원본 창의 변경은 유지된다.
-   격자는 유지하고 타일·sprite·clip 메타는 빈 상태로 시작한다.
+   격자는 유지하고 타일·sprite·animation 메타는 빈 상태로 시작한다.
    또는 `Output dir`과 `Save all regions`로 후보 전체를 `<stem>-region-<n>.png`로 저장한다.
-   기본 폴더는 `assets/splites/<stem>/`이며 번호는 1부터 목록 순이다. 대상 중 사이드카가
+   기본 폴더는 `assets/sprites/<stem>/`이며 번호는 1부터 목록 순이다. 대상 중 사이드카가
    하나라도 있거나, 출력 이름이 심볼릭 링크이거나, 어느 편집 창에든 열린 PNG면 디렉터리를
    만들기 전에 전체를 거부한다. 그 밖의 기존 PNG는 교체한다. 검사는 버튼을 누를 때 한 번 한다.
    열린 이미지가 충돌하면 `sidecar, symlink or open image conflicts: ...`에 경로가 표시된다.
@@ -205,31 +261,39 @@ PNG 저장 후 `Save`로 메타를 따로 쓴다. 다른 편집 창이 열고 �
    끝까지 쓰고, Reload는 그 파일까지 로그에 남긴 뒤 취소를 적는다. 그 뒤로는 새 이미지의 로그에
    이전 작업의 결과가 들어오지 않는다. 일괄 저장은 사이드카와 창을 만들지 않고 키 색도 적용하지 않는다.
 3. `Image output`을 확인하고 `Save image as`로 crop PNG를 쓴다. 기본은
-   `assets/splites/<crop 이름>/<crop 이름>.png`다. 이 버튼은 JSON을 만들지 않는다.
+   `assets/sprites/<crop 이름>/<crop 이름>.png`다. 이 버튼은 JSON을 만들지 않는다.
    그 경로에 PNG나 사이드카가 이미 있으면 쓰지 않고 거부한다. 심볼릭 링크 이름도 포함한다.
    PNG는 배타적으로 게시하므로 동시에 다른 쓰기가 만든 파일도 덮지 않는다.
    어느 편집 창에든 열린 PNG나 그 PNG를 가리키는 심볼릭 링크도 거부한다.
    `image ... is already open; choose another image path`가 표시되면 다른 Image output을 고른다. 창을 닫아도 그 PNG가 디스크에 남아 같은 경로는 계속 거부된다.
 4. 배경을 제거하려면 그 PNG를 저장한 다음 `Key color`를 켜고 해당 창의 `Reload image`를 누른다.
    이어 격자를 직접 입력하거나 Guess/Apply로 정한다. crop과 키 색 제거는 이 두 단계다.
-5. `Extract`의 `Analyze`를 누른다. 완전 투명 픽셀의 RGB를 0으로 정규화한 뒤
+5. `Import`의 `Extract tileset`에서 `Analyze`를 누른다. 완전 투명 픽셀의 RGB를 0으로 정규화한 뒤
    기본적으로 바이트가 같은 타일만 묶고 첫 등장 순서를 유지한다. `Group rotations/flips`는
    기본 꺼짐이며 켜면 회전·반전 8종도 묶는다. 대칭 타일은 변형 없음이 우선이다.
    이 선택은 분석을 느리게 하며 변경하면 이전 분석이 무효화된다. 완전 투명 타일도 하나의 고유 타일이다.
    unique 수와 원래 격자 셀 영역의 `rebuild` 동일 여부를 확인한다. 자투리는 비교에서 제외한다.
    `Columns`(기본 16)와 `Output`을 정한다. 격자·이미지가 바뀌면 분석을 다시 해야 한다.
 6. `Write tileset`으로 PNG와 빈 메타의 사이드카, 맵 배치 파일을 쓴다. 기본 출력은
-   `assets/splites/<맵 stem>/<맵 stem>-tileset.png`다. tile은 유지하고 offset·spacing은 0이 된다.
+   `assets/sprites/<맵 stem>/<맵 stem>-tileset.png`다. tile은 유지하고 offset·spacing은 0이 된다.
    현재 창의 원본 PNG를 포함해 어느 편집 창에든 열린 PNG는 Output으로 쓸 수 없다.
    그 PNG를 가리키는 심볼릭 링크도 파일이나 디렉터리를 만들기 전에 거부한다.
    `image ... is already open; choose another image path`가 표시되면 다른 창이 연 PNG는 그 창을 닫거나 다른 Output을 고른다. 현재 창의 원본이면 다른 Output을 고른다.
-   `Open result`로 결과를 바로 열 수 있다. sprite·clip은 자동 생성하지 않으므로
-   런타임 재생 전 편집기에서 sprite와 최소 하나의 clip을 작성한다.
+   `Open result`로 결과를 바로 열 수 있다. sprite·animation은 자동 생성하지 않으므로
+   런타임 재생 전 편집기에서 sprite와 최소 하나의 animation을 작성한다.
 
-Find regions·Suggest from objects·Analyze는 백그라운드에서 실행되며 진행률과 Cancel을 표시한다. 실행 중 다른 입력과 창을 사용할 수 있다. Reload와 창 닫기는 작업을 취소하며, Analyze는 실행 중 격자나 묶기 설정이 바뀌거나 `Save image as`로 이름이 바뀌어도 취소되고 이전 결과를 버린다. Find regions 중 Background나 Min size를 바꾸면 진행 중인 검색은 취소된다.
-출력은 `.png`만 받는다. checkout의 `assets/splites/` 안에서는 없는 디렉터리를 만들지만,
+Find regions·Analyze는 백그라운드에서 실행되며 진행률과 Cancel을 표시한다. 실행 중 다른 입력과 창을 사용할 수 있다. Reload와 창 닫기는 작업을 취소하며, Analyze는 실행 중 격자나 묶기 설정이 바뀌거나 `Save image as`로 이름이 바뀌어도 취소되고 이전 결과를 버린다. Find regions 중 Background나 Min size를 바꾸면 진행 중인 검색은 취소된다.
+출력은 `.png`만 받는다. checkout의 `assets/sprites/` 안에서는 없는 디렉터리를 만들지만,
 밖에서는 이미 존재하는 디렉터리만 쓸 수 있다. `..`와 심볼릭 링크를 거치는 출력 디렉터리는 거부한다.
 저장소 안이면서 이 ignore 폴더 밖이면 커밋 대상이 될 수 있다는 상태 줄을 표시한다.
+
+이전 기본 출력 폴더 `assets/splites/`가 있으면 Asset Library 상태 줄이 이동을 안내한다. 자동으로 이동하거나 삭제하지 않는다. checkout 최상단에서 새 폴더가 없을 때만 다음 명령으로 옮길 수 있다.
+
+```sh
+test -e assets/sprites || mv assets/splites assets/sprites
+```
+
+`assets/sprites`가 이미 있으면 아무 작업도 하지 않으므로 두 폴더를 사람이 직접 합친다. 사이드카 `image`와 맵 `tileset`은 파일 이름을 가리켜 폴더째 이동해도 유지된다. 이전 폴더에 출력할 때는 실제로 ignore되어 있어도 상태 줄에 `not ignored`가 붙을 수 있다.
 
 `Write tileset`의 PNG는 재생성 결과로서 원자적으로 교체한다. JSON은 기존 파일이나 동시에 다른 쓰기가 만든
 파일을 덮지 않도록 배타적으로 게시한다. 맵 파일은 PNG처럼 원자적으로 교체하되 심볼릭 링크인 맵 이름은 거부한다.
@@ -296,16 +360,16 @@ cargo run -- --play tests/fixtures/example.sprites.json cycle
 cargo run -- --play tests/fixtures/example-turned.sprites.json
 ```
 
-인자 순서는 `[--play <sidecar.json> [clip]] [--smoke-frames N]`이다. clip을 생략하면
-이름 순 첫 clip을 고르며, 없으면 `sprite sheet has no clips`, 틀린 이름은 `no clip named ...` 오류다.
+인자 순서는 `[--play <sidecar.json> [animation]] [--smoke-frames N]`이다. animation을 생략하면
+이름 순 첫 animation을 고르며, 없으면 `sprite sheet has no animations`, 틀린 이름은 `no animation named ...` 오류다. v1·v2 사이드카도 재생하며 버린 타일 animation은 stderr로 경고한다.
 정수 배율은 `max(1, floor(viewport_height / 4 / sprite_height))`이고 pivot을 창 가운데에 둔다.
 실패는 일반 실행에서 `rusty-nails: <이유>`, 스모크에서는 `rn-smoke: fail <이유>`다.
 
-다음은 저장소에 포함되지 않은 사람의 로컬 파일 예다. 해당 PNG와 편집기로 만든 clip이
+다음은 저장소에 포함되지 않은 사람의 로컬 파일 예다. 해당 PNG와 편집기로 만든 animation이
 있는 사이드카를 이미 가지고 있을 때만 실행한다.
 
 ```sh
-cargo run -- --play assets/splites/cave/cave-01-wall.sprites.json
+cargo run -- --play assets/sprites/cave/cave-01-wall.sprites.json
 ```
 
 ## 웹 재생
@@ -316,7 +380,7 @@ scripts/serve-web.sh
 ```
 
 서버를 둔 채 `http://127.0.0.1:8080/?play=example` 또는
-`http://127.0.0.1:8080/?play=example&clip=cycle`을 연다.
+`http://127.0.0.1:8080/?play=example&animation=cycle`을 연다. 이전 링크의 `clip=`도 별칭으로 받는다.
 `src/sprite/embedded.rs`의 표에는 `sprite::example()`이 만드는 64×16, 16px 네 색 시트만 있다.
 파일 preload나 사람 이미지 임베드는 없으며 새 예제도 코드로 그린 것만 추가한다.
 웹의 `play`는 임베드 이름, 네이티브의 `--play`는 사이드카 경로다.
@@ -338,7 +402,7 @@ scripts/build-web.sh --dev
 scripts/smoke-web.sh --dev
 ```
 
-native 스모크는 fixture를 `target/` 아래에 복사해 재생 성공과 없는 파일·없는 clip·위험한
+native 스모크는 fixture를 `target/` 아래에 복사해 재생 성공과 없는 파일·없는 animation·위험한
 경로 실패를 함께 검사한다. 웹은 무인자/`--dev`/`--play` 셋 중 하나이며 인자를 조합하지 않는다.
 비dev 재생은 `vtx=0 lit>0`이어야 성공이다. 원래 비dev 빈 화면은 `vtx=0 lit=0`, dev는
 `vtx>0 lit>0`이다. 결과 한 줄과 시간 상한은 [스모크 출력 계약](development.md#스모크-출력-계약)을 따른다.
@@ -382,8 +446,10 @@ map.csv, 맵 에디터·런타임 타일맵, 레이어 자동 분류, 개별 til
 
 PNG만 지원하며 undo, 프레임 이벤트, 상태머신·타일맵 배치는 지원하지 않는다.
 앱 종료 시 미저장 변경 유실도 현재 한계다.
-사람의 원본 `/home/raven/Works/splites/`와 결과 `assets/splites/`는 로컬 전용이다.
-`/assets/splites/`는 gitignore에 있으며 이미지·결과 PNG·사이드카를 커밋하지 않는다.
+사람의 원본 `/home/raven/Works/splites/`와 결과 `assets/sprites/`는 로컬 전용이다.
+`/assets/sprites/`와 이전 `/assets/splites/`는 gitignore에 있으며 이미지·결과 PNG·사이드카를 커밋하지 않는다.
 라이선스는 이 문서에서 단정하지 않는다. 자동 검사·웹 예제는 코드가 만든 이미지로만 동작한다.
 
-Decided in: isk-fcuz, isk-hk1c, isk-aw9h, isk-ut06, isk-6ptr, isk-8v66, isk-y594, isk-utmw
+캔버스에서 8칸 넘는 이전 set은 읽기 전용이다. 타일 배수가 아닌 옛 set은 틀의 크기를 올림하면서 런타임 배율이 달라질 수 있다. 실제 FPS와 수백 프레임 띠의 비용은 측정하지 않았다.
+
+Decided in: isk-79ss, isk-aqpa, isk-fcuz, isk-hk1c, isk-aw9h, isk-ut06, isk-6ptr, isk-8v66, isk-y594, isk-utmw
