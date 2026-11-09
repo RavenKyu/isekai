@@ -125,7 +125,7 @@ fn absolute_output(path: &Path, checkout: &Path) -> Result<PathBuf, StoreError> 
     }
     Ok(path)
 }
-/// Refuses a write over a PNG another editor holds: its window would keep the old
+/// Refuses a write over a PNG any editor holds: its window would keep the old
 /// image, and Load of that path only focuses it. A symlink or alias resolves first.
 pub(super) fn refuse_open_output(output: &Path, open_files: &[PathBuf]) -> Result<(), String> {
     let resolved = output
@@ -289,8 +289,9 @@ fn save_sidecar_new(path: &Path, sheet: &SpriteSheet) -> Result<(), StoreError> 
     Ok(())
 }
 fn write_plan(plan: &ExtractPlan, open_files: &[PathBuf]) -> Result<String, String> {
-    let output = ensure_output_dir(&plan.output, &plan.checkout).map_err(|e| e.to_string())?;
+    let output = absolute_output(&plan.output, &plan.checkout).map_err(|e| e.to_string())?;
     refuse_open_output(&output, open_files)?;
+    let output = ensure_output_dir(&output, &plan.checkout).map_err(|e| e.to_string())?;
     store::write_atomic(&output, &plan.png).map_err(|e| format!("PNG not written: {e}"))?;
     // PNG is a regenerated artifact and is replaced even when edited metadata exists.
     // These two files are not a transaction: after any JSON error the PNG remains.
@@ -570,6 +571,49 @@ pub(super) mod tests {
             );
             assert!(!external.0.join("new").exists());
         }
+    }
+    #[test]
+    fn opened_output_is_refused_before_any_disk_changes() {
+        let temp = Temp::new();
+        let (image, grid) = map(0, [0, 0]);
+        let source = temp.0.join("original.png");
+        fs::write(&source, image.to_png().unwrap()).unwrap();
+        let original = fs::read(&source).unwrap();
+        let open_files = [source.canonicalize().unwrap()];
+        let mut outputs = vec![source.clone()];
+        #[cfg(unix)]
+        {
+            let alias = temp.0.join("alias.png");
+            std::os::unix::fs::symlink(&source, &alias).unwrap();
+            outputs.push(alias);
+        }
+        let entries = fs::read_dir(&temp.0).unwrap().count();
+        for output in outputs {
+            let plan = plan_extract(&image, &grid, 16, &output, &temp.0).unwrap();
+            let error = write_plan(&plan, &open_files).unwrap_err();
+            assert!(error.contains("already open"), "{error}");
+            assert!(error.is_ascii() && !error.contains(['\r', '\n']));
+            assert_eq!(fs::read(&source).unwrap(), original);
+            assert!(!plan.sidecar_path.exists());
+            assert_eq!(fs::read_dir(&temp.0).unwrap().count(), entries);
+            assert_no_temps(&temp.0);
+        }
+        // A still-open editor may hold a path whose PNG has since disappeared.
+        // The refusal must happen before ensure_output_dir creates this parent.
+        let missing = temp.0.join("assets/splites/missing/result.png");
+        let plan = plan_extract(&image, &grid, 16, &missing, &temp.0).unwrap();
+        assert!(
+            write_plan(&plan, std::slice::from_ref(&missing))
+                .unwrap_err()
+                .contains("already open")
+        );
+        assert!(!temp.0.join("assets").exists());
+        assert_eq!(fs::read_dir(&temp.0).unwrap().count(), entries);
+        // A memory sheet has no open file; a new output remains writable.
+        assert!(matches!(memory_sheet().source, SheetSource::Memory { .. }));
+        write_plan(&plan, &[]).unwrap();
+        assert_eq!(fs::read(&missing).unwrap(), plan.png);
+        assert_no_temps(&temp.0);
     }
     #[test]
     fn writes_are_atomic_png_replaced_sidecar_preserved_and_temps_cleaned() {
