@@ -124,8 +124,9 @@ Library 창을 닫아도 편집 창은 유지된다. 웹 dev에는 Assets 메뉴
 4. `Guess`는 반복 패턴의 점수와 후보를 제시한다. `Apply ... offset (x,y)`를 눌러야
    tile과 x·y 여백이 함께 들어가며 spacing은 유지된다. 자동 적용하지 않는다.
    고유 타일만 모은 시트에서는 약하므로 사람이 정한 값이 우선이다.
-   이 버튼은 동기 실행이다. debug 빌드의 실제 480×800 맵에서 약 55초 동안 프레임이 멈춘 사례가 있다.
-   현재 진행 표시·취소는 없으므로 추정 중에는 응답을 기다리거나 처음부터 값을 직접 넣는다.
+   Guess는 백그라운드에서 실행하며 검사한 offset 수에 따른 진행률을 표시한다.
+   실행 중에도 격자를 편집하거나 다른 창을 쓸 수 있다. `Cancel Guess`로 취소하고, 창을 닫으면
+   작업도 취소한다. `Reload image`는 이전 이미지의 작업과 결과를 버린다.
 5. `Show grid`, 배율 1–16(`Zoom` 또는 이미지 위 Ctrl+휠)을 조정한다.
    클릭은 한 셀, Shift+클릭은 앵커부터 사각 범위, Ctrl+클릭은 토글이다.
    이미지 안의 격자 밖을 클릭하면 선택을 비운다.
@@ -178,7 +179,7 @@ PNG 저장 후 `Save`로 메타를 따로 쓴다. GL 최대 텍스처 크기를 
    `Open result`로 결과를 바로 열 수 있다. sprite·clip은 자동 생성하지 않으므로
    런타임 재생 전 편집기에서 sprite와 최소 하나의 clip을 작성한다.
 
-Find regions·Suggest from objects·Guess·Analyze는 버튼에서만 동기로 실행하며 큰 이미지에서는 화면이 멈출 수 있다.
+Find regions·Suggest from objects·Analyze는 버튼에서만 동기로 실행하며 큰 이미지에서는 화면이 멈출 수 있다.
 출력은 `.png`만 받는다. checkout의 `assets/splites/` 안에서는 없는 디렉터리를 만들지만,
 밖에서는 이미 존재하는 디렉터리만 쓸 수 있다. `..`와 심볼릭 링크를 거치는 출력 디렉터리는 거부한다.
 저장소 안이면서 이 ignore 폴더 밖이면 커밋 대상이 될 수 있다는 상태 줄을 표시한다.
@@ -277,7 +278,7 @@ current인지, 텍스처·shader가 GLContext보다 먼저 해제되는지 코�
 ## 한계와 로컬 자산
 
 PNG만, 한 번에 시트 하나, undo 없음, 프레임 이벤트 없음, 상태머신·타일맵 배치 없음이다.
-Guess의 장시간 동기 정지와 앱 종료 시 미저장 변경 유실도 현재 한계다.
+Find regions·Suggest from objects·Analyze의 동기 실행과 앱 종료 시 미저장 변경 유실도 현재 한계다.
 사람의 원본 `/home/raven/Works/splites/`와 결과 `assets/splites/`는 로컬 전용이다.
 `/assets/splites/`는 gitignore에 있으며 이미지·결과 PNG·사이드카를 커밋하지 않는다.
 라이선스는 이 문서에서 단정하지 않는다. 자동 검사·웹 예제는 코드가 만든 이미지로만 동작한다.

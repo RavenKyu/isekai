@@ -1,6 +1,7 @@
 mod clips;
 mod edit;
 mod extract;
+mod guess;
 mod model;
 mod preview;
 mod regions;
@@ -53,6 +54,7 @@ pub struct SheetEditor {
     pub zoom: u32,
     pub show_grid: bool,
     pub guess: Option<GridGuess>,
+    guess_job: Option<guess::GuessJob>,
     /// Latest message for the library status line; the library takes it after drawing.
     pub status: String,
     /// Actions this editor queued; the library takes them after drawing.
@@ -102,6 +104,9 @@ impl SpriteLibrary {
         self.pending.push(Action::Load(path));
     }
     pub fn apply_pending(&mut self, gl: &Rc<glow::Context>, renderer: &mut GlowRenderer) {
+        for editor in &mut self.sheets {
+            editor.poll_guess();
+        }
         for action in std::mem::take(&mut self.pending) {
             if let Err(error) = self.apply_action(action, gl, renderer) {
                 self.status = error.replace(['\n', '\r'], " ");
@@ -317,6 +322,7 @@ impl SheetEditor {
             zoom: 2,
             show_grid: true,
             guess: None,
+            guess_job: None,
             status: String::new(),
             pending: vec![],
             saved_path: None,
@@ -343,6 +349,7 @@ impl SheetEditor {
             }
             return Err(error);
         }
+        self.guess_job = None;
         self.sheet = opened;
         self.selected_sprite = None;
         self.selected_clip = None;
@@ -481,9 +488,43 @@ impl SheetEditor {
             extract::tab(self, ui);
         }
     }
+    fn start_guess(&mut self) {
+        if self.guess_job.is_some() {
+            return;
+        }
+        self.guess = None;
+        match guess::GuessJob::start(self.sheet.image.clone()) {
+            Ok(job) => {
+                self.guess_job = Some(job);
+                self.status = "Guess started".into();
+            }
+            Err(error) => self.status = error,
+        }
+    }
+    fn cancel_guess(&mut self) {
+        if self.guess_job.take().is_some() {
+            self.status = "Guess cancelled".into();
+        }
+    }
+    fn poll_guess(&mut self) {
+        let Some(job) = &self.guess_job else {
+            return;
+        };
+        match job.poll() {
+            Ok(Some(result)) => {
+                self.guess = Some(result);
+                self.guess_job = None;
+                self.status = "Guess completed (100%)".into();
+            }
+            Ok(None) => {}
+            Err(error) => {
+                self.guess_job = None;
+                self.status = error;
+            }
+        }
+    }
     fn grid_panel(&mut self, ui: &Ui) {
-        let sheet = &mut self.sheet;
-        let mut grid = sheet.meta.grid;
+        let mut grid = self.sheet.meta.grid;
         let mut changed = false;
         ui.set_next_item_width(130.0);
         changed |= view::input_u32(ui, "Tile", &mut grid.tile, 1);
@@ -496,12 +537,18 @@ impl SheetEditor {
         ui.same_line();
         ui.set_next_item_width(130.0);
         changed |= view::input_u32(ui, "Spacing", &mut grid.spacing, 0);
-        if ui.button("Guess") {
-            self.guess = Some(raster::guess_grid(
-                &sheet.image,
-                &raster::DEFAULT_GUESS_CANDIDATES,
-                true,
-            ));
+        if let Some(job) = &self.guess_job {
+            let fraction = job.fraction();
+            ui.progress_bar(fraction)
+                .size([240.0, 0.0])
+                .overlay_text(format!("Guessing... {:.0}%", fraction * 100.0))
+                .build();
+            ui.same_line();
+            if ui.button("Cancel Guess") {
+                self.cancel_guess();
+            }
+        } else if ui.button("Guess") {
+            self.start_guess();
         }
         ui.same_line();
         ui.checkbox("Show grid", &mut self.show_grid);
@@ -533,7 +580,7 @@ impl SheetEditor {
             }
         }
         if changed {
-            match sheet.set_grid(grid) {
+            match self.sheet.set_grid(grid) {
                 Ok(()) => {
                     self.tile_draft = Default::default();
                     self.extract.invalidate();
@@ -542,7 +589,11 @@ impl SheetEditor {
                 Err(error) => self.status = error,
             }
         }
-        let cells = sheet.meta.grid.cells(sheet.image.width, sheet.image.height);
+        let cells = self
+            .sheet
+            .meta
+            .grid
+            .cells(self.sheet.image.width, self.sheet.image.height);
         ui.text(format!(
             "{} x {} cells, leftover {} x {} px",
             cells.cols, cells.rows, cells.leftover_right, cells.leftover_bottom
@@ -671,6 +722,34 @@ mod tests {
                 })
                 .is_err()
         );
+    }
+    #[test]
+    fn cancelled_guess_cannot_install_a_late_result_and_editors_are_independent() {
+        let mut first = SheetEditor::new(1, fake_sheet());
+        let second = SheetEditor::new(2, fake_sheet());
+        first.start_guess();
+        assert!(first.guess_job.is_some());
+        assert!(second.guess_job.is_none());
+        first.cancel_guess();
+        assert!(first.guess_job.is_none());
+        first.poll_guess();
+        assert!(first.guess.is_none());
+        first.start_guess();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while first.guess_job.is_some() {
+            first.poll_guess();
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        assert_eq!(
+            first.guess,
+            Some(raster::guess_grid(
+                &first.sheet.image,
+                &raster::DEFAULT_GUESS_CANDIDATES,
+                true
+            ))
+        );
+        assert!(second.guess.is_none());
     }
     #[test]
     fn save_state_tracks_edits_success_failure_and_memory_images() {
@@ -1001,6 +1080,7 @@ mod tests {
             "focus retains edits"
         );
         let second_external = library.sheets[1].sheet.external;
+        library.sheets[0].start_guess();
         library.pending.push(Action::Reload(first_id));
         library.apply_pending(&gl, &mut renderer);
         assert_eq!(
@@ -1008,6 +1088,10 @@ mod tests {
             "reload affects its own sheet"
         );
         assert_ne!(library.sheets[0].sheet.external, first_external);
+        assert!(
+            library.sheets[0].guess_job.is_none() && library.sheets[0].guess.is_none(),
+            "reload cancels and clears results for the previous image"
+        );
         library.close_all(&mut renderer).unwrap();
         renderer.shutdown(&mut imgui).unwrap();
     }
