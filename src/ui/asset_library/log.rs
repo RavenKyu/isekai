@@ -18,6 +18,25 @@ fn timestamp() -> String {
     }
 }
 
+pub(super) fn format_local(secs: Option<u64>) -> String {
+    let Some(ticks) = secs
+        .and_then(|s| s.checked_mul(1_000_000_000))
+        .and_then(|n| i64::try_from(n).ok())
+    else {
+        return "-".into();
+    };
+    let mut date = sdl3::sys::time::SDL_DateTime::default();
+    // SAFETY: date points to writable storage and the SDL time conversion is thread safe.
+    if unsafe { sdl3::sys::time::SDL_TimeToDateTime(ticks, &mut date, true) } {
+        format!(
+            "{:04}-{:02}-{:02} {:02}:{:02}",
+            date.year, date.month, date.day, date.hour, date.minute
+        )
+    } else {
+        "-".into()
+    }
+}
+
 #[derive(Clone, Default, PartialEq, Debug)]
 pub struct SheetLog {
     lines: Vec<String>,

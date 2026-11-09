@@ -9,6 +9,8 @@ pub struct PropsDraft {
     pub key_input: Option<[f32; 2]>,
     #[cfg(test)]
     pub add_button: Option<[f32; 2]>,
+    #[cfg(test)]
+    pub value_input: Option<[f32; 2]>,
 }
 impl PropsDraft {
     pub fn from_map(map: &BTreeMap<String, String>) -> Self {
@@ -57,6 +59,14 @@ impl PropsDraft {
             ui.same_line();
             ui.set_next_item_width(110.0);
             changed |= ui.input_text("##value", value).build();
+            #[cfg(test)]
+            {
+                if i == 0 {
+                    let min = ui.item_rect_min();
+                    let size = ui.item_rect_size();
+                    self.value_input = Some([min[0] + 10.0, min[1] + size[1] * 0.5]);
+                }
+            }
             ui.same_line();
             if ui.small_button("x") {
                 remove = Some(i);

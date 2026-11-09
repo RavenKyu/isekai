@@ -115,6 +115,29 @@ fn part_position(part: &Part, origin: [f32; 2], scale: f32) -> [f32; 2] {
         origin[1] + part.dy as f32 * scale,
     ]
 }
+pub(super) fn fit_scale(bounds: (u32, u32), size: [f32; 2]) -> f32 {
+    if bounds.0 == 0 || bounds.1 == 0 {
+        return 0.0;
+    }
+    (size[0] / bounds.0 as f32)
+        .min(size[1] / bounds.1 as f32)
+        .max(0.0)
+}
+pub(super) fn draw_parts_fit(
+    ui: &Ui,
+    view: &PartView,
+    parts: &[Part],
+    bounds: (u32, u32),
+    min: [f32; 2],
+    size: [f32; 2],
+) {
+    let scale = fit_scale(bounds, size);
+    let origin = [
+        min[0] + (size[0] - bounds.0 as f32 * scale) / 2.0,
+        min[1] + (size[1] - bounds.1 as f32 * scale) / 2.0,
+    ];
+    draw_parts_scaled(ui, view, parts, origin, scale);
+}
 /// imgui walks the quad clockwise from top-left; the shared corners use
 /// triangle-strip order (top-left, top-right, bottom-left, bottom-right).
 fn image_quad(min: [f32; 2], max: [f32; 2], corners: [[f32; 2]; 4]) -> [([f32; 2], [f32; 2]); 4] {
@@ -295,6 +318,12 @@ impl SheetEditor {
         };
         let (w, h) = sprite.bounds(&sheet.meta.grid);
         ui.text(format!("{}  {} x {} px", sprite.name, w, h));
+        if self.active_tab == EditorTab::Sprites {
+            ui.text(format!(
+                "modified {}",
+                super::log::format_local(sprite.modified)
+            ));
+        }
         let origin = ui.cursor_screen_pos();
         let scale = self.preview.zoom as f32;
         let parts = sprite.parts(&sheet.meta.grid);
@@ -362,6 +391,12 @@ mod tests {
         assert_eq!(state.builds, 1);
         state.update_timeline(vec![10, 21], Mode::Loop).unwrap();
         assert_eq!(state.builds, 2);
+    }
+    #[test]
+    fn thumbnail_fit_preserves_aspect() {
+        assert_eq!(fit_scale((32, 16), [32.0, 32.0]), 1.0);
+        assert_eq!(fit_scale((16, 64), [32.0, 32.0]), 0.5);
+        assert_eq!(fit_scale((0, 1), [32.0, 32.0]), 0.0);
     }
     #[test]
     fn part_position_preserves_empty_canvas_edges() {

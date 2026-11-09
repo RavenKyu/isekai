@@ -91,6 +91,8 @@ pub struct SheetEditor {
     tile_name_input: [f32; 2],
     #[cfg(test)]
     sprite_name_input: [f32; 2],
+    #[cfg(test)]
+    sprite_new_input: [f32; 2],
     pub zoom: u32,
     pub show_grid: bool,
     pub guess: Option<GridGuess>,
@@ -103,9 +105,9 @@ pub struct SheetEditor {
     saved_path: Option<PathBuf>,
     tile_draft: tileset::TileDraft,
     selected_sprite: Option<u64>,
+    sprite_props_target: Option<u64>,
+    sprite_props: props::PropsDraft,
     selected_animation: Option<u64>,
-    suggestions: Vec<raster::CellRect>,
-    suggest_job: Option<job::Job<Vec<raster::ObjectBox>>>,
     animation_draft: animations::AnimationDraft,
     preview: preview::PreviewState,
     regions: regions::RegionsState,
@@ -152,7 +154,6 @@ impl AssetLibrary {
         for editor in &mut self.sheets {
             editor.poll_guess();
             editor.poll_find();
-            editor.poll_suggest();
             editor.poll_analysis();
             editor.poll_batch();
         }
@@ -445,6 +446,8 @@ impl SheetEditor {
             tile_name_input: [0.0; 2],
             #[cfg(test)]
             sprite_name_input: [0.0; 2],
+            #[cfg(test)]
+            sprite_new_input: [0.0; 2],
             zoom: 2,
             show_grid: true,
             guess: None,
@@ -455,9 +458,9 @@ impl SheetEditor {
             saved_path: None,
             tile_draft: Default::default(),
             selected_sprite: None,
+            sprite_props_target: None,
+            sprite_props: Default::default(),
             selected_animation: None,
-            suggestions: Vec::new(),
-            suggest_job: None,
             animation_draft: Default::default(),
             preview: Default::default(),
             regions: Default::default(),
@@ -479,13 +482,13 @@ impl SheetEditor {
         }
         self.cancel_guess();
         self.cancel_find();
-        self.cancel_suggest();
         self.cancel_analysis();
         self.cancel_batch();
         self.sheet = opened;
         self.selected_sprite = None;
+        self.sprite_props_target = None;
+        self.sprite_props = Default::default();
         self.selected_animation = None;
-        self.suggestions.clear();
         self.animation_draft = Default::default();
         self.preview = Default::default();
         self.guess = None;
@@ -506,6 +509,9 @@ impl SheetEditor {
     }
     fn save(&mut self) -> Result<String, String> {
         self.tile_draft.validate(&self.sheet.meta)?;
+        if self.sprite_props_target.is_some() {
+            self.sprite_props.validate()?;
+        }
         self.animation_draft.validate()?;
         let sheet = &mut self.sheet;
         let SheetSource::File(path) = &sheet.source else {
@@ -689,69 +695,6 @@ impl SheetEditor {
     }
     fn log(&mut self, message: impl Into<String>) {
         log::append(&mut self.log, message.into());
-    }
-    fn start_suggest(&mut self) {
-        if self.suggest_job.is_some() {
-            return;
-        }
-        let image = self.sheet.image.clone();
-        let total = raster::find_objects_work(&image);
-        match job::Job::start(
-            "sprite-suggest",
-            "Suggest",
-            total,
-            move |progress, cancel| {
-                raster::find_objects_with(
-                    &image,
-                    raster::Background::Auto,
-                    raster::DEFAULT_MIN_OBJECT_SIZE,
-                    progress,
-                    cancel,
-                )
-            },
-        ) {
-            Ok(job) => {
-                self.suggest_job = Some(job);
-                self.log("Suggest started (0%)");
-            }
-            Err(error) => self.log(error),
-        }
-    }
-    fn cancel_suggest(&mut self) {
-        if self.suggest_job.take().is_some() {
-            self.log("Suggest cancelled");
-        }
-    }
-    fn poll_suggest(&mut self) {
-        let Some(job) = &mut self.suggest_job else {
-            return;
-        };
-        match job.poll() {
-            Ok(Some(objects)) => {
-                self.suggest_job = None;
-                self.suggestions = edit::snap_objects(
-                    &objects,
-                    &self.sheet.meta.grid,
-                    self.sheet.image.width,
-                    self.sheet.image.height,
-                );
-                self.log("Suggest completed (100%)");
-                if self.suggestions.is_empty() {
-                    self.log("No object suggestions");
-                } else {
-                    self.log(format!("{} object suggestions", self.suggestions.len()));
-                }
-            }
-            Ok(None) => {
-                if let Some(percent) = job.next_step() {
-                    self.log(format!("Suggesting... {percent}%"));
-                }
-            }
-            Err(error) => {
-                self.suggest_job = None;
-                self.log(error);
-            }
-        }
     }
     fn start_guess(&mut self) {
         if self.guess_job.is_some() {
@@ -1494,6 +1437,97 @@ mod tests {
         let with = draw(context);
         assert!(with >= without + 4, "{without} {with}");
     }
+    fn check_sprite_list_and_creation(
+        context: &mut Context,
+        consumer: &SynchronousRendererConsumer,
+    ) {
+        use std::cell::RefCell;
+        let mut sheet = fake_sheet();
+        sheet.image = RgbaImage::new(160, 64);
+        let editor = RefCell::new(SheetEditor::new(25, sheet));
+        editor.borrow_mut().now = || 777;
+        let render = |context: &mut Context| {
+            vertices(context, consumer, |ui| {
+                ui.window("Sprite create test")
+                    .position([40.0, 40.0], Condition::Always)
+                    .size([900.0, 600.0], Condition::Always)
+                    .build(|| editor.borrow_mut().sprites_tab(ui));
+            });
+        };
+        render(context);
+        let button = editor.borrow().sprite_new_input;
+        let count = editor.borrow().sheet.meta.sprites.len();
+        click(context, render, button);
+        assert_eq!(editor.borrow().sheet.meta.sprites.len(), count);
+        assert!(editor.borrow().log.is_empty());
+        {
+            let mut e = editor.borrow_mut();
+            e.sheet.selection.cells = [(1, 2), (3, 3)].into_iter().collect();
+        }
+        click(context, render, button);
+        {
+            let e = editor.borrow();
+            let sprite = e.sheet.meta.sprites.last().unwrap();
+            assert_eq!(sprite.pivot, [24.0, 32.0]);
+            assert!(matches!(
+                sprite.shape,
+                crate::sprite::format::Shape::Set { canvas: [3, 2], .. }
+            ));
+            assert_eq!(sprite.modified, Some(777));
+        }
+        {
+            let mut e = editor.borrow_mut();
+            e.sheet.selection.cells = [(0, 0), (8, 0)].into_iter().collect();
+        }
+        click(context, render, button);
+        assert_eq!(editor.borrow().sheet.meta.sprites.len(), count + 1);
+        assert!(
+            editor
+                .borrow()
+                .log
+                .iter()
+                .any(|s| s.contains("at most 8 x 8"))
+        );
+        render(context);
+        let add = editor.borrow().sprite_props.add_button.unwrap();
+        click(context, render, add);
+        let key = editor.borrow().sprite_props.key_input.unwrap();
+        type_into(context, render, key, "key");
+        let value = editor.borrow().sprite_props.value_input.unwrap();
+        type_into(context, render, value, "value");
+        {
+            let e = editor.borrow();
+            let sprite = e.sheet.meta.sprites.last().unwrap();
+            assert_eq!(sprite.props.get("key").map(String::as_str), Some("value"));
+            assert_eq!(sprite.modified, Some(777));
+        }
+        let list = RefCell::new(SheetEditor::new(26, fake_sheet()));
+        let count_vertices = |context: &mut Context, n: usize| {
+            {
+                let mut e = list.borrow_mut();
+                let template = e.sheet.meta.sprites[0].clone();
+                e.sheet.meta.sprites = (0..n)
+                    .map(|i| {
+                        let mut s = template.clone();
+                        s.id = i as u64 + 1;
+                        s.name = format!("sprite-{i}");
+                        s
+                    })
+                    .collect();
+                e.selected_sprite = None;
+            }
+            vertices(context, consumer, |ui| {
+                ui.window("Sprite list test")
+                    .position([40.0, 40.0], Condition::Always)
+                    .size([700.0, 400.0], Condition::Always)
+                    .build(|| list.borrow_mut().sprites_tab(ui));
+            })
+        };
+        count_vertices(context, 20);
+        let small = count_vertices(context, 20);
+        let large = count_vertices(context, 1000);
+        assert!(large <= small + 100, "20 rows: {small}, 1000 rows: {large}");
+    }
     fn check_sprite_rename_log_input(
         context: &mut Context,
         consumer: &SynchronousRendererConsumer,
@@ -1685,34 +1719,6 @@ mod tests {
         assert!(second.guess.is_none());
     }
     #[test]
-    fn suggest_worker_uses_current_grid_and_cancel_preserves_results() {
-        let mut editor = SheetEditor::new(1, fake_sheet());
-        editor.start_suggest();
-        let original = editor.sheet.meta.grid;
-        let mut grid = original;
-        grid.offset = [1, 0];
-        editor.sheet.meta.grid = grid;
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-        while editor.suggest_job.is_some() {
-            editor.poll_suggest();
-            assert!(std::time::Instant::now() < deadline);
-            std::thread::yield_now();
-        }
-        assert_eq!(
-            editor.suggestions,
-            edit::suggestions(&editor.sheet.image, &grid)
-        );
-        let expected = editor.suggestions.clone();
-        // Under the original grid a run would snap differently, so an applied result shows.
-        editor.sheet.meta.grid = original;
-        assert_ne!(edit::suggestions(&editor.sheet.image, &original), expected);
-        editor.start_suggest();
-        editor.cancel_suggest();
-        assert!(editor.suggest_job.is_none());
-        editor.poll_suggest();
-        assert_eq!(editor.suggestions, expected);
-    }
-    #[test]
     fn save_state_tracks_edits_success_failure_and_memory_images() {
         let temp = crate::test_support::TempDir::new("extract");
         let path = temp.0.join("example.png");
@@ -1818,6 +1824,7 @@ mod tests {
         let (mut context, consumer) = context();
         check_tile_log_input(&mut context, &consumer);
         check_tile_properties_and_marker(&mut context, &consumer);
+        check_sprite_list_and_creation(&mut context, &consumer);
         check_sprite_rename_log_input(&mut context, &consumer);
         let library = std::cell::RefCell::new(AssetLibrary::default());
         assert!(!library.borrow().open);
