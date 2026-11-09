@@ -121,6 +121,9 @@ Library 창을 닫아도 편집 창은 유지된다. 웹 dev에는 Assets 메뉴
 
 1. `PNG path` 입력 후 `Load`, 파일 드래그 앤 드롭, `Browse...`의 네이티브 파일
    대화상자, `assets/` 목록 중 하나로 PNG를 연다. 드롭은 도구가 숨겨져 있어도 창을 연다.
+   입력칸 오른쪽 `Load`는 빈 값·공백만 있거나 마지막 경로 구성 요소가 비어 있거나 `.`·`..`이면 꺼진다.
+   따라서 `/`로 끝나는 경로도 꺼진다. 입력의 앞뒤 공백은 지우고 연다. 파일 존재 여부는 Load할 때 확인한다.
+   `Browse...`와 `assets/` 목록은 선택 즉시 열며 Load 버튼이 필요 없다.
    디렉터리 밖을 가리키는 PNG 심볼릭 링크는 이미 열린 파일을 가리켜도 포커스 전에 거부한다.
    오류는 Library 상태 줄에 남고, 열린 창과 입력 경로 및 디스크는 유지된다.
    목록은 현재 checkout의 assets 아래를 재귀 탐색하며 숨김 항목·심볼릭 링크를 따르지 않는다.
@@ -164,6 +167,11 @@ Guess의 진행·점수가 시스템 현지 시각 `HH:MM:SS`와 함께 쌓인�
 위쪽을 읽고 있으면 스크롤 위치를 유지한다. `Clear`로 해당 창의 로그만 지운다.
 Load 실패와 assets 스캔 오류는 Library의 상태 문구에 표시한다.
 
+`Grid updated`, `Tile metadata updated`, `Sprite updated`,
+`Sprite renamed and clip references updated`, `Clip updated` 중 같은 기록이 바로 이어지면
+새 줄 대신 마지막 줄의 시각과 횟수 `(xN)`을 갱신한다. 오류·Save·Reload·Guess 등 다른 기록이나
+`Clear`는 묶음을 끊는다. 묶음은 문구만 비교하므로 편집 대상이 바뀌어도 이어지며, 로그를 남기지 않는 선택 변경과 sprite·clip 삭제는 묶음을 끊지 않는다. 로그의 500줄 상한은 유지된다.
+
 메모리 이미지는 `Save image as`로 PNG 경로를 정하기 전에는 Save·Reload가 비활성이다.
 PNG 저장 후 `Save`로 메타를 따로 쓴다. 다른 편집 창이 열고 있는 PNG 경로에는 저장할 수 없다. GL 최대 텍스처 크기를 넘으면 치수와
 `GL_MAX_TEXTURE_SIZE` 오류를 한 줄로 표시하고 기존 시트를 유지한다.
@@ -184,6 +192,8 @@ PNG 저장 후 `Save`로 메타를 따로 쓴다. 다른 편집 창이 열고 �
    기본 폴더는 `assets/splites/<stem>/`이며 번호는 1부터 목록 순이다. 대상 중 사이드카가
    하나라도 있거나, 출력 이름이 심볼릭 링크이거나, 어느 편집 창에든 열린 PNG면 디렉터리를
    만들기 전에 전체를 거부한다. 그 밖의 기존 PNG는 교체한다. 검사는 버튼을 누를 때 한 번 한다.
+   열린 이미지가 충돌하면 `sidecar, symlink or open image conflicts: ...`에 경로가 표시된다.
+   열린 PNG만 걸렸다면 그 편집 창을 닫거나 다른 Output dir을 고른다. 목록의 경로가 사이드카이거나 심볼릭 링크 이름이면 창을 닫아도 거부가 남는다.
    백그라운드 진행률과 `Cancel region save`를 표시한다. 취소는 파일 사이에서 확인하므로
    이미 쓴 파일은 남는다. `Reload image`와 창 닫기도 저장을 취소한다. 이때 쓰던 파일 하나는
    끝까지 쓰고, Reload는 그 파일까지 로그에 남긴 뒤 취소를 적는다. 그 뒤로는 새 이미지의 로그에
@@ -192,6 +202,8 @@ PNG 저장 후 `Save`로 메타를 따로 쓴다. 다른 편집 창이 열고 �
    `assets/splites/<crop 이름>/<crop 이름>.png`다. 이 버튼은 JSON을 만들지 않는다.
    그 경로에 PNG나 사이드카가 이미 있으면 쓰지 않고 거부한다. 심볼릭 링크 이름도 포함한다.
    PNG는 배타적으로 게시하므로 동시에 다른 쓰기가 만든 파일도 덮지 않는다.
+   어느 편집 창에든 열린 PNG나 그 PNG를 가리키는 심볼릭 링크도 거부한다.
+   `image ... is already open; choose another image path`가 표시되면 다른 Image output을 고른다. 창을 닫아도 그 PNG가 디스크에 남아 같은 경로는 계속 거부된다.
 4. 배경을 제거하려면 그 PNG를 저장한 다음 `Key color`를 켜고 해당 창의 `Reload image`를 누른다.
    이어 격자를 직접 입력하거나 Guess/Apply로 정한다. crop과 키 색 제거는 이 두 단계다.
 5. `Extract`의 `Analyze`를 누른다. 완전 투명 픽셀의 RGB를 0으로 정규화한 뒤
@@ -204,6 +216,7 @@ PNG 저장 후 `Save`로 메타를 따로 쓴다. 다른 편집 창이 열고 �
    `assets/splites/<맵 stem>/<맵 stem>-tileset.png`다. tile은 유지하고 offset·spacing은 0이 된다.
    현재 창의 원본 PNG를 포함해 어느 편집 창에든 열린 PNG는 Output으로 쓸 수 없다.
    그 PNG를 가리키는 심볼릭 링크도 파일이나 디렉터리를 만들기 전에 거부한다.
+   `image ... is already open; choose another image path`가 표시되면 다른 창이 연 PNG는 그 창을 닫거나 다른 Output을 고른다. 현재 창의 원본이면 다른 Output을 고른다.
    `Open result`로 결과를 바로 열 수 있다. sprite·clip은 자동 생성하지 않으므로
    런타임 재생 전 편집기에서 sprite와 최소 하나의 clip을 작성한다.
 
@@ -217,7 +230,10 @@ Find regions·Suggest from objects·Analyze는 백그라운드에서 실행되�
 세 파일은 하나의 트랜잭션이 아니며 사이드카가 이미 있어도 맵은 갱신한다.
 배타 게시에는 하드 링크를 지원하는 파일시스템이 필요하다. FAT/exFAT나 하드 링크를 지원하지 않는
 일부 네트워크 마운트에서는 `Save image as`와 타일셋 JSON 게시가 IO 오류로 실패한다.
+`Save all regions`와 `Write tileset`의 PNG·맵은 rename으로 교체하므로 하드 링크가 필요 없다.
 `Write tileset`은 이때도 PNG를 이미 교체했고 `PNG written: ...; sidecar not written: sprite file IO: ...`를 표시한다.
+하드 링크 생성이 실패하면 게시하려던 새 대상 파일은 생기지 않고 임시 파일은 지워진다.
+출력 디렉터리를 새로 만들었다면 그 디렉터리는 남는다.
 이때는 하드 링크를 지원하는 저장 위치를 사용한다. 다른 방식으로 자동 전환하지 않는다.
 기존 사이드카 때문에 JSON 저장이 거부돼도 PNG는 이미 새 내용일 수 있다.
 `PNG written: ...; sidecar not written: sidecar exists; remove it first`가 그 상태다.
@@ -321,8 +337,14 @@ native 스모크는 fixture를 `target/` 아래에 복사해 재생 성공과 �
 RN_LOCAL_ASSETS=1 cargo test --locked local_assets_report -- --ignored --nocapture
 ```
 
-텍스처 크기·필터·Drop 삭제와 외부 ID 해제는 실제 GL 검사로 본다. App 필드 선언 순서와
-전체 shutdown 순서가 잘못되는 변이를 자동으로 잡는 검사는 아직 없다. 리뷰에서 컨텍스트가
+텍스처 크기·필터·Drop 삭제와 외부 ID 해제는 실제 GL 검사로 본다.
+`transformed_pixels_match_gpu_readback`은 코드로 만든 비대칭 4×4 타일의 여덟 변형을
+`SpriteQuad`로 그려 GPU에서 읽은 픽셀을 `RgbaImage::transformed`와 비교하고,
+90도 회전과 반전 후 90도 회전은 수기 기대값과도 비교한다. 방향 규약은 [사이드카 형식](#사이드카-형식)을 따른다.
+이 검사는 디스플레이가 필요해 일반 테스트에서 무시되며 `scripts/smoke-native.sh`와
+`scripts/smoke-native.sh --dev`에서 실행된다. `Playback::draw`의 dest·pivot 계산,
+`Grid::uv`의 부분 시트 호출과 웹 ES 300의 실제 픽셀 방향은 측정하지 않는다.
+App 필드 선언 순서와 전체 shutdown 순서가 잘못되는 변이를 자동으로 잡는 검사는 아직 없다. 리뷰에서 컨텍스트가
 current인지, 텍스처·shader가 GLContext보다 먼저 해제되는지 코드를 확인해야 한다.
 
 ## 스크립트에서 가져온 범위
@@ -351,4 +373,4 @@ PNG만 지원하며 undo, 프레임 이벤트, 상태머신·타일맵 배치는
 `/assets/splites/`는 gitignore에 있으며 이미지·결과 PNG·사이드카를 커밋하지 않는다.
 라이선스는 이 문서에서 단정하지 않는다. 자동 검사·웹 예제는 코드가 만든 이미지로만 동작한다.
 
-Decided in: rn-fcuz, rn-hk1c, rn-aw9h, rn-ut06, rn-6ptr
+Decided in: rn-fcuz, rn-hk1c, rn-aw9h, rn-ut06, rn-6ptr, rn-8v66
