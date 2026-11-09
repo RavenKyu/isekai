@@ -1,7 +1,7 @@
 use super::log;
 use super::{
     SheetEditor, edit,
-    view::{Overlay, input_u32},
+    view::{Overlay, input_u32, job_progress},
 };
 use crate::sprite::format::{Part, Shape};
 use dear_imgui_rs::Ui;
@@ -56,13 +56,7 @@ impl SheetEditor {
             }
         }
         if let Some(job) = &self.suggest_job {
-            let fraction = job.fraction();
-            ui.progress_bar(fraction)
-                .size([240.0, 0.0])
-                .overlay_text(format!("Suggesting... {:.0}%", fraction * 100.0))
-                .build();
-            ui.same_line();
-            if ui.button("Cancel Suggest") {
+            if job_progress(ui, job.fraction(), "Suggesting", "Cancel Suggest") {
                 self.cancel_suggest();
             }
         } else if ui.button("Suggest from objects") {

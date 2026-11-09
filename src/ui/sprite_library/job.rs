@@ -11,6 +11,7 @@ pub(super) struct Job<T> {
     total: u64,
     pub(super) result: Receiver<T>,
     label: &'static str,
+    logged: u32,
 }
 impl<T: Send + 'static> Job<T> {
     pub fn start(
@@ -41,7 +42,18 @@ impl<T: Send + 'static> Job<T> {
             total,
             result,
             label,
+            logged: 0,
         })
+    }
+    /// The next 10% step to log while running, once each; completion logs 100%.
+    pub fn next_step(&mut self) -> Option<u32> {
+        let percent = (self.fraction() * 100.0) as u32 / 10 * 10;
+        if percent > self.logged && percent < 100 {
+            self.logged = percent;
+            Some(percent)
+        } else {
+            None
+        }
     }
     pub fn fraction(&self) -> f32 {
         if self.total == 0 {

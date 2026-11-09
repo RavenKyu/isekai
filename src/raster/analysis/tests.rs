@@ -599,26 +599,57 @@ fn analysis_progress_and_cancellation_match_wrappers() {
     assert_eq!(calls.borrow().first(), Some(&(0, 7)));
     assert_eq!(calls.borrow().last(), Some(&(7, 7)));
     assert_eq!(dedupe_work(&image, &grid), 9);
-    let d = dedupe_progress(&image, &grid, true, &|_, _| {}, &cancel).unwrap();
+    calls.borrow_mut().clear();
+    let d = dedupe_progress(
+        &image,
+        &grid,
+        true,
+        &|d, t| calls.borrow_mut().push((d, t)),
+        &cancel,
+    )
+    .unwrap();
     assert_eq!(d, dedupe_with(&image, &grid, true));
+    assert_eq!(calls.borrow().first(), Some(&(0, 9)));
+    assert_eq!(calls.borrow().last(), Some(&(9, 9)));
+    calls.borrow_mut().clear();
     assert_eq!(
-        rebuild_matches_with(&image, &grid, &d, &|_, _| {}, &cancel),
-        Some(rebuild_matches(&image, &grid, &d))
-    );
-    assert!(
-        dedupe_progress(
+        rebuild_matches_with(
             &image,
             &grid,
-            false,
-            &|done, _| {
-                if done == 1 {
-                    cancel.store(true, Ordering::Relaxed);
-                }
-            },
+            &d,
+            &|d, t| calls.borrow_mut().push((d, t)),
             &cancel
-        )
-        .is_none()
+        ),
+        Some(rebuild_matches(&image, &grid, &d))
     );
+    assert_eq!(calls.borrow().first(), Some(&(0, 9)));
+    assert_eq!(calls.borrow().last(), Some(&(9, 9)));
+
+    // Cancelled after the first cell or row, each loop has to stop right there rather
+    // than run to its end and drop the result only at the final check.
+    fn stops_after_first_step(run: impl Fn(&dyn Fn(u64, u64), &AtomicBool) -> bool) -> bool {
+        let cancel = AtomicBool::new(false);
+        let last = std::cell::Cell::new(0);
+        let progress = |done, _| {
+            last.set(done);
+            if done == 1 {
+                cancel.store(true, Ordering::Relaxed);
+            }
+        };
+        run(&progress, &cancel) && last.get() == 1
+    }
+    assert!(stops_after_first_step(|progress, cancel| {
+        dedupe_progress(&image, &grid, false, progress, cancel).is_none()
+    }));
+    assert!(stops_after_first_step(|progress, cancel| {
+        rebuild_matches_with(&image, &grid, &d, progress, cancel).is_none()
+    }));
+    assert!(stops_after_first_step(|progress, cancel| {
+        find_objects_with(&image, Background::Transparent, 1, progress, cancel).is_none()
+    }));
+
+    cancel.store(true, Ordering::Relaxed);
+    assert!(dedupe_progress(&image, &grid, false, &|_, _| {}, &cancel).is_none());
     assert!(rebuild_matches_with(&image, &grid, &d, &|_, _| {}, &cancel).is_none());
     assert!(find_objects_with(&image, Background::Transparent, 1, &|_, _| {}, &cancel).is_none());
 }

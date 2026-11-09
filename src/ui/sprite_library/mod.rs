@@ -79,7 +79,6 @@ pub struct SheetEditor {
     guess_job: Option<job::Job<GridGuess>>,
     pub log: log::SheetLog,
     log_view: log::LogView,
-    guess_logged_percent: u32,
     /// Actions this editor queued; the library takes them after drawing.
     pub pending: Vec<Action>,
     /// Where Save image as wrote the memory image, for the library's PNG path field.
@@ -89,7 +88,6 @@ pub struct SheetEditor {
     selected_clip: Option<String>,
     suggestions: Vec<raster::CellRect>,
     suggest_job: Option<job::Job<Vec<raster::ObjectBox>>>,
-    suggest_percent: u32,
     clip_draft: clips::ClipDraft,
     preview: preview::PreviewState,
     regions: regions::RegionsState,
@@ -414,7 +412,6 @@ impl SheetEditor {
             guess_job: None,
             log: Default::default(),
             log_view: Default::default(),
-            guess_logged_percent: 0,
             pending: vec![],
             saved_path: None,
             tile_draft: Default::default(),
@@ -422,7 +419,6 @@ impl SheetEditor {
             selected_clip: None,
             suggestions: Vec::new(),
             suggest_job: None,
-            suggest_percent: 0,
             clip_draft: Default::default(),
             preview: Default::default(),
             regions: Default::default(),
@@ -635,7 +631,6 @@ impl SheetEditor {
         ) {
             Ok(job) => {
                 self.suggest_job = Some(job);
-                self.suggest_percent = 0;
                 self.log("Suggest started (0%)");
             }
             Err(error) => self.log(error),
@@ -647,7 +642,7 @@ impl SheetEditor {
         }
     }
     fn poll_suggest(&mut self) {
-        let Some(job) = &self.suggest_job else {
+        let Some(job) = &mut self.suggest_job else {
             return;
         };
         match job.poll() {
@@ -667,9 +662,7 @@ impl SheetEditor {
                 }
             }
             Ok(None) => {
-                let percent = (job.fraction() * 100.0) as u32 / 10 * 10;
-                if percent > self.suggest_percent && percent < 100 {
-                    self.suggest_percent = percent;
+                if let Some(percent) = job.next_step() {
                     self.log(format!("Suggesting... {percent}%"));
                 }
             }
@@ -687,7 +680,6 @@ impl SheetEditor {
         match guess::start(self.sheet.image.clone()) {
             Ok(job) => {
                 self.guess_job = Some(job);
-                self.guess_logged_percent = 0;
                 self.log("Guess started (0%)");
             }
             Err(error) => log::append(&mut self.log, error),
@@ -699,7 +691,7 @@ impl SheetEditor {
         }
     }
     fn poll_guess(&mut self) {
-        let Some(job) = &self.guess_job else {
+        let Some(job) = &mut self.guess_job else {
             return;
         };
         match job.poll() {
@@ -723,9 +715,7 @@ impl SheetEditor {
                 self.guess_job = None;
             }
             Ok(None) => {
-                let percent = ((job.fraction() * 100.0) as u32 / 10) * 10;
-                if percent > self.guess_logged_percent && percent < 100 {
-                    self.guess_logged_percent = percent;
+                if let Some(percent) = job.next_step() {
                     self.log(format!("Guessing... {percent}%"));
                 }
             }
@@ -750,13 +740,7 @@ impl SheetEditor {
         ui.set_next_item_width(130.0);
         changed |= view::input_u32(ui, "Spacing", &mut grid.spacing, 0);
         if let Some(job) = &self.guess_job {
-            let fraction = job.fraction();
-            ui.progress_bar(fraction)
-                .size([240.0, 0.0])
-                .overlay_text(format!("Guessing... {:.0}%", fraction * 100.0))
-                .build();
-            ui.same_line();
-            if ui.button("Cancel Guess") {
+            if view::job_progress(ui, job.fraction(), "Guessing", "Cancel Guess") {
                 self.cancel_guess();
             }
         } else if ui.button("Guess") {
@@ -1420,7 +1404,8 @@ mod tests {
     fn suggest_worker_uses_current_grid_and_cancel_preserves_results() {
         let mut editor = SheetEditor::new(1, fake_sheet());
         editor.start_suggest();
-        let mut grid = editor.sheet.meta.grid;
+        let original = editor.sheet.meta.grid;
+        let mut grid = original;
         grid.offset = [1, 0];
         editor.sheet.meta.grid = grid;
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
@@ -1434,8 +1419,12 @@ mod tests {
             edit::suggestions(&editor.sheet.image, &grid)
         );
         let expected = editor.suggestions.clone();
+        // Under the original grid a run would snap differently, so an applied result shows.
+        editor.sheet.meta.grid = original;
+        assert_ne!(edit::suggestions(&editor.sheet.image, &original), expected);
         editor.start_suggest();
         editor.cancel_suggest();
+        assert!(editor.suggest_job.is_none());
         editor.poll_suggest();
         assert_eq!(editor.suggestions, expected);
     }
