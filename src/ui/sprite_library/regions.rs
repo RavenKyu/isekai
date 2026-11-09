@@ -627,6 +627,37 @@ mod tests {
         }
     }
     #[test]
+    fn batch_preflight_refuses_open_output_before_creating_directories() {
+        let temp = crate::test_support::TempDir::new("batch-preflight");
+        let boxes = vec![
+            ObjectBox {
+                x: 0,
+                y: 0,
+                w: 2,
+                h: 2,
+            };
+            2
+        ];
+        let dir = temp.0.join("assets/splites/new");
+        let open_files = [dir.join("map-region-1.png"), dir.join("map-region-2.png")];
+        let entries = std::fs::read_dir(&temp.0).unwrap().count();
+        let error = plan_batch(&boxes, "map", &dir, &temp.0, &open_files).unwrap_err();
+        assert!(error.starts_with("sidecar, symlink or open image conflicts:"));
+        for path in &open_files {
+            assert!(error.contains(&path.display().to_string()), "{error}");
+        }
+        assert!(!temp.0.join("assets").exists());
+        assert!(!dir.exists());
+        assert_eq!(std::fs::read_dir(&temp.0).unwrap().count(), entries);
+        super::super::extract::tests::assert_no_temps(&temp.0);
+
+        let targets = plan_batch(&boxes, "map", &dir, &temp.0, &[]).unwrap();
+        assert_eq!(targets.len(), boxes.len());
+        assert!(dir.is_dir());
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+        super::super::extract::tests::assert_no_temps(&temp.0);
+    }
+    #[test]
     fn batch_preflight_refuses_a_png_open_in_any_editor() {
         let temp = crate::test_support::TempDir::new("extract");
         let boxes = vec![
@@ -1067,6 +1098,42 @@ mod tests {
         assert!(!output.exists());
         assert!(sidecar.is_symlink());
         assert_eq!(std::fs::read_dir(&temp.0).unwrap().count(), 3);
+    }
+    #[test]
+    fn save_memory_refuses_open_output_before_creating_directories() {
+        let temp = crate::test_support::TempDir::new("save-memory");
+        let mut sheet = super::super::extract::tests::memory_sheet();
+        let output = temp.0.join("assets/splites/new/new.png");
+        let SheetSource::Memory { name } = &sheet.source else {
+            panic!("expected a memory image");
+        };
+        let source_name = name.clone();
+        let meta = sheet.meta.clone();
+        let dirty = sheet.dirty;
+        let entries = std::fs::read_dir(&temp.0).unwrap().count();
+        let error =
+            save_memory(&mut sheet, &output, &temp.0, std::slice::from_ref(&output)).unwrap_err();
+        assert!(
+            error.contains("already open; choose another image path"),
+            "{error}"
+        );
+        assert!(error.is_ascii() && !error.contains(['\r', '\n']));
+        assert!(!temp.0.join("assets").exists());
+        assert_eq!(std::fs::read_dir(&temp.0).unwrap().count(), entries);
+        super::super::extract::tests::assert_no_temps(&temp.0);
+        assert!(matches!(&sheet.source, SheetSource::Memory { name } if name == &source_name));
+        assert_eq!(sheet.meta, meta);
+        assert_eq!(sheet.dirty, dirty);
+
+        save_memory(&mut sheet, &output, &temp.0, &[]).unwrap();
+        assert!(output.is_file());
+        assert!(matches!(&sheet.source, SheetSource::File(path) if path == &output));
+        assert_eq!(
+            RgbaImage::from_png(&std::fs::read(&output).unwrap()).unwrap(),
+            sheet.image
+        );
+        assert!(!store::sidecar_for(&output).exists());
+        super::super::extract::tests::assert_no_temps(&temp.0);
     }
     #[test]
     fn save_memory_uses_png_and_changes_source_only_after_success() {

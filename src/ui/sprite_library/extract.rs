@@ -572,7 +572,7 @@ pub(super) mod tests {
         }
         (image, grid)
     }
-    fn assert_no_temps(root: &Path) {
+    pub(crate) fn assert_no_temps(root: &Path) {
         for entry in fs::read_dir(root).unwrap() {
             let entry = entry.unwrap();
             assert!(
