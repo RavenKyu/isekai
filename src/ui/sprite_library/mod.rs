@@ -1624,11 +1624,7 @@ mod tests {
         let mut imgui = crate::dev::context().unwrap();
         let mut renderer = GlowRenderer::with_shared_context(Rc::clone(&gl), &mut imgui).unwrap();
         let mut library = SpriteLibrary::default();
-        let default_grid = Grid {
-            tile: 16,
-            offset: [0, 0],
-            spacing: 0,
-        };
+        let default_grid = Grid::DEFAULT;
         library.pending.push(Action::Replace {
             image: crate::sprite::example().0,
             name: "cropped".into(),

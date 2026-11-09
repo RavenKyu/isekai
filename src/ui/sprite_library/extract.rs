@@ -167,12 +167,13 @@ pub(super) fn source_stem(source: &SheetSource) -> String {
         SheetSource::Memory { name } => name.clone(),
     }
 }
+const LOCAL_ASSETS: &str = "assets/splites";
+pub(super) fn default_directory(source: &SheetSource, checkout: &Path) -> PathBuf {
+    checkout.join(LOCAL_ASSETS).join(source_stem(source))
+}
 pub(super) fn default_output(source: &SheetSource, checkout: &Path) -> PathBuf {
     let stem = source_stem(source);
-    checkout
-        .join("assets/splites")
-        .join(&stem)
-        .join(format!("{stem}-tileset.png"))
+    default_directory(source, checkout).join(format!("{stem}-tileset.png"))
 }
 pub(super) fn absolute_output(path: &Path, checkout: &Path) -> Result<PathBuf, StoreError> {
     if path.components().any(|c| matches!(c, Component::ParentDir)) {
@@ -212,8 +213,7 @@ pub(super) fn refuse_open_output(output: &Path, open_files: &[PathBuf]) -> Resul
     Ok(())
 }
 pub(super) fn inside_local_assets(path: &Path, checkout: &Path) -> bool {
-    absolute_output(path, checkout)
-        .is_ok_and(|path| path.starts_with(checkout.join("assets/splites")))
+    absolute_output(path, checkout).is_ok_and(|path| path.starts_with(checkout.join(LOCAL_ASSETS)))
 }
 pub(super) fn ensure_output_dir(path: &Path, checkout: &Path) -> Result<PathBuf, StoreError> {
     let output = absolute_output(path, checkout)?;
@@ -546,14 +546,7 @@ pub(super) mod tests {
     use std::io::Read;
     pub(crate) fn memory_sheet() -> OpenSheet {
         let (image, _) = crate::sprite::example();
-        let meta = SpriteSheet::new_for(
-            "map.png",
-            Grid {
-                tile: 16,
-                offset: [0, 0],
-                spacing: 0,
-            },
-        );
+        let meta = SpriteSheet::new_for("map.png", Grid::DEFAULT);
         OpenSheet {
             source: SheetSource::Memory { name: "map".into() },
             image,
@@ -600,14 +593,7 @@ pub(super) mod tests {
             let plan = plan_extract(&image, &grid, 16, &temp.0.join("map.png"), &temp.0).unwrap();
             let png = RgbaImage::from_png(&plan.png).unwrap();
             assert_eq!((png.width, png.height), (48, 16));
-            assert_eq!(
-                plan.sheet.grid,
-                Grid {
-                    tile: 16,
-                    offset: [0, 0],
-                    spacing: 0
-                }
-            );
+            assert_eq!(plan.sheet.grid, Grid::DEFAULT);
             assert_eq!(plan.sheet.image, "map.png");
             assert!(
                 plan.sheet.tiles.is_empty()
@@ -627,11 +613,7 @@ pub(super) mod tests {
         assert!(
             plan_extract(
                 &RgbaImage::new(7, 7),
-                &Grid {
-                    tile: 16,
-                    offset: [0, 0],
-                    spacing: 0
-                },
+                &Grid::DEFAULT,
                 16,
                 &temp.0.join("map.png"),
                 &temp.0
@@ -885,14 +867,7 @@ pub(super) mod tests {
                 let path = path.clone();
                 let barrier = barrier.clone();
                 std::thread::spawn(move || {
-                    let sheet = SpriteSheet::new_for(
-                        &format!("image-{i}.png"),
-                        Grid {
-                            tile: 16,
-                            offset: [0, 0],
-                            spacing: 0,
-                        },
-                    );
+                    let sheet = SpriteSheet::new_for(&format!("image-{i}.png"), Grid::DEFAULT);
                     barrier.wait();
                     save_sidecar_new(&path, &sheet).is_ok()
                 })

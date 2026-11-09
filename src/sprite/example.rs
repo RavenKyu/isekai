@@ -10,14 +10,7 @@ use std::path::{Path, PathBuf};
 pub const EXAMPLE_JSON: &str = include_str!("../../tests/fixtures/example.sprites.json");
 pub fn example() -> (RgbaImage, SpriteSheet) {
     let mut image = RgbaImage::new(64, 16);
-    let mut sheet = SpriteSheet::new_for(
-        "example.png",
-        Grid {
-            tile: 16,
-            offset: [0, 0],
-            spacing: 0,
-        },
-    );
+    let mut sheet = SpriteSheet::new_for("example.png", Grid::DEFAULT);
     for (col, (name, color)) in [
         ("a", [255, 64, 64, 255]),
         ("b", [64, 255, 64, 255]),

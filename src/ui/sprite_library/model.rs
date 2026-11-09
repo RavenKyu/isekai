@@ -160,16 +160,7 @@ pub fn open_sheet(
         image.apply_key_color(key);
     }
     let dirty = sidecar.is_none();
-    let meta = sidecar.unwrap_or_else(|| {
-        SpriteSheet::new_for(
-            name,
-            Grid {
-                tile: 16,
-                offset: [0, 0],
-                spacing: 0,
-            },
-        )
-    });
+    let meta = sidecar.unwrap_or_else(|| SpriteSheet::new_for(name, Grid::DEFAULT));
     if meta.image != name {
         return Err(format!(
             "sidecar image {:?} does not match opened file {name:?}",

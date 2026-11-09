@@ -317,10 +317,7 @@ fn crop_action(
 }
 fn default_image_output(source: &SheetSource, checkout: &Path) -> PathBuf {
     let stem = extract::source_stem(source);
-    checkout
-        .join("assets/splites")
-        .join(&stem)
-        .join(format!("{stem}.png"))
+    extract::default_directory(source, checkout).join(format!("{stem}.png"))
 }
 fn save_memory(
     sheet: &mut OpenSheet,
@@ -534,9 +531,7 @@ pub(super) fn tab(editor: &mut SheetEditor, ui: &Ui, open_files: &[PathBuf]) {
     };
     let stem = extract::source_stem(&sheet.source);
     if state.batch_dir.is_empty() {
-        state.batch_dir = checkout
-            .join("assets/splites")
-            .join(&stem)
+        state.batch_dir = extract::default_directory(&sheet.source, &checkout)
             .to_string_lossy()
             .into_owned();
     }
