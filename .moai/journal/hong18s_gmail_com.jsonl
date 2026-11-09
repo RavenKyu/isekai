@@ -295,3 +295,5 @@
 {"ts":"2026-11-08T23:52:18Z","id":"rn-fx6y","kind":"status","by":"Raven","by_email":"hong18s@gmail.com","from":"todo","to":"in_progress"}
 {"ts":"2026-11-08T23:52:59Z","id":"rn-fx6y","kind":"note","by":"Raven","by_email":"hong18s@gmail.com","text":"Merged aee62c9 into develop. Tests dev 48 / non-dev 28 pass, clippy both clean, mutation (pin ignored) fails the new test."}
 {"ts":"2026-11-08T23:52:59Z","id":"rn-fx6y","kind":"status","by":"Raven","by_email":"hong18s@gmail.com","from":"in_progress","to":"done"}
+{"ts":"2026-11-09T00:02:35Z","id":"rn-uzsv","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.3.1"}
+{"ts":"2026-11-09T00:02:39Z","id":"rn-fx6y","kind":"note","by":"Raven","by_email":"hong18s@gmail.com","text":"Checked on screen by the person: Pin tile + Add selected cells animates in Preview."}
