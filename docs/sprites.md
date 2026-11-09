@@ -121,6 +121,9 @@ Library 창을 닫아도 편집 창은 유지된다. 웹 dev에는 Assets 메뉴
 
 1. `PNG path` 입력 후 `Load`, 파일 드래그 앤 드롭, `Browse...`의 네이티브 파일
    대화상자, `assets/` 목록 중 하나로 PNG를 연다. 드롭은 도구가 숨겨져 있어도 창을 연다.
+   입력칸 오른쪽 `Load`는 빈 값·공백만 있거나 마지막 경로 구성 요소가 비어 있거나 `.`·`..`이면 꺼진다.
+   따라서 `/`로 끝나는 경로도 꺼진다. 입력의 앞뒤 공백은 지우고 연다. 파일 존재 여부는 Load할 때 확인한다.
+   `Browse...`와 `assets/` 목록은 선택 즉시 열며 Load 버튼이 필요 없다.
    디렉터리 밖을 가리키는 PNG 심볼릭 링크는 이미 열린 파일을 가리켜도 포커스 전에 거부한다.
    오류는 Library 상태 줄에 남고, 열린 창과 입력 경로 및 디스크는 유지된다.
    목록은 현재 checkout의 assets 아래를 재귀 탐색하며 숨김 항목·심볼릭 링크를 따르지 않는다.
@@ -163,6 +166,11 @@ Guess의 진행·점수가 시스템 현지 시각 `HH:MM:SS`와 함께 쌓인�
 스크롤해서 읽고 텍스트를 선택해 복사할 수 있다. 아래쪽에서 읽는 동안에는 새 줄을 따라가며,
 위쪽을 읽고 있으면 스크롤 위치를 유지한다. `Clear`로 해당 창의 로그만 지운다.
 Load 실패와 assets 스캔 오류는 Library의 상태 문구에 표시한다.
+
+연속 입력으로 `Grid updated`, `Tile metadata updated`, `Sprite updated`,
+`Sprite renamed and clip references updated`, `Clip updated` 중 같은 기록이 바로 이어지면
+새 줄 대신 마지막 줄의 시각과 횟수 `(xN)`을 갱신한다. 오류·Save·Reload·Guess 등 다른 기록이나
+`Clear`는 묶음을 끊는다. 로그의 500줄 상한은 유지된다.
 
 메모리 이미지는 `Save image as`로 PNG 경로를 정하기 전에는 Save·Reload가 비활성이다.
 PNG 저장 후 `Save`로 메타를 따로 쓴다. 다른 편집 창이 열고 있는 PNG 경로에는 저장할 수 없다. GL 최대 텍스처 크기를 넘으면 치수와
