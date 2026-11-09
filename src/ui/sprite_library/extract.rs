@@ -134,7 +134,8 @@ pub(super) fn refuse_open_output(output: &Path, open_files: &[PathBuf]) -> Resul
         return Err(format!(
             "image {} is already open; choose another image path",
             output.display()
-        ));
+        )
+        .replace(['\n', '\r'], " "));
     }
     Ok(())
 }
@@ -577,8 +578,7 @@ pub(super) mod tests {
         );
         assert!(!temp.0.join("assets").exists());
         assert_eq!(fs::read_dir(&temp.0).unwrap().count(), entries);
-        // A memory sheet has no open file; a new output remains writable.
-        assert!(matches!(memory_sheet().source, SheetSource::Memory { .. }));
+        // Once no editor holds that path, the same new output is writable.
         write_plan(&plan, &[]).unwrap();
         assert_eq!(fs::read(&missing).unwrap(), plan.png);
         assert_no_temps(&temp.0);

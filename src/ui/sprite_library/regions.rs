@@ -92,7 +92,8 @@ fn save_memory(
         return Err(format!(
             "sidecar {} exists; choose another image path",
             sidecar.display()
-        ));
+        )
+        .replace(['\n', '\r'], " "));
     }
     let name = output
         .file_name()
