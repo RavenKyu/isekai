@@ -33,7 +33,7 @@ impl SheetEditor {
             debug_assert_eq!(texture.width, sheet.image.width);
         }
         ui.child_window("Sheet view")
-            .size([0.0, 210.0])
+            .size([0.0, 0.0])
             .flags(WindowFlags::HORIZONTAL_SCROLLBAR)
             .build(ui, || {
                 let origin = ui.cursor_screen_pos();

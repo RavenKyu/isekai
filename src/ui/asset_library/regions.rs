@@ -457,10 +457,7 @@ fn start_find(state: &mut RegionsState, sheet: &OpenSheet, log: &mut log::SheetL
         Err(e) => log::append(log, e),
     }
 }
-pub(super) fn tab(editor: &mut SheetEditor, ui: &Ui, open_files: &[PathBuf]) {
-    let Some(_tab) = ui.tab_item("Regions") else {
-        return;
-    };
+pub(super) fn section(editor: &mut SheetEditor, ui: &Ui, open_files: &[PathBuf]) {
     let SheetEditor {
         sheet,
         regions: state,

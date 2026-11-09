@@ -17,7 +17,7 @@ use crate::{
     sprite::{Grid, SpriteSheet, store, texture::SheetTexture},
 };
 use dear_imgui_glow::{ExternalTextureId, GlowRenderer};
-use dear_imgui_rs::{Condition, TextureId, Ui};
+use dear_imgui_rs::{Condition, TabItemOptions, TabItemPlacement, TextureId, TreeNodeFlags, Ui};
 use std::{
     path::{Path, PathBuf},
     rc::Rc,
@@ -67,11 +67,21 @@ pub enum Action {
         grid: Grid,
     },
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+enum EditorTab {
+    #[default]
+    Tileset,
+    Sprites,
+    Animations,
+    Import,
+}
+
 /// Everything needed to edit one sheet. The library owns a list of these.
 pub struct SheetEditor {
     pub id: SheetId,
     pub sheet: OpenSheet,
     now: fn() -> u64,
+    active_tab: EditorTab,
     focus_requested: bool,
     confirm_close: bool,
     #[cfg(test)]
@@ -425,6 +435,7 @@ impl SheetEditor {
                     .unwrap_or_default()
                     .as_secs()
             },
+            active_tab: EditorTab::default(),
             focus_requested: true,
             confirm_close: false,
             #[cfg(test)]
@@ -534,7 +545,7 @@ impl SheetEditor {
         let mut window = ui
             .window(self.window_title())
             .opened(&mut open)
-            .size([1000.0, 700.0], Condition::FirstUseEver)
+            .size([1280.0, 760.0], Condition::FirstUseEver)
             .position(
                 [
                     180.0 + (self.id % 8) as f32 * 28.0,
@@ -614,24 +625,66 @@ impl SheetEditor {
             },
         );
         self.grid_panel(ui);
-        let overlays = self.sprite_overlays();
-        regions::sheet_view(self, ui, overlays);
-        if let Some(_tabs) = ui.tab_bar("Sheet editor tabs") {
-            if let Some(_tab) = ui.tab_item("Tileset") {
-                self.tileset_tab(ui);
-            }
-            if let Some(_tab) = ui.tab_item("Sprites") {
-                self.sprites_tab(ui);
-            }
-            if let Some(_tab) = ui.tab_item("Animations") {
-                self.animations_tab(ui);
-            }
-            if let Some(_tab) = ui.tab_item("Preview") {
-                self.preview_tab(ui, now_ms);
-            }
-            regions::tab(self, ui, open_files);
-            extract::tab(self, ui, open_files);
-        }
+        let available = ui.content_region_avail()[0];
+        let side = 300.0_f32.min((available * 0.3).max(120.0));
+        let sheet_width = ((available - side - 20.0) * 0.5).max(100.0);
+        let middle_width = (available - side - sheet_width - 20.0).max(100.0);
+        ui.child_window("Sheet column")
+            .size([sheet_width, 0.0])
+            .build(ui, || {
+                ui.text("Sheet");
+                ui.text_disabled("Click: select  Shift: range  Ctrl: toggle");
+                let overlays = self.sprite_overlays();
+                regions::sheet_view(self, ui, overlays);
+            });
+        ui.same_line();
+        ui.child_window("Editor tabs column")
+            .size([middle_width, 0.0])
+            .build(ui, || {
+                if let Some(_tabs) = ui.tab_bar("Sheet editor tabs") {
+                    if let Some(_tab) = ui.tab_item("Tileset") {
+                        self.active_tab = EditorTab::Tileset;
+                        self.tileset_tab(ui);
+                    }
+                    if let Some(_tab) = ui.tab_item(format!(
+                        "Sprites ({})###sprites",
+                        self.sheet.meta.sprites.len()
+                    )) {
+                        self.active_tab = EditorTab::Sprites;
+                        self.sprites_tab(ui);
+                    }
+                    if let Some(_tab) = ui.tab_item(format!(
+                        "Animations ({})###animations",
+                        self.sheet.meta.animations.len()
+                    )) {
+                        self.active_tab = EditorTab::Animations;
+                        self.animations_tab(ui);
+                    }
+                    if let Some(_tab) = ui.tab_item_with_flags(
+                        "Import",
+                        None,
+                        TabItemOptions::new().placement(TabItemPlacement::Trailing),
+                    ) {
+                        self.active_tab = EditorTab::Import;
+                        if ui.collapsing_header("Regions", TreeNodeFlags::empty()) {
+                            ui.text_wrapped("Cut regions out of a large picture into new PNGs.");
+                            regions::section(self, ui, open_files);
+                        }
+                        if ui.collapsing_header("Extract tileset", TreeNodeFlags::empty()) {
+                            ui.text_wrapped(
+                                "Turn a map picture into a tileset PNG and a .map.json.",
+                            );
+                            extract::section(self, ui, open_files);
+                        }
+                    }
+                }
+            });
+        ui.same_line();
+        ui.child_window("Preview column")
+            .size([0.0, 0.0])
+            .build(ui, || {
+                self.preview_panel(ui, now_ms);
+            });
     }
     fn log(&mut self, message: impl Into<String>) {
         log::append(&mut self.log, message.into());
@@ -1281,7 +1334,7 @@ mod tests {
     }
     pub(super) fn context() -> (Context, SynchronousRendererConsumer) {
         let mut context = crate::dev::context().unwrap();
-        context.io_mut().set_display_size([1400.0, 900.0]);
+        context.io_mut().set_display_size([2000.0, 1100.0]);
         context.io_mut().set_delta_time(1.0 / 60.0);
         context
             .io_mut()
@@ -1770,6 +1823,82 @@ mod tests {
             single >= baseline + 4 && double >= single + 4,
             "baseline={baseline}, one={single}, two={double}"
         );
+        let transition = std::cell::RefCell::new(SheetEditor::new(71, fake_sheet()));
+        transition.borrow_mut().sheet.selection.cells.insert((0, 0));
+        let draw_transition = |context: &mut Context| {
+            vertices(context, &consumer, |ui| {
+                ui.window("Transition test")
+                    .position([40.0, 40.0], Condition::Always)
+                    .size([1200.0, 700.0], Condition::Always)
+                    .build(|| transition.borrow_mut().draw_contents(ui, 0, &[]));
+            })
+        };
+        draw_transition(&mut context);
+        {
+            let mut editor = transition.borrow_mut();
+            editor.active_tab = EditorTab::Animations;
+            editor.selected_animation = Some(5);
+        }
+        draw_transition(&mut context);
+        assert_eq!(transition.borrow().active_tab, EditorTab::Tileset);
+        assert_eq!(
+            transition.borrow().preview.target,
+            preview::PreviewTarget::Selection
+        );
+        // Each tab paints an image when its target exists; empty targets paint only text.
+        let editor = std::cell::RefCell::new(SheetEditor::new(70, fake_sheet()));
+        let measure_preview = |context: &mut Context, tab: EditorTab, selected: bool| {
+            {
+                let mut editor = editor.borrow_mut();
+                editor.active_tab = tab;
+                editor.preview.drawn_parts = 0;
+                editor.sheet.selection.cells.clear();
+                editor.selected_sprite = None;
+                editor.selected_animation = None;
+                if selected {
+                    match tab {
+                        EditorTab::Tileset | EditorTab::Import => {
+                            editor.sheet.selection.cells.insert((0, 0));
+                        }
+                        EditorTab::Sprites => editor.selected_sprite = Some(1),
+                        EditorTab::Animations => editor.selected_animation = Some(5),
+                    }
+                }
+            }
+            vertices(context, &consumer, |ui| {
+                ui.window("Preview panel test")
+                    .position([40.0, 40.0], Condition::Always)
+                    .size([400.0, 500.0], Condition::Always)
+                    .build(|| editor.borrow_mut().preview_panel(ui, 0));
+            })
+        };
+        for tab in [
+            EditorTab::Tileset,
+            EditorTab::Import,
+            EditorTab::Sprites,
+            EditorTab::Animations,
+        ] {
+            let _ = measure_preview(&mut context, tab, false);
+            let empty = measure_preview(&mut context, tab, false);
+            let with_target = measure_preview(&mut context, tab, true);
+            assert_eq!(editor.borrow().preview.drawn_parts, 1);
+            assert!(
+                with_target != empty,
+                "{tab:?}: target={with_target}, empty={empty}"
+            );
+        }
+        {
+            let mut e = editor.borrow_mut();
+            e.active_tab = EditorTab::Tileset;
+            e.sheet.selection.cells = (0..257).map(|col| (col, 0)).collect();
+        }
+        vertices(&mut context, &consumer, |ui| {
+            ui.window("Preview panel test")
+                .position([40.0, 40.0], Condition::Always)
+                .size([400.0, 500.0], Condition::Always)
+                .build(|| editor.borrow_mut().preview_panel(ui, 0));
+        });
+        assert_eq!(editor.borrow().preview.drawn_parts, 0);
         check_window_close_interactions(&mut context, &consumer);
         log::LogView::check_interactions(&mut context, &consumer);
         context

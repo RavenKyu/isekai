@@ -1,4 +1,4 @@
-use super::SheetEditor;
+use super::{EditorTab, SheetEditor};
 use crate::sprite::{Grid, Mode, Timeline, format::Part};
 use dear_imgui_rs::{TextureId, Ui};
 
@@ -6,6 +6,7 @@ use dear_imgui_rs::{TextureId, Ui};
 pub enum PreviewTarget {
     #[default]
     None,
+    Selection,
     Animation(u64),
     Sprite(u64),
 }
@@ -16,7 +17,12 @@ pub struct PreviewState {
     elapsed_base: u64,
     timeline: Option<Timeline>,
     signature: Option<(Vec<u32>, Mode)>,
+    #[cfg(test)]
+    builds: u32,
+    #[cfg(test)]
+    pub(super) drawn_parts: usize,
     pub zoom: u32,
+    pub show_pivot: bool,
 }
 impl Default for PreviewState {
     fn default() -> Self {
@@ -27,7 +33,12 @@ impl Default for PreviewState {
             elapsed_base: 0,
             timeline: None,
             signature: None,
+            #[cfg(test)]
+            builds: 0,
+            #[cfg(test)]
+            drawn_parts: 0,
             zoom: 3,
+            show_pivot: true,
         }
     }
 }
@@ -60,6 +71,10 @@ impl PreviewState {
         let signature = (durations, mode);
         if self.signature.as_ref() != Some(&signature) {
             self.timeline = Some(Timeline::new(signature.0.clone(), mode)?);
+            #[cfg(test)]
+            {
+                self.builds += 1;
+            }
             self.signature = Some(signature);
         }
         Ok(())
@@ -78,7 +93,9 @@ pub struct PartView {
     pub height: u32,
 }
 pub fn draw_parts(ui: &Ui, view: &PartView, parts: &[Part], origin: [f32; 2], zoom: u32) {
-    let scale = zoom as f32;
+    draw_parts_scaled(ui, view, parts, origin, zoom as f32);
+}
+fn draw_parts_scaled(ui: &Ui, view: &PartView, parts: &[Part], origin: [f32; 2], scale: f32) {
     let draw = ui.get_window_draw_list();
     for part in parts {
         let (uv0, uv1) = view.grid.uv(part.col, part.row, view.width, view.height);
@@ -108,148 +125,244 @@ fn image_quad(min: [f32; 2], max: [f32; 2], corners: [[f32; 2]; 4]) -> [([f32; 2
         ([min[0], max[1]], corners[2]),
     ]
 }
-impl SheetEditor {
-    pub fn preview_tab(&mut self, ui: &Ui, now: u64) {
-        let sheet = &self.sheet;
-        let mut choices = vec![("None".to_string(), PreviewTarget::None)];
-        for animation in &sheet.meta.animations {
-            choices.push((
-                format!("Animation: {}", animation.name),
-                PreviewTarget::Animation(animation.id),
-            ));
-        }
-        for sprite in &sheet.meta.sprites {
-            choices.push((
-                format!("Sprite: {}", sprite.name),
-                PreviewTarget::Sprite(sprite.id),
-            ));
-        }
-        let mut index = choices
-            .iter()
-            .position(|(_, t)| *t == self.preview.target)
-            .unwrap_or(0);
-        let labels: Vec<_> = choices.iter().map(|(label, _)| label.as_str()).collect();
-        if ui.combo_simple_string("Preview target", &mut index, &labels) {
-            self.preview.select(choices[index].1.clone(), now);
-        }
-        if ui.button(if self.preview.playing {
-            "Pause"
-        } else {
-            "Play"
-        }) {
-            self.preview.pause_or_play(now);
-        }
-        ui.same_line();
-        if ui.button("Restart") {
-            self.preview.restart(now);
-        }
-        ui.set_next_item_width(200.0);
-        ui.slider("Preview zoom", 1, 8, &mut self.preview.zoom);
-        let mut parts = Vec::new();
-        let mut pivot = [0.0; 2];
-        let mut bounds = (0, 0);
-        let mut frame_count = 1;
-        let result: Result<(), String> = (|| {
-            let sprite = match &self.preview.target {
-                PreviewTarget::Animation(id) => {
-                    let animation = sheet
-                        .meta
-                        .animations
-                        .iter()
-                        .find(|c| c.id == *id)
-                        .ok_or("Select an existing animation")?;
-                    self.preview.update_timeline(
-                        animation.frames.iter().map(|f| f.ms).collect(),
-                        animation.mode,
-                    )?;
-                    frame_count = animation.frames.len();
-                    let frame = &animation.frames[self.preview.frame(now)];
-                    Some(
-                        sheet
-                            .meta
-                            .sprites
-                            .iter()
-                            .find(|s| s.id == frame.sprite_id)
-                            .ok_or("animation refers to a missing sprite")?,
-                    )
-                }
-                PreviewTarget::Sprite(id) => Some(
-                    sheet
-                        .meta
-                        .sprites
-                        .iter()
-                        .find(|s| s.id == *id)
-                        .ok_or("Select an existing sprite")?,
-                ),
-                PreviewTarget::None => None,
-            };
-            if let Some(sprite) = sprite {
-                parts = sprite.parts(&sheet.meta.grid);
-                bounds = sprite.bounds(&sheet.meta.grid);
-                pivot = sprite.pivot;
-            }
-            Ok(())
-        })();
-        if let Err(error) = result {
-            ui.text_wrapped(error);
-            return;
-        }
-        if parts.is_empty() {
-            ui.text("Select an animation or a sprite");
-            return;
-        }
-        let moving = matches!(self.preview.target, PreviewTarget::Animation(_));
-        let frame = if moving { self.preview.frame(now) } else { 0 };
-        ui.text(format!(
-            "Frame {} / {}, elapsed {} ms{}",
-            frame + 1,
-            frame_count,
-            self.preview.elapsed(now),
-            if moving
-                && self
-                    .preview
-                    .timeline
-                    .as_ref()
-                    .is_some_and(|t| t.finished_at(self.preview.elapsed(now)))
-            {
-                " (finished)"
+fn selection_renderable(len: usize) -> bool {
+    len <= 256
+}
+fn preview_target(
+    tab: EditorTab,
+    selection_len: usize,
+    sprite: Option<u64>,
+    animation: Option<u64>,
+) -> PreviewTarget {
+    match tab {
+        EditorTab::Tileset | EditorTab::Import => {
+            if selection_len == 0 {
+                PreviewTarget::None
             } else {
-                ""
+                PreviewTarget::Selection
             }
-        ));
-        let cursor = ui.cursor_screen_pos();
-        let origin = [cursor[0] + 16.0, cursor[1] + 16.0];
-        let scale = self.preview.zoom as f32;
+        }
+        EditorTab::Sprites => sprite.map_or(PreviewTarget::None, PreviewTarget::Sprite),
+        EditorTab::Animations => animation.map_or(PreviewTarget::None, PreviewTarget::Animation),
+    }
+}
+impl SheetEditor {
+    pub fn preview_panel(&mut self, ui: &Ui, now: u64) {
+        #[cfg(test)]
+        {
+            self.preview.drawn_parts = 0;
+        }
+        let target = preview_target(
+            self.active_tab,
+            self.sheet.selection.cells.len(),
+            self.selected_sprite,
+            self.selected_animation,
+        );
+        self.preview.select(target, now);
+        ui.text("Preview");
+        if self.active_tab == EditorTab::Animations {
+            if ui.button(if self.preview.playing {
+                "Pause"
+            } else {
+                "Play"
+            }) {
+                self.preview.pause_or_play(now);
+            }
+            ui.same_line();
+            if ui.button("Restart") {
+                self.preview.restart(now);
+            }
+        }
+        ui.set_next_item_width(140.0);
+        ui.slider("Preview zoom", 1, 8, &mut self.preview.zoom);
+        if matches!(self.active_tab, EditorTab::Sprites | EditorTab::Animations) {
+            ui.checkbox("Pivot", &mut self.preview.show_pivot);
+        }
+        let sheet = &self.sheet;
         let view = PartView {
             id: sheet.imgui_id,
             grid: sheet.meta.grid,
             width: sheet.image.width,
             height: sheet.image.height,
         };
+        if self.preview.target == PreviewTarget::Selection {
+            let selection = &sheet.selection.cells;
+            let min_col = selection.iter().map(|p| p.0).min().unwrap();
+            let max_col = selection.iter().map(|p| p.0).max().unwrap();
+            let min_row = selection.iter().map(|p| p.1).min().unwrap();
+            let max_row = selection.iter().map(|p| p.1).max().unwrap();
+            let cols = max_col - min_col + 1;
+            let rows = max_row - min_row + 1;
+            if selection.len() == 1 {
+                ui.text(format!("Tile ({min_col}, {min_row})"));
+                if let Some(tile) = sheet
+                    .meta
+                    .tiles
+                    .iter()
+                    .find(|t| t.col == min_col && t.row == min_row)
+                {
+                    if let Some(name) = &tile.name {
+                        ui.text(name);
+                    }
+                    if tile.props.is_empty() {
+                        ui.text_disabled("No properties");
+                    } else {
+                        for (k, v) in &tile.props {
+                            ui.text(format!("{k}={v}"));
+                        }
+                    }
+                } else {
+                    ui.text_disabled("No properties");
+                }
+            } else {
+                ui.text(format!("{} cells ({} x {})", selection.len(), cols, rows));
+            }
+            if !selection_renderable(selection.len()) {
+                ui.text_disabled("Selection exceeds 256 cells");
+                return;
+            }
+            let parts: Vec<_> = selection
+                .iter()
+                .map(|&(col, row)| Part {
+                    col,
+                    row,
+                    dx: ((col - min_col) * sheet.meta.grid.tile) as i32,
+                    dy: ((row - min_row) * sheet.meta.grid.tile) as i32,
+                    ..Default::default()
+                })
+                .collect();
+            let width = cols as f32 * sheet.meta.grid.tile as f32;
+            let height = rows as f32 * sheet.meta.grid.tile as f32;
+            let scale = (self.preview.zoom as f32)
+                .min((ui.content_region_avail()[0].max(1.0) / width).max(0.01));
+            let origin = ui.cursor_screen_pos();
+            #[cfg(test)]
+            {
+                self.preview.drawn_parts = parts.len();
+            }
+            draw_parts_scaled(ui, &view, &parts, origin, scale);
+            ui.dummy([width * scale, height * scale]);
+            return;
+        }
+        let sprite = match self.preview.target {
+            PreviewTarget::Sprite(id) => sheet.meta.sprites.iter().find(|s| s.id == id),
+            PreviewTarget::Animation(id) => {
+                let Some(animation) = sheet.meta.animations.iter().find(|a| a.id == id) else {
+                    ui.text("Select an animation");
+                    return;
+                };
+                ui.text(format!("{} ({:?})", animation.name, animation.mode));
+                if animation.frames.is_empty() {
+                    ui.text("No frames");
+                    return;
+                }
+                if let Err(error) = self.preview.update_timeline(
+                    animation.frames.iter().map(|f| f.ms).collect(),
+                    animation.mode,
+                ) {
+                    ui.text_wrapped(error);
+                    return;
+                }
+                let index = self.preview.frame(now);
+                let frame = &animation.frames[index];
+                let finished = self
+                    .preview
+                    .timeline
+                    .as_ref()
+                    .is_some_and(|t| t.finished_at(self.preview.elapsed(now)));
+                ui.text(format!(
+                    "Frame {} / {}, elapsed {} ms{}",
+                    index + 1,
+                    animation.frames.len(),
+                    self.preview.elapsed(now),
+                    if finished { " (finished)" } else { "" }
+                ));
+                sheet.meta.sprites.iter().find(|s| s.id == frame.sprite_id)
+            }
+            PreviewTarget::None => {
+                ui.text(match self.active_tab {
+                    EditorTab::Sprites => "Select or create a sprite",
+                    EditorTab::Animations => "Select an animation",
+                    _ => "No selection",
+                });
+                return;
+            }
+            PreviewTarget::Selection => unreachable!(),
+        };
+        let Some(sprite) = sprite else {
+            ui.text("Select an existing sprite");
+            return;
+        };
+        let (w, h) = sprite.bounds(&sheet.meta.grid);
+        ui.text(format!("{}  {} x {} px", sprite.name, w, h));
+        let origin = ui.cursor_screen_pos();
+        let scale = self.preview.zoom as f32;
+        let parts = sprite.parts(&sheet.meta.grid);
+        #[cfg(test)]
+        {
+            self.preview.drawn_parts = parts.len();
+        }
         draw_parts(ui, &view, &parts, origin, self.preview.zoom);
-        let cross = [origin[0] + pivot[0] * scale, origin[1] + pivot[1] * scale];
-        let draw = ui.get_window_draw_list();
-        draw.add_line(
-            [cross[0] - 5.0, cross[1]],
-            [cross[0] + 5.0, cross[1]],
-            [1.0, 0.3, 0.2, 1.0],
-        )
-        .build();
-        draw.add_line(
-            [cross[0], cross[1] - 5.0],
-            [cross[0], cross[1] + 5.0],
-            [1.0, 0.3, 0.2, 1.0],
-        )
-        .build();
-        ui.dummy([
-            bounds.0 as f32 * scale + 32.0,
-            bounds.1 as f32 * scale + 32.0,
-        ]);
+        if self.preview.show_pivot {
+            let cross = [
+                origin[0] + sprite.pivot[0] * scale,
+                origin[1] + sprite.pivot[1] * scale,
+            ];
+            let draw = ui.get_window_draw_list();
+            draw.add_line(
+                [cross[0] - 5.0, cross[1]],
+                [cross[0] + 5.0, cross[1]],
+                [1.0, 0.3, 0.2, 1.0],
+            )
+            .build();
+            draw.add_line(
+                [cross[0], cross[1] - 5.0],
+                [cross[0], cross[1] + 5.0],
+                [1.0, 0.3, 0.2, 1.0],
+            )
+            .build();
+        }
+        ui.dummy([w as f32 * scale, h as f32 * scale]);
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn tab_targets_selection_and_timeline_cache() {
+        for tab in [EditorTab::Tileset, EditorTab::Import] {
+            assert_eq!(
+                preview_target(tab, 0, Some(1), Some(2)),
+                PreviewTarget::None
+            );
+            assert_eq!(preview_target(tab, 1, None, None), PreviewTarget::Selection);
+        }
+        assert_eq!(
+            preview_target(EditorTab::Sprites, 1, Some(3), Some(4)),
+            PreviewTarget::Sprite(3)
+        );
+        assert_eq!(
+            preview_target(EditorTab::Sprites, 1, None, Some(4)),
+            PreviewTarget::None
+        );
+        assert_eq!(
+            preview_target(EditorTab::Animations, 1, Some(3), Some(4)),
+            PreviewTarget::Animation(4)
+        );
+        assert_eq!(
+            preview_target(EditorTab::Animations, 1, Some(3), None),
+            PreviewTarget::None
+        );
+        assert!(selection_renderable(256));
+        assert!(!selection_renderable(257));
+        let mut state = PreviewState::default();
+        state.update_timeline(vec![10, 20], Mode::Loop).unwrap();
+        state.update_timeline(vec![10, 20], Mode::Loop).unwrap();
+        assert_eq!(state.builds, 1);
+        state.update_timeline(vec![10, 21], Mode::Loop).unwrap();
+        assert_eq!(state.builds, 2);
+    }
     #[test]
     fn part_position_preserves_empty_canvas_edges() {
         let part = Part {

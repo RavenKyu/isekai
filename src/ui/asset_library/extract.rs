@@ -473,10 +473,7 @@ fn start_analysis(state: &mut ExtractState, sheet: &OpenSheet, log: &mut log::Sh
     }
 }
 
-pub(super) fn tab(editor: &mut SheetEditor, ui: &Ui, open_files: &[PathBuf]) {
-    let Some(_tab) = ui.tab_item("Extract") else {
-        return;
-    };
+pub(super) fn section(editor: &mut SheetEditor, ui: &Ui, open_files: &[PathBuf]) {
     let SheetEditor {
         sheet,
         extract: state,
