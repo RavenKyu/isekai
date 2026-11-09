@@ -1,4 +1,5 @@
 mod animations;
+mod canvas;
 mod edit;
 mod extract;
 mod guess;
@@ -57,6 +58,13 @@ pub struct OpenSheet {
 }
 /// Identifies one open sheet so queued actions reach the editor that asked.
 pub type SheetId = u64;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TileDrag {
+    sheet: SheetId,
+    col: u32,
+    row: u32,
+}
+const TILE_DRAG: &str = "RN_SHEET_TILE";
 pub enum Action {
     Load(PathBuf),
     Reload(SheetId),
@@ -93,6 +101,8 @@ pub struct SheetEditor {
     sprite_name_input: [f32; 2],
     #[cfg(test)]
     sprite_new_input: [f32; 2],
+    #[cfg(test)]
+    sprite_blank_input: [f32; 2],
     pub zoom: u32,
     pub show_grid: bool,
     pub guess: Option<GridGuess>,
@@ -107,6 +117,10 @@ pub struct SheetEditor {
     selected_sprite: Option<u64>,
     sprite_props_target: Option<u64>,
     sprite_props: props::PropsDraft,
+    drag_origin: Option<TileDrag>,
+    canvas_cache: Option<(u64, crate::sprite::format::Shape, Grid, canvas::Canvas)>,
+    #[cfg(test)]
+    sheet_image_origin: [f32; 2],
     selected_animation: Option<u64>,
     animation_draft: animations::AnimationDraft,
     preview: preview::PreviewState,
@@ -448,6 +462,8 @@ impl SheetEditor {
             sprite_name_input: [0.0; 2],
             #[cfg(test)]
             sprite_new_input: [0.0; 2],
+            #[cfg(test)]
+            sprite_blank_input: [0.0; 2],
             zoom: 2,
             show_grid: true,
             guess: None,
@@ -460,6 +476,10 @@ impl SheetEditor {
             selected_sprite: None,
             sprite_props_target: None,
             sprite_props: Default::default(),
+            drag_origin: None,
+            canvas_cache: None,
+            #[cfg(test)]
+            sheet_image_origin: [0.0; 2],
             selected_animation: None,
             animation_draft: Default::default(),
             preview: Default::default(),
@@ -488,6 +508,7 @@ impl SheetEditor {
         self.selected_sprite = None;
         self.sprite_props_target = None;
         self.sprite_props = Default::default();
+        self.canvas_cache = None;
         self.selected_animation = None;
         self.animation_draft = Default::default();
         self.preview = Default::default();
@@ -640,7 +661,11 @@ impl SheetEditor {
             .size([sheet_width, 0.0])
             .build(ui, || {
                 ui.text("Sheet");
-                ui.text_disabled("Click: select  Shift: range  Ctrl: toggle");
+                ui.text_disabled(if self.active_tab == EditorTab::Sprites {
+                    "Drag tiles onto the canvas. Shift: range, Ctrl: toggle"
+                } else {
+                    "Click: select  Shift: range  Ctrl: toggle"
+                });
                 let overlays = self.sprite_overlays();
                 regions::sheet_view(self, ui, overlays);
             });
@@ -1501,6 +1526,18 @@ mod tests {
             assert_eq!(sprite.props.get("key").map(String::as_str), Some("value"));
             assert_eq!(sprite.modified, Some(777));
         }
+        let blank = editor.borrow().sprite_blank_input;
+        click(context, render, blank);
+        {
+            let e = editor.borrow();
+            let sprite = e.sheet.meta.sprites.last().unwrap();
+            assert!(
+                matches!(&sprite.shape,crate::sprite::format::Shape::Set{canvas:[2,2],parts} if parts.is_empty())
+            );
+            assert_eq!(sprite.pivot, [16.0, 32.0]);
+            assert_eq!(sprite.modified, Some(777));
+            assert!(e.sheet.meta.validate().is_err());
+        }
         let list = RefCell::new(SheetEditor::new(26, fake_sheet()));
         let count_vertices = |context: &mut Context, n: usize| {
             {
@@ -1527,6 +1564,139 @@ mod tests {
         let small = count_vertices(context, 20);
         let large = count_vertices(context, 1000);
         assert!(large <= small + 100, "20 rows: {small}, 1000 rows: {large}");
+    }
+    fn check_drag_canvas(context: &mut Context, consumer: &SynchronousRendererConsumer) {
+        use std::cell::RefCell;
+        let a = RefCell::new(SheetEditor::new(80, fake_sheet()));
+        let b = RefCell::new(SheetEditor::new(81, fake_sheet()));
+        {
+            let mut a = a.borrow_mut();
+            a.zoom = 1;
+            let sprite = crate::sprite::Sprite {
+                id: 0,
+                name: "blank".into(),
+                shape: crate::sprite::format::Shape::Set {
+                    canvas: [2, 2],
+                    parts: vec![],
+                },
+                pivot: [16.0, 32.0],
+                props: Default::default(),
+                modified: None,
+            };
+            let id = a.sheet.meta.add_sprite(sprite, 100);
+            a.selected_sprite = Some(id);
+        }
+        b.borrow_mut().zoom = 1;
+        let render = |context: &mut Context| {
+            vertices(context, consumer, |ui| {
+                ui.window("Drag source A")
+                    .position([30.0, 30.0], Condition::Always)
+                    .size([400.0, 180.0], Condition::Always)
+                    .build(|| a.borrow_mut().sheet_view(ui, &[]));
+                ui.window("Drag source B")
+                    .position([30.0, 260.0], Condition::Always)
+                    .size([400.0, 180.0], Condition::Always)
+                    .build(|| b.borrow_mut().sheet_view(ui, &[]));
+                ui.window("Drag target A")
+                    .position([500.0, 30.0], Condition::Always)
+                    .size([850.0, 700.0], Condition::Always)
+                    .build(|| a.borrow_mut().sprites_tab(ui));
+            });
+        };
+        render(context);
+        let origin = a.borrow().sheet_image_origin;
+        let source = [origin[0] + 40.0, origin[1] + 8.0];
+        let dest = a.borrow().canvas_cache.as_ref().unwrap().3.positions[3];
+        let before = a.borrow().sheet.meta.sprites.last().unwrap().clone();
+        click(context, render, source);
+        assert_eq!(a.borrow().sheet.selection.single(), Some((2, 0)));
+        assert_eq!(*a.borrow().sheet.meta.sprites.last().unwrap(), before);
+        let drag = |context: &mut Context, source: [f32; 2], middle: [f32; 2], dest: [f32; 2]| {
+            context.io_mut().add_mouse_pos_event(source);
+            render(context);
+            context
+                .io_mut()
+                .add_mouse_button_event(dear_imgui_rs::MouseButton::Left, true);
+            render(context);
+            context.io_mut().add_mouse_pos_event(middle);
+            render(context);
+            context.io_mut().add_mouse_pos_event(dest);
+            render(context);
+            context
+                .io_mut()
+                .add_mouse_button_event(dear_imgui_rs::MouseButton::Left, false);
+            render(context);
+        };
+        drag(context, source, [origin[0] + 56.0, origin[1] + 8.0], dest);
+        {
+            let a = a.borrow();
+            let sprite = a.sheet.meta.sprites.last().unwrap();
+            let parts = sprite.parts(&a.sheet.meta.grid);
+            assert_eq!(parts.len(), 1);
+            assert_eq!(
+                (parts[0].col, parts[0].row, parts[0].dx, parts[0].dy),
+                (2, 0, 16, 16)
+            );
+        }
+        let right_click = |context: &mut Context, point: [f32; 2]| {
+            context.io_mut().add_mouse_pos_event(point);
+            render(context);
+            context
+                .io_mut()
+                .add_mouse_button_event(dear_imgui_rs::MouseButton::Right, true);
+            render(context);
+            context
+                .io_mut()
+                .add_mouse_button_event(dear_imgui_rs::MouseButton::Right, false);
+            render(context);
+        };
+        right_click(context, dest);
+        let flip = a.borrow().canvas_cache.as_ref().unwrap().3.flip_input;
+        assert!(flip[0] > 0.0);
+        click(context, render, flip);
+        assert!(
+            a.borrow()
+                .sheet
+                .meta
+                .sprites
+                .last()
+                .unwrap()
+                .parts(&a.borrow().sheet.meta.grid)[0]
+                .flip_x
+        );
+        right_click(context, dest);
+        let rotate = a.borrow().canvas_cache.as_ref().unwrap().3.rotate_input;
+        assert!(rotate[0] > 0.0);
+        click(context, render, rotate);
+        assert_eq!(
+            a.borrow()
+                .sheet
+                .meta
+                .sprites
+                .last()
+                .unwrap()
+                .parts(&a.borrow().sheet.meta.grid)[0]
+                .rotation,
+            90
+        );
+        let saved = a.borrow().sheet.meta.sprites.last().unwrap().clone();
+        drag(
+            context,
+            source,
+            [origin[0] + 56.0, origin[1] + 8.0],
+            [1450.0, 850.0],
+        );
+        assert_eq!(*a.borrow().sheet.meta.sprites.last().unwrap(), saved);
+        let other = b.borrow().sheet_image_origin;
+        let source_b = [other[0] + 8.0, other[1] + 8.0];
+        drag(context, source_b, [other[0] + 24.0, other[1] + 8.0], dest);
+        assert_eq!(*a.borrow().sheet.meta.sprites.last().unwrap(), saved);
+        assert!(
+            a.borrow()
+                .log
+                .iter()
+                .any(|s| s.contains("Drop tiles from this sheet only"))
+        );
     }
     fn check_sprite_rename_log_input(
         context: &mut Context,
@@ -1825,6 +1995,7 @@ mod tests {
         check_tile_log_input(&mut context, &consumer);
         check_tile_properties_and_marker(&mut context, &consumer);
         check_sprite_list_and_creation(&mut context, &consumer);
+        check_drag_canvas(&mut context, &consumer);
         check_sprite_rename_log_input(&mut context, &consumer);
         let library = std::cell::RefCell::new(AssetLibrary::default());
         assert!(!library.borrow().open);

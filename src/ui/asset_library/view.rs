@@ -1,5 +1,5 @@
-use super::{SheetEditor, cell_under};
-use dear_imgui_rs::{MouseButton, Ui, WindowFlags};
+use super::{SheetEditor, TILE_DRAG, TileDrag, cell_under};
+use dear_imgui_rs::{DragDropSourceFlags, MouseButton, Ui, WindowFlags};
 
 pub struct Overlay {
     pub col: u32,
@@ -37,6 +37,10 @@ impl SheetEditor {
             .flags(WindowFlags::HORIZONTAL_SCROLLBAR)
             .build(ui, || {
                 let origin = ui.cursor_screen_pos();
+                #[cfg(test)]
+                {
+                    self.sheet_image_origin = origin;
+                }
                 let zoom = self.zoom as f32;
                 ui.image(
                     sheet.imgui_id,
@@ -59,9 +63,32 @@ impl SheetEditor {
                         sheet.image.width,
                         sheet.image.height,
                     );
+                    self.drag_origin = cell.map(|(col, row)| TileDrag {
+                        sheet: self.id,
+                        col,
+                        row,
+                    });
                     sheet
                         .selection
                         .apply(cell, ui.io().key_shift(), ui.io().key_ctrl());
+                }
+                if let Some(payload) = self.drag_origin
+                    && let Some(_tooltip) = ui
+                        .drag_drop_source_config(TILE_DRAG)
+                        .flags(DragDropSourceFlags::ALLOW_NULL_ID)
+                        .begin_payload(payload)
+                {
+                    ui.text(format!("Tile ({}, {})", payload.col, payload.row));
+                    let (uv0, uv1) = sheet.meta.grid.uv(
+                        payload.col,
+                        payload.row,
+                        sheet.image.width,
+                        sheet.image.height,
+                    );
+                    ui.image_config(sheet.imgui_id, [48.0, 48.0])
+                        .uv0(uv0)
+                        .uv1(uv1)
+                        .build();
                 }
                 let grid = &sheet.meta.grid;
                 let cells = grid.cells(sheet.image.width, sheet.image.height);
