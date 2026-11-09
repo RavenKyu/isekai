@@ -22,6 +22,7 @@ fn timestamp() -> String {
 pub struct SheetLog {
     lines: Vec<String>,
     generation: u64,
+    repeat: Option<(&'static str, u64)>,
 }
 
 impl std::ops::Deref for SheetLog {
@@ -34,11 +35,13 @@ impl std::ops::Deref for SheetLog {
 impl SheetLog {
     fn clear(&mut self) {
         self.lines.clear();
+        self.repeat = None;
         self.generation = self.generation.wrapping_add(1);
     }
 }
 
 pub(super) fn append(log: &mut SheetLog, message: String) {
+    log.repeat = None;
     let lines = &mut log.lines;
     let time = timestamp();
     // One timestamp per physical line; embedded NULs cannot truncate InputText.
@@ -49,6 +52,23 @@ pub(super) fn append(log: &mut SheetLog, message: String) {
         lines.drain(..lines.len() - LIMIT);
     }
     log.generation = log.generation.wrapping_add(1);
+}
+
+// Only calls to this function can continue a run. Every ordinary append,
+// including an error or save, terminates it even when its text happens to match.
+pub(super) fn append_repeat(log: &mut SheetLog, message: &'static str) {
+    if let Some((previous, count)) = log.repeat
+        && previous == message
+    {
+        let count = count.saturating_add(1);
+        *log.lines.last_mut().expect("repeat run has a line") =
+            format!("{} {message} (x{count})", timestamp());
+        log.repeat = Some((message, count));
+        log.generation = log.generation.wrapping_add(1);
+    } else {
+        append(log, message.into());
+        log.repeat = Some((message, 1));
+    }
 }
 
 #[derive(Default)]
@@ -209,6 +229,11 @@ impl LogView {
             !view.borrow().text.contains("event 0"),
             "eviction refreshes cached text"
         );
+        append_repeat(&mut lines.borrow_mut(), "Tile metadata updated");
+        render(context);
+        append_repeat(&mut lines.borrow_mut(), "Tile metadata updated");
+        render(context);
+        assert!(view.borrow().text.ends_with("Tile metadata updated (x2)"));
         context
             .io_mut()
             .add_mouse_button_event(MouseButton::Left, true);
@@ -282,6 +307,29 @@ pub(super) mod tests {
         log.clear();
         assert_eq!(log.generation, before + 2);
         assert!(log.is_empty());
+    }
+
+    #[test]
+    fn repeated_edits_preserve_prior_lines_and_stop_at_other_messages() {
+        let mut log = SheetLog::default();
+        append(&mut log, "Saved x".into());
+        for i in 1..498 {
+            append(&mut log, format!("event {i}"));
+        }
+        append_repeat(&mut log, "Grid updated");
+        let generation = log.generation;
+        for _ in 1..20 {
+            append_repeat(&mut log, "Grid updated");
+        }
+        assert_eq!(log.len(), 499);
+        assert!(log[0].ends_with(" Saved x"));
+        assert!(log.last().unwrap().ends_with("Grid updated (x20)"));
+        assert_eq!(log.generation, generation + 19);
+        append(&mut log, "validation error".into());
+        append_repeat(&mut log, "Grid updated");
+        assert!(log[497].ends_with("Grid updated (x20)"));
+        assert!(log[498].ends_with("validation error"));
+        assert!(log[500 - 1].ends_with("Grid updated"));
     }
 
     #[test]

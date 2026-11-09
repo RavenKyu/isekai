@@ -68,6 +68,8 @@ pub struct SheetEditor {
     confirm_close: bool,
     #[cfg(test)]
     close_controls: [[f32; 2]; 3],
+    #[cfg(test)]
+    tile_name_input: [f32; 2],
     pub zoom: u32,
     pub show_grid: bool,
     pub guess: Option<GridGuess>,
@@ -393,6 +395,8 @@ impl SheetEditor {
             confirm_close: false,
             #[cfg(test)]
             close_controls: [[0.0; 2]; 3],
+            #[cfg(test)]
+            tile_name_input: [0.0; 2],
             zoom: 2,
             show_grid: true,
             guess: None,
@@ -698,7 +702,7 @@ impl SheetEditor {
                 Ok(()) => {
                     self.tile_draft = Default::default();
                     self.extract.invalidate();
-                    log::append(&mut self.log, "Grid updated".into());
+                    log::append_repeat(&mut self.log, "Grid updated");
                 }
                 Err(error) => log::append(&mut self.log, error),
             }
@@ -1130,6 +1134,54 @@ mod tests {
         let size = ui.item_rect_size();
         [min[0] + size[0] * 0.5, min[1] + size[1] * 0.5]
     }
+    fn check_tile_log_input(context: &mut Context, consumer: &SynchronousRendererConsumer) {
+        use dear_imgui_rs::{Condition, MouseButton};
+        use std::cell::RefCell;
+        let mut sheet = fake_sheet();
+        sheet.meta.tiles.clear();
+        sheet.meta.sprites.clear();
+        sheet.meta.clips.clear();
+        sheet.selection.apply(Some((0, 0)), false, false);
+        let editor = RefCell::new(SheetEditor::new(20, sheet));
+        let other = SheetEditor::new(21, fake_sheet());
+        let render = |context: &mut Context| {
+            vertices(context, consumer, |ui| {
+                ui.window("Grid input test")
+                    .position([40.0, 40.0], Condition::Always)
+                    .size([900.0, 220.0], Condition::Always)
+                    .build(|| editor.borrow_mut().tiles_tab(ui));
+            });
+        };
+        render(context);
+        let point = editor.borrow().tile_name_input;
+        context.io_mut().add_mouse_pos_event(point);
+        render(context);
+        context
+            .io_mut()
+            .add_mouse_button_event(MouseButton::Left, true);
+        render(context);
+        context
+            .io_mut()
+            .add_mouse_button_event(MouseButton::Left, false);
+        render(context);
+        for ch in "abcdefghijkl".chars() {
+            context.io_mut().add_input_character(ch);
+            render(context);
+        }
+        let editor = editor.borrow();
+        assert_eq!(
+            editor.sheet.meta.tiles[0].name.as_deref(),
+            Some("abcdefghijkl")
+        );
+        assert!(editor.sheet.dirty);
+        assert_eq!(editor.log.len(), 1, "each keystroke belongs to one run");
+        assert!(
+            editor.log[0].ends_with("Tile metadata updated (x12)"),
+            "{:?}",
+            editor.log
+        );
+        assert!(other.log.is_empty(), "other sheets have independent logs");
+    }
     fn check_window_close_interactions(
         context: &mut Context,
         consumer: &SynchronousRendererConsumer,
@@ -1353,6 +1405,7 @@ mod tests {
     fn hidden_library_grid_and_zoom_geometry() {
         // Same serialized CPU ImGui context style as the existing UI tests.
         let (mut context, consumer) = context();
+        check_tile_log_input(&mut context, &consumer);
         let library = std::cell::RefCell::new(SpriteLibrary::default());
         assert!(!library.borrow().open);
         assert_eq!(

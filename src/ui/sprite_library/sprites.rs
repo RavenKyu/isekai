@@ -197,7 +197,7 @@ impl SheetEditor {
                 Ok(()) => {
                     sheet.meta.sprites[index] = sprite;
                     sheet.dirty = true;
-                    log::append(&mut self.log, "Sprite updated".into());
+                    log::append_repeat(&mut self.log, "Sprite updated");
                 }
                 Err(errors) => log::append(&mut self.log, errors.join("; ")),
             }
