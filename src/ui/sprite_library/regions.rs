@@ -17,7 +17,6 @@ pub(super) struct RegionsState {
     candidates: Vec<ObjectBox>,
     selected: Option<usize>,
     save_path: String,
-    confirm_crop: Option<(ObjectBox, String)>,
 }
 impl Default for RegionsState {
     fn default() -> Self {
@@ -29,7 +28,6 @@ impl Default for RegionsState {
             candidates: vec![],
             selected: None,
             save_path: String::new(),
-            confirm_crop: None,
         }
     }
 }
@@ -40,7 +38,6 @@ impl RegionsState {
             self.candidates.clear();
             self.selected = None;
             self.save_path.clear();
-            self.confirm_crop = None;
         }
     }
     fn background(&self) -> Result<Background, String> {
@@ -190,7 +187,6 @@ pub(super) fn tab(editor: &mut SheetEditor, ui: &Ui) {
                 // Large images pause the editor; invoke only on this button.
                 state.candidates = raster::find_objects(&sheet.image, background, state.min_size);
                 state.selected = None;
-                state.confirm_crop = None;
                 *status = format!("{} region candidates (not saved)", state.candidates.len());
             }
             Err(e) => *status = e,
@@ -221,34 +217,12 @@ pub(super) fn tab(editor: &mut SheetEditor, ui: &Ui) {
             && let Some((i, bbox)) = selected
         {
             let name = region_name(&extract::source_stem(&sheet.source), i + 1);
-            if sheet.dirty {
-                state.confirm_crop = Some((bbox, name));
-                ui.open_popup("Discard metadata for crop?");
-            } else {
-                match crop_action(&sheet.image, sheet.meta.grid, bbox, name) {
-                    Ok(action) => pending.push(action),
-                    Err(e) => *status = e,
-                }
+            match crop_action(&sheet.image, sheet.meta.grid, bbox, name) {
+                Ok(action) => pending.push(action),
+                Err(e) => *status = e,
             }
         }
     }
-    ui.modal_popup("Discard metadata for crop?", || {
-        ui.text("Discard unsaved changes and start a new image?");
-        if ui.button("Discard and crop") {
-            if let Some((bbox, name)) = state.confirm_crop.take() {
-                match crop_action(&sheet.image, sheet.meta.grid, bbox, name) {
-                    Ok(action) => pending.push(action),
-                    Err(e) => *status = e,
-                }
-            }
-            ui.close_current_popup();
-        }
-        ui.same_line();
-        if ui.button("Cancel crop") {
-            state.confirm_crop = None;
-            ui.close_current_popup();
-        }
-    });
     ui.text_wrapped("Crops keep the grid and start empty metadata. Save the image, then Load with Key color to remove a panel background.");
 }
 

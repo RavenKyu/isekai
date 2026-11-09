@@ -48,6 +48,8 @@ pub enum Action {
 pub struct SheetEditor {
     pub id: SheetId,
     pub sheet: OpenSheet,
+    focus_requested: bool,
+    confirm_close: bool,
     pub zoom: u32,
     pub show_grid: bool,
     pub guess: Option<GridGuess>,
@@ -124,6 +126,13 @@ impl SpriteLibrary {
     ) -> Result<(), String> {
         match action {
             Action::Load(path) => {
+                let path = path.canonicalize().map_err(|e| e.to_string())?;
+                if let Some(editor) = self.sheets.iter_mut().find(|editor| {
+                    matches!(&editor.sheet.source, SheetSource::File(open) if open == &path)
+                }) {
+                    editor.focus_requested = true;
+                    return Ok(());
+                }
                 let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
                 let sidecar = store::sidecar_for(&path);
                 // try_exists propagates permission errors rather than treating them
@@ -142,7 +151,7 @@ impl SpriteLibrary {
                     gl,
                     renderer,
                 )?;
-                self.install(opened, renderer)?;
+                self.install(opened);
                 self.path_input = path.to_string_lossy().into_owned();
                 self.status = format!("Opened {}", path.display());
             }
@@ -156,7 +165,7 @@ impl SpriteLibrary {
                     gl,
                     renderer,
                 )?;
-                self.install(opened, renderer)?;
+                self.install(opened);
                 self.status = "Memory image: save the image first".into();
             }
             Action::Reload(id) => {
@@ -199,16 +208,11 @@ impl SpriteLibrary {
         }
         Ok(())
     }
-    /// Shows a newly opened sheet. The library still edits one sheet at a time,
-    /// so this replaces the open sheet and keeps its view settings.
-    fn install(&mut self, opened: OpenSheet, renderer: &mut GlowRenderer) -> Result<(), String> {
-        if let Some(editor) = self.sheets.first_mut() {
-            return editor.replace_sheet(opened, renderer);
-        }
+    /// Adds an independent editor. File identity is checked before loading/uploading.
+    fn install(&mut self, opened: OpenSheet) {
         let id = self.next_id;
         self.next_id += 1;
         self.sheets.push(SheetEditor::new(id, opened));
-        Ok(())
     }
     /// Releases one sheet's texture and drops its editor. On error the editor stays.
     pub fn close(&mut self, id: SheetId, renderer: &mut GlowRenderer) -> Result<(), String> {
@@ -226,26 +230,25 @@ impl SpriteLibrary {
         Ok(())
     }
     pub fn draw(&mut self, ui: &Ui, now_ms: u64) {
-        if !self.open {
-            return;
+        if self.open {
+            if !self.assets_scanned {
+                self.refresh_assets();
+                self.assets_scanned = true;
+            }
+            let mut open = self.open;
+            ui.window("Sprite Library")
+                .opened(&mut open)
+                .size([620.0, 260.0], Condition::FirstUseEver)
+                .position([140.0, 40.0], Condition::FirstUseEver)
+                .build(|| {
+                    self.import_panel(ui);
+                    ui.text_wrapped(&self.status);
+                });
+            self.open = open;
         }
-        if !self.assets_scanned {
-            self.refresh_assets();
-            self.assets_scanned = true;
+        for editor in &mut self.sheets {
+            editor.draw(ui, now_ms);
         }
-        let mut open = self.open;
-        ui.window("Sprite Library")
-            .opened(&mut open)
-            .size([1000.0, 650.0], Condition::FirstUseEver)
-            .position([140.0, 40.0], Condition::FirstUseEver)
-            .build(|| {
-                self.import_panel(ui);
-                ui.text_wrapped(&self.status);
-                for editor in &mut self.sheets {
-                    editor.draw(ui, now_ms);
-                }
-            });
-        self.open = open;
         self.collect_editor_output();
     }
     /// Moves what the editors produced while drawing into the library.
@@ -309,6 +312,8 @@ impl SheetEditor {
         Self {
             id,
             sheet,
+            focus_requested: true,
+            confirm_close: false,
             zoom: 2,
             show_grid: true,
             guess: None,
@@ -373,19 +378,58 @@ impl SheetEditor {
         sheet.dirty = false;
         Ok(format!("Saved {}", sidecar.display()))
     }
-    fn draw(&mut self, ui: &Ui, now_ms: u64) {
-        let _id = ui.push_id(&format!("sheet-{}", self.id));
-        let sheet = &self.sheet;
-        let name = match &sheet.source {
+    fn window_title(&self) -> String {
+        let name = match &self.sheet.source {
             SheetSource::File(path) => path
                 .file_name()
                 .map_or_else(|| "?".into(), |s| s.to_string_lossy()),
             SheetSource::Memory { name } => name.as_str().into(),
         };
-        ui.separator();
-        ui.text(format!("{}{}", name, if sheet.dirty { " *" } else { "" }));
+        format!(
+            "{name}{}###sheet-{}",
+            if self.sheet.dirty { " *" } else { "" },
+            self.id
+        )
+    }
+    fn request_close(&mut self) {
+        if self.sheet.dirty {
+            self.confirm_close = true;
+        } else {
+            self.pending.push(Action::Close(self.id));
+        }
+    }
+    fn draw(&mut self, ui: &Ui, now_ms: u64) {
+        let mut open = true;
+        let focus = std::mem::take(&mut self.focus_requested);
+        let mut window = ui
+            .window(self.window_title())
+            .opened(&mut open)
+            .size([1000.0, 700.0], Condition::FirstUseEver)
+            .position(
+                [
+                    180.0 + (self.id % 8) as f32 * 28.0,
+                    70.0 + (self.id % 8) as f32 * 28.0,
+                ],
+                Condition::FirstUseEver,
+            )
+            .focused(focus);
+        if focus || self.confirm_close {
+            window = window.collapsed(false, Condition::Always);
+        }
+        window.build(|| {
+            if self.confirm_close {
+                ui.open_popup("Discard changes?");
+                self.confirm_close = false;
+            }
+            self.draw_contents(ui, now_ms);
+        });
+        if !open {
+            self.request_close();
+        }
+    }
+    fn draw_contents(&mut self, ui: &Ui, now_ms: u64) {
+        let sheet = &self.sheet;
         let memory = matches!(sheet.source, SheetSource::Memory { .. });
-        let dirty = sheet.dirty;
         {
             let _disabled = ui.begin_disabled_with_cond(memory);
             if ui.button("Save") {
@@ -394,14 +438,6 @@ impl SheetEditor {
             ui.same_line();
             if ui.button("Reload image") {
                 self.pending.push(Action::Reload(self.id));
-            }
-        }
-        ui.same_line();
-        if ui.button("Close") {
-            if dirty {
-                ui.open_popup("Discard changes?");
-            } else {
-                self.pending.push(Action::Close(self.id));
             }
         }
         if memory {
@@ -631,6 +667,24 @@ mod tests {
         );
     }
     #[test]
+    fn title_and_close_request_keep_sheet_identity_and_dirty_changes() {
+        let mut editor = SheetEditor::new(42, fake_sheet());
+        let clean_title = editor.window_title();
+        editor.request_close();
+        assert!(matches!(editor.pending[..], [Action::Close(42)]));
+        assert!(!editor.confirm_close);
+        editor.pending.clear();
+        editor.sheet.dirty = true;
+        assert_eq!(
+            clean_title.split("###").last(),
+            editor.window_title().split("###").last()
+        );
+        assert!(editor.window_title().contains(" *###"));
+        editor.request_close();
+        assert!(editor.confirm_close);
+        assert!(editor.pending.is_empty(), "dirty x waits for Discard");
+    }
+    #[test]
     fn editor_output_moves_into_the_library_after_drawing() {
         let mut library = SpriteLibrary::default();
         library.sheets.push(SheetEditor::new(7, fake_sheet()));
@@ -722,11 +776,12 @@ mod tests {
         });
         assert_eq!(size.get(), [128.0, 32.0]);
         library.borrow_mut().open = false;
-        assert_eq!(
+        assert!(
             vertices(&mut context, &consumer, |ui| library
                 .borrow_mut()
-                .draw(ui, 0)),
-            0
+                .draw(ui, 0))
+                > 0,
+            "sheet windows survive closing the library"
         );
         let view = preview::PartView {
             id: TextureId::new(1),
@@ -843,22 +898,73 @@ mod tests {
             grid,
         });
         library.apply_pending(&gl, &mut renderer);
+        assert_eq!(library.sheets.len(), 2);
+        assert_eq!(library.sheets[1].sheet.meta.grid.offset, [3, 5]);
+        assert!(library.sheets[1].sheet.selection.cells.is_empty());
+        let latest = library.sheets[1].sheet.external.unwrap();
+        let latest_texture = library.sheets[1].sheet.texture.as_ref().unwrap().raw();
+        library.close(library.sheets[0].id, &mut renderer).unwrap();
         assert_eq!(library.sheets.len(), 1);
-        assert_eq!(library.sheets[0].sheet.meta.grid.offset, [3, 5]);
-        assert!(library.sheets[0].sheet.selection.cells.is_empty());
         assert!(
             renderer.unregister_external_texture(old).is_err(),
-            "replacement must unregister old id"
+            "closed id must be unregistered"
         );
         use glow::HasContext;
-        // SAFETY: current context; the first texture should have been deleted.
+        // SAFETY: the test's GL context is current.
         unsafe {
             assert!(!gl.is_texture(texture));
+            assert!(
+                gl.is_texture(latest_texture),
+                "closing a sibling keeps this texture alive"
+            );
         }
-        let latest = library.sheets[0].sheet.external.unwrap();
         library.close_all(&mut renderer).unwrap();
         assert!(library.sheets.is_empty());
         assert!(renderer.unregister_external_texture(latest).is_err());
+        let temp = extract::tests::Temp::new();
+        let first = temp.0.join("first.png");
+        let second = temp.0.join("second.png");
+        let bytes = crate::sprite::example().0.to_png().unwrap();
+        std::fs::write(&first, &bytes).unwrap();
+        std::fs::write(&second, &bytes).unwrap();
+        library
+            .pending
+            .extend([Action::Load(first.clone()), Action::Load(second.clone())]);
+        library.apply_pending(&gl, &mut renderer);
+        assert_eq!(
+            library.sheets.len(),
+            2,
+            "different files get independent editors"
+        );
+        let first_id = library.sheets[0].id;
+        let first_external = library.sheets[0].sheet.external;
+        library.sheets[0].sheet.meta.grid.offset = [1, 0];
+        library.sheets[0].focus_requested = false;
+        std::fs::create_dir(temp.0.join("alias")).unwrap();
+        library
+            .pending
+            .push(Action::Load(temp.0.join("alias/../first.png")));
+        library.apply_pending(&gl, &mut renderer);
+        assert_eq!(library.sheets.len(), 2);
+        assert!(library.sheets[0].focus_requested);
+        assert_eq!(
+            library.sheets[0].sheet.external, first_external,
+            "focus reuses the texture"
+        );
+        assert_eq!(
+            library.sheets[0].sheet.meta.grid.offset,
+            [1, 0],
+            "focus retains edits"
+        );
+        let second_external = library.sheets[1].sheet.external;
+        library.pending.push(Action::Reload(first_id));
+        library.apply_pending(&gl, &mut renderer);
+        assert_eq!(
+            library.sheets[1].sheet.external, second_external,
+            "reload affects its own sheet"
+        );
+        assert_ne!(library.sheets[0].sheet.external, first_external);
+        library.close_all(&mut renderer).unwrap();
         renderer.shutdown(&mut imgui).unwrap();
     }
 }

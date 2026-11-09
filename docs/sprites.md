@@ -109,7 +109,8 @@ cargo run --features dev
 ```
 
 백틱을 눌러 메뉴를 열고 `Assets > Sprite Library`를 켠다. 창은 처음에는 닫혀 있다.
-웹 dev에는 Assets 메뉴가 없다. `View`의 기존 개발 창은 그대로 쓸 수 있다.
+PNG마다 별도의 편집 창이 열린다. 같은 파일을 다시 열면 기존 창이 앞으로 온다.
+Library 창을 닫아도 편집 창은 유지된다. 웹 dev에는 Assets 메뉴가 없다. `View`의 기존 개발 창은 그대로 쓸 수 있다.
 
 1. `PNG path` 입력 후 `Load`, 파일 드래그 앤 드롭, `Browse...`의 네이티브 파일
    대화상자, `assets/` 목록 중 하나로 PNG를 연다. 드롭은 도구가 숨겨져 있어도 창을 연다.
@@ -143,8 +144,8 @@ cargo run --features dev
 9. `Preview`에서 clip, 타일 애니메이션, 정지 sprite를 고른다. `Play`/`Pause`, `Restart`,
    배율 1–8, 프레임 번호·경과 ms, pivot 십자를 확인한다. once는 마지막 프레임에 머문다.
 10. 헤더의 `*`는 변경 표시다. `Save`는 JSON을 저장한다. `Reload image`는 현재 메타를
-    유지하며 PNG만 다시 읽는다. 메타도 다시 읽으려면 저장 후 `Close`하고 PNG를 다시 Load한다.
-    `Close`는 변경이 있으면 `Discard`/`Cancel`로 확인한다. 앱 종료는 확인 없이 미저장 변경을 잃는다.
+    유지하며 PNG만 다시 읽는다. 메타도 다시 읽으려면 저장 후 편집 창의 x로 닫고 PNG를 다시 Load한다.
+    x는 변경이 있으면 `Discard`/`Cancel`로 확인한다. 앱 종료는 확인 없이 미저장 변경을 잃는다.
 
 메모리 이미지는 `Save image as`로 PNG 경로를 정하기 전에는 Save·Reload가 비활성이다.
 PNG 저장 후 `Save`로 메타를 따로 쓴다. GL 최대 텍스처 크기를 넘으면 치수와
@@ -159,13 +160,13 @@ PNG 저장 후 `Save`로 메타를 따로 쓴다. GL 최대 텍스처 크기를 
 1. 큰 PNG를 열고 `Regions`에서 배경 `Auto`/`Transparent`/`Color`, hex, `Min size`를 정해
    `Find regions`를 누른다. Auto는 투명 픽셀이 있으면 알파를, 없으면 좌상단 색을 배경으로 쓴다.
    기본 Min size는 32이며 8방향 연결 덩어리의 bbox를 제안한다. 후보는 JSON에 저장하지 않는다.
-2. 후보를 선택하고 `Crop to new image`를 누른다. 변경이 있으면 `Discard and crop` 또는
-   `Cancel crop`로 확인한다. 선택 영역은 다음 프레임에 새 메모리 이미지로 열린다.
+2. 후보를 선택하고 `Crop to new image`를 누른다. 선택 영역은 다음 프레임에 새 창의
+   메모리 이미지로 열린다. 원본 창의 변경은 유지된다.
    격자는 유지하고 타일·sprite·clip 메타는 빈 상태로 시작한다.
 3. `Image output`을 확인하고 `Save image as`로 crop PNG를 쓴다. 기본은
    `assets/splites/<crop 이름>/<crop 이름>.png`다. 이 버튼은 JSON을 만들지 않는다.
    그 경로의 사이드카가 이미 있으면 Save가 그 메타를 덮게 되므로 PNG도 쓰지 않고 거부한다.
-4. 배경을 제거하려면 그 PNG를 저장한 다음 `Key color`를 켜고 Load한다.
+4. 배경을 제거하려면 그 PNG를 저장한 다음 `Key color`를 켜고 해당 창의 `Reload image`를 누른다.
    이어 격자를 직접 입력하거나 Guess/Apply로 정한다. crop과 키 색 제거는 이 두 단계다.
 5. `Extract`의 `Analyze`를 누른다. 완전 투명 픽셀의 RGB를 0으로 정규화한 뒤
    바이트가 같은 타일만 묶고 첫 등장 순서를 유지한다. 완전 투명 타일도 하나의 고유 타일이다.
