@@ -148,5 +148,9 @@ mod tests {
         assert!(map.validate().is_err());
         assert!(parse(&json.replace("tiles.png", "../tiles.png")).is_err());
         assert!(parse(&json.replace("\"version\": 1", "\"unknown\": 1, \"version\": 1")).is_err());
+        assert!(parse(&json.replace("\"version\": 1", "\"version\": 2")).is_err());
+        assert!(parse(&json.replace("\"tile\": 2", "\"tile\": 0")).is_err());
+        // A safe relative path is still not the single file name the map promises.
+        assert!(parse(&json.replace("tiles.png", "sub/tiles.png")).is_err());
     }
 }

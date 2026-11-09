@@ -312,8 +312,8 @@ fn write_plan(plan: &ExtractPlan, open_files: &[PathBuf]) -> Result<String, Stri
     refuse_open_output(&output, open_files)?;
     let output = ensure_output_dir(&output, &plan.checkout).map_err(|e| e.to_string())?;
     store::write_atomic(&output, &plan.png).map_err(|e| format!("PNG not written: {e}"))?;
-    // PNG is a regenerated artifact and is replaced even when edited metadata exists.
-    // These two files are not a transaction: after any JSON error the PNG remains.
+    // PNG and map are regenerated artifacts, replaced even when edited metadata exists.
+    // The three files are not a transaction: after any JSON error the PNG remains.
     let sidecar = match save_sidecar_new(&plan.sidecar_path, &plan.sheet) {
         Ok(()) => format!("sidecar written: {}", plan.sidecar_path.display()),
         Err(error) if matches!(&error,StoreError::Io(e) if e.kind()==io::ErrorKind::AlreadyExists) => {
@@ -323,13 +323,10 @@ fn write_plan(plan: &ExtractPlan, open_files: &[PathBuf]) -> Result<String, Stri
     };
     let map_write = match fs::symlink_metadata(&plan.map_path) {
         Ok(meta) if meta.file_type().is_symlink() => Err("map output is a symlink".to_string()),
-        Ok(_) => {
+        Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e.to_string()),
+        _ => {
             store::write_atomic(&plan.map_path, plan.map_json.as_bytes()).map_err(|e| e.to_string())
         }
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {
-            store::write_atomic(&plan.map_path, plan.map_json.as_bytes()).map_err(|e| e.to_string())
-        }
-        Err(e) => Err(e.to_string()),
     };
     let map = match map_write {
         Ok(()) => format!("map written: {}", plan.map_path.display()),

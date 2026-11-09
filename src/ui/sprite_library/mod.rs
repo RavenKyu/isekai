@@ -587,7 +587,7 @@ impl SheetEditor {
             if let Some(_tab) = ui.tab_item("Preview") {
                 self.preview_tab(ui, now_ms);
             }
-            regions::tab(self, ui);
+            regions::tab(self, ui, open_files);
             extract::tab(self, ui, open_files);
         }
     }
@@ -1589,8 +1589,27 @@ mod tests {
         );
         let second_external = library.sheets[1].sheet.external;
         library.sheets[0].start_guess();
+        let running = library.sheets[0].attach_test_batch(2);
+        let finished = library.sheets[1].attach_test_batch(1);
+        finished.send(Ok("done.png".into())).unwrap();
+        drop(finished);
         library.pending.push(Action::Reload(first_id));
         library.apply_pending(&gl, &mut renderer);
+        assert!(
+            running.send(Ok("late.png".into())).is_err()
+                && library.sheets[0]
+                    .log
+                    .iter()
+                    .any(|line| line.contains("Region save cancelled")),
+            "reload cancels the region save of the previous image"
+        );
+        assert!(
+            library.sheets[1]
+                .log
+                .iter()
+                .any(|line| line.contains("Saved 1 of 1 regions")),
+            "every editor's region save is collected before the frame"
+        );
         assert_eq!(
             library.sheets[1].sheet.external, second_external,
             "reload affects its own sheet"
