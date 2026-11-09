@@ -121,8 +121,11 @@ impl Playback {
                 self.sheet
                     .grid
                     .uv(part.col, part.row, self.texture.width, self.texture.height);
-            self.quad
-                .draw(self.texture.raw(), dest, [uv0[0], uv0[1], uv1[0], uv1[1]])?;
+            self.quad.draw(
+                self.texture.raw(),
+                dest,
+                part.transform().uv_corners(uv0, uv1),
+            )?;
         }
         Ok(())
     }

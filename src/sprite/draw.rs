@@ -8,11 +8,11 @@ const HEADER: &str = "#version 300 es\nprecision mediump float;\n";
 const VERT_BODY: &str = r#"
 layout(location = 0) in vec2 a_pos;
 uniform vec4 u_dest;
-uniform vec4 u_uv;
+uniform vec2 u_uv[4];
 out vec2 v_uv;
 void main() {
     gl_Position = vec4(u_dest.xy + a_pos * u_dest.zw, 0.0, 1.0);
-    v_uv = mix(u_uv.xy, u_uv.zw, a_pos);
+    v_uv = u_uv[gl_VertexID];
 }
 "#;
 const FRAG_BODY: &str = r#"
@@ -94,7 +94,7 @@ impl SpriteQuad {
                 vao,
                 vbo,
                 u_dest: gl.get_uniform_location(program, "u_dest"),
-                u_uv: gl.get_uniform_location(program, "u_uv"),
+                u_uv: gl.get_uniform_location(program, "u_uv[0]"),
                 u_tex: gl.get_uniform_location(program, "u_tex"),
             };
             let vertices: [f32; 8] = [0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0];
@@ -114,7 +114,12 @@ impl SpriteQuad {
         }
     }
 
-    pub fn draw(&self, texture: glow::Texture, dest: [f32; 4], uv: [f32; 4]) -> Result<(), String> {
+    pub fn draw(
+        &self,
+        texture: glow::Texture,
+        dest: [f32; 4],
+        corners: [[f32; 2]; 4],
+    ) -> Result<(), String> {
         let gl = &self.gl;
         // SAFETY: frame restored this owner's context; texture and buffers are live.
         unsafe {
@@ -130,7 +135,7 @@ impl SpriteQuad {
             gl.use_program(Some(self.program));
             gl.bind_vertex_array(Some(self.vao));
             gl.uniform_4_f32(self.u_dest.as_ref(), dest[0], dest[1], dest[2], dest[3]);
-            gl.uniform_4_f32(self.u_uv.as_ref(), uv[0], uv[1], uv[2], uv[3]);
+            gl.uniform_2_f32_slice(self.u_uv.as_ref(), corners.as_flattened());
             gl.uniform_1_i32(self.u_tex.as_ref(), 0);
             gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
             gl.disable(glow::BLEND);
