@@ -81,12 +81,7 @@ fn save_memory(
         return Err("only memory images need Save image as".into());
     }
     let output = extract::ensure_output_dir(path, checkout).map_err(|e| e.to_string())?;
-    if open_files.contains(&output) {
-        return Err(format!(
-            "image {} is already open; choose another image path",
-            output.display()
-        ));
-    }
+    extract::refuse_open_output(&output, open_files)?;
     // Save would then replace this sidecar with the crop's empty metadata.
     let sidecar = store::sidecar_for(&output);
     if sidecar.try_exists().map_err(|e| e.to_string())? {
@@ -101,6 +96,8 @@ fn save_memory(
         .ok_or("image file name must be valid UTF-8")?
         .to_owned();
     store::write_atomic(&output, &sheet.image.to_png()?).map_err(|e| e.to_string())?;
+    // Load compares canonical paths, so a later Load of this PNG focuses this editor.
+    let output = output.canonicalize().unwrap_or(output);
     sheet.meta.image = name;
     sheet.source = SheetSource::File(output.clone());
     sheet.dirty = true;
@@ -238,7 +235,7 @@ pub(super) fn tab(editor: &mut SheetEditor, ui: &Ui) {
             }
         }
     }
-    ui.text_wrapped("Crops keep the grid and start empty metadata. Save the image, then Load with Key color to remove a panel background.");
+    ui.text_wrapped("Crops keep the grid and start empty metadata. Save the image, then turn on Key color and Reload image in its window to remove a panel background.");
 }
 
 #[cfg(test)]
@@ -314,11 +311,29 @@ mod tests {
         std::fs::write(&output, b"open sibling PNG").unwrap();
         let canonical = output.canonicalize().unwrap();
         assert!(
-            save_memory(&mut sheet, &output, &temp.0, &[canonical])
-                .unwrap_err()
-                .contains("already open")
+            save_memory(
+                &mut sheet,
+                &output,
+                &temp.0,
+                std::slice::from_ref(&canonical)
+            )
+            .unwrap_err()
+            .contains("already open")
         );
         assert_eq!(std::fs::read(&output).unwrap(), b"open sibling PNG");
+        #[cfg(unix)]
+        {
+            // A link to the open PNG names the same file.
+            let link = output.with_file_name("alias.png");
+            std::os::unix::fs::symlink(&output, &link).unwrap();
+            assert!(
+                save_memory(&mut sheet, &link, &temp.0, std::slice::from_ref(&canonical))
+                    .unwrap_err()
+                    .contains("already open")
+            );
+            assert!(link.is_symlink());
+            std::fs::remove_file(&link).unwrap();
+        }
         assert!(matches!(sheet.source, SheetSource::Memory { .. }));
         save_memory(&mut sheet, &output, &temp.0, &[]).unwrap();
         assert!(matches!(&sheet.source,SheetSource::File(path) if path==&output));

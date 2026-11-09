@@ -547,7 +547,7 @@ impl SheetEditor {
                 self.preview_tab(ui, now_ms);
             }
             regions::tab(self, ui);
-            extract::tab(self, ui);
+            extract::tab(self, ui, open_files);
         }
     }
     fn log(&mut self, message: impl Into<String>) {

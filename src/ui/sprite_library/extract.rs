@@ -125,6 +125,20 @@ fn absolute_output(path: &Path, checkout: &Path) -> Result<PathBuf, StoreError> 
     }
     Ok(path)
 }
+/// Refuses a write over a PNG another editor holds: its window would keep the old
+/// image, and Load of that path only focuses it. A symlink or alias resolves first.
+pub(super) fn refuse_open_output(output: &Path, open_files: &[PathBuf]) -> Result<(), String> {
+    let resolved = output
+        .canonicalize()
+        .unwrap_or_else(|_| output.to_path_buf());
+    if open_files.contains(&resolved) {
+        return Err(format!(
+            "image {} is already open; choose another image path",
+            output.display()
+        ));
+    }
+    Ok(())
+}
 pub(super) fn inside_local_assets(path: &Path, checkout: &Path) -> bool {
     absolute_output(path, checkout)
         .is_ok_and(|path| path.starts_with(checkout.join("assets/splites")))
@@ -274,8 +288,9 @@ fn save_sidecar_new(path: &Path, sheet: &SpriteSheet) -> Result<(), StoreError> 
     fs::hard_link(&stage.0, path)?;
     Ok(())
 }
-fn write_plan(plan: &ExtractPlan) -> Result<String, String> {
+fn write_plan(plan: &ExtractPlan, open_files: &[PathBuf]) -> Result<String, String> {
     let output = ensure_output_dir(&plan.output, &plan.checkout).map_err(|e| e.to_string())?;
+    refuse_open_output(&output, open_files)?;
     store::write_atomic(&output, &plan.png).map_err(|e| format!("PNG not written: {e}"))?;
     // PNG is a regenerated artifact and is replaced even when edited metadata exists.
     // These two files are not a transaction: after any JSON error the PNG remains.
@@ -300,7 +315,7 @@ fn write_plan(plan: &ExtractPlan) -> Result<String, String> {
     ))
 }
 
-pub(super) fn tab(editor: &mut SheetEditor, ui: &Ui) {
+pub(super) fn tab(editor: &mut SheetEditor, ui: &Ui, open_files: &[PathBuf]) {
     let Some(_tab) = ui.tab_item("Extract") else {
         return;
     };
@@ -353,8 +368,9 @@ pub(super) fn tab(editor: &mut SheetEditor, ui: &Ui) {
                 Path::new(&state.output),
                 &checkout,
             )
-            .and_then(|plan| write_plan(&plan).map(|message| format!("{message}; {}", plan.report)))
-            {
+            .and_then(|plan| {
+                write_plan(&plan, open_files).map(|message| format!("{message}; {}", plan.report))
+            }) {
                 Ok(message) => {
                     log::append(log, message);
                     state.written = absolute_output(Path::new(&state.output), &checkout).ok();
@@ -561,7 +577,7 @@ pub(super) mod tests {
         let (mut image, grid) = map(1, [2, 0]);
         let output = temp.0.join("assets/splites/map/tiles.png");
         let first = plan_extract(&image, &grid, 16, &output, &temp.0).unwrap();
-        write_plan(&first).unwrap();
+        write_plan(&first, &[]).unwrap();
         let saved = store::load(&first.sidecar_path).unwrap();
         assert_eq!(saved.sheet, first.sheet);
         assert_eq!(
@@ -572,7 +588,15 @@ pub(super) mod tests {
         let mut old_inode = fs::File::open(&output).unwrap();
         image.set_pixel(2, 0, [200, 100, 50, 255]);
         let second = plan_extract(&image, &grid, 16, &output, &temp.0).unwrap();
-        let error = write_plan(&second).unwrap_err();
+        // A PNG open in an editor is left alone, bytes and sidecar included.
+        let open = [output.canonicalize().unwrap()];
+        assert!(
+            write_plan(&second, &open)
+                .unwrap_err()
+                .contains("already open")
+        );
+        assert_eq!(fs::read(&output).unwrap(), first.png);
+        let error = write_plan(&second, &[]).unwrap_err();
         assert!(
             error.contains("PNG written:") && error.contains("sidecar exists; remove it first"),
             "{error}"
@@ -589,7 +613,11 @@ pub(super) mod tests {
         // A publication error after PNG success is reported explicitly and cleans staging files.
         fs::remove_file(&first.sidecar_path).unwrap();
         fs::create_dir(&first.sidecar_path).unwrap();
-        assert!(write_plan(&first).unwrap_err().contains("PNG written:"));
+        assert!(
+            write_plan(&first, &[])
+                .unwrap_err()
+                .contains("PNG written:")
+        );
         assert_no_temps(&temp.0);
     }
     #[test]
