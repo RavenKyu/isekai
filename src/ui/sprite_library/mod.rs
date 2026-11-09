@@ -847,29 +847,19 @@ mod tests {
         use std::{fs, os::unix::fs::symlink};
         // A private cwd exercises the empty parent of "example.png" without
         // changing the process-wide directory used by concurrently running tests.
-        if std::env::var_os("RN_LOAD_PATH_CHILD").is_none() {
-            let fixture = extract::tests::Temp::new();
-            let output = std::process::Command::new(std::env::current_exe().unwrap())
-                .env("RN_LOAD_PATH_CHILD", "1")
-                .current_dir(&fixture.0)
-                .args([
-                    "--exact",
-                    "ui::sprite_library::tests::load_path_rules_in_their_own_process",
-                    "--nocapture",
-                ])
-                .output()
-                .unwrap();
-            assert!(
-                output.status.success(),
-                "{}{}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
+        const CHILD: &str = "RN_LOAD_PATH_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let fixture = crate::test_support::TempDir::new("extract");
+            crate::test_support::in_child_process(
+                "ui::sprite_library::tests::load_path_rules_in_their_own_process",
+                Some(CHILD),
+                false,
+                Some(&fixture.0),
             );
-            assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
             return;
         }
         let dir = std::env::current_dir().unwrap();
-        let outside = extract::tests::Temp::new();
+        let outside = crate::test_support::TempDir::new("extract");
         let (image, mut meta) = crate::sprite::example();
         let png = image.to_png().unwrap();
         let image_path = Path::new("example.png");
@@ -1012,26 +1002,17 @@ mod tests {
         use std::cell::{Cell, RefCell};
         // Both the normal wrapper and bulk --ignored runs enter here. Only
         // the exact-test child owns an ImGui context and scans the fixture.
-        if std::env::var_os("RN_IMPORT_PANEL_CHILD").is_none() {
-            let fixture = extract::tests::Temp::new();
+        const CHILD: &str = "RN_IMPORT_PANEL_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let fixture = crate::test_support::TempDir::new("extract");
             std::fs::create_dir(fixture.0.join("assets")).unwrap();
             // Refresh only lists the name; no PNG decoding, GL or local assets.
             std::fs::write(fixture.0.join("assets/from-refresh.png"), []).unwrap();
-            let output = std::process::Command::new(std::env::current_exe().unwrap())
-                .env("RN_IMPORT_PANEL_CHILD", "1")
-                .current_dir(&fixture.0)
-                .args([
-                    "--exact",
-                    "ui::sprite_library::tests::import_panel_clicks_and_layout",
-                    "--ignored",
-                ])
-                .output()
-                .unwrap();
-            assert!(
-                output.status.success(),
-                "{}{}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
+            crate::test_support::in_child_process(
+                "ui::sprite_library::tests::import_panel_clicks_and_layout",
+                Some(CHILD),
+                true,
+                Some(&fixture.0),
             );
             return;
         }
@@ -1430,7 +1411,7 @@ mod tests {
     }
     #[test]
     fn save_state_tracks_edits_success_failure_and_memory_images() {
-        let temp = extract::tests::Temp::new();
+        let temp = crate::test_support::TempDir::new("extract");
         let path = temp.0.join("example.png");
         let (image, meta) = crate::sprite::example();
         let bytes = image.to_png().unwrap();
@@ -1514,24 +1495,21 @@ mod tests {
     fn library_geometry_in_its_own_process() {
         // Dear ImGui permits one owning thread per process. Keep the original
         // UI test unchanged and run this second context in a separate process.
-        let output = std::process::Command::new(std::env::current_exe().unwrap())
-            .args([
-                "--exact",
-                "ui::sprite_library::tests::hidden_library_grid_and_zoom_geometry",
-                "--ignored",
-            ])
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "{}{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
+        hidden_library_grid_and_zoom_geometry();
     }
     #[test]
     #[ignore = "run by library_geometry_in_its_own_process"]
     fn hidden_library_grid_and_zoom_geometry() {
+        // Both the default wrapper and bulk --ignored runs enter here. Only
+        // the exact-test child owns an ImGui context.
+        if !crate::test_support::in_child_process(
+            "ui::sprite_library::tests::hidden_library_grid_and_zoom_geometry",
+            Some("RN_LIBRARY_GEOMETRY_CHILD"),
+            true,
+            None,
+        ) {
+            return;
+        }
         // Same serialized CPU ImGui context style as the existing UI tests.
         let (mut context, consumer) = context();
         check_tile_log_input(&mut context, &consumer);
@@ -1640,54 +1618,20 @@ mod tests {
     #[test]
     #[ignore = "requires a display; run under Xvfb"]
     fn queued_replacement_registration_and_close() {
-        if std::env::var_os("RN_LIBRARY_GL_CHILD").is_none() {
-            let output = std::process::Command::new(std::env::current_exe().unwrap())
-                .env("RN_LIBRARY_GL_CHILD", "1")
-                .args([
-                    "--exact",
-                    "ui::sprite_library::tests::queued_replacement_registration_and_close",
-                    "--ignored",
-                ])
-                .output()
-                .unwrap();
-            assert!(
-                output.status.success(),
-                "{}{}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            );
+        if !crate::test_support::in_child_process(
+            "ui::sprite_library::tests::queued_replacement_registration_and_close",
+            Some("RN_LIBRARY_GL_CHILD"),
+            true,
+            None,
+        ) {
             return;
         }
-        let sdl = sdl3::init().unwrap();
-        let video = sdl.video().unwrap();
-        video
-            .gl_attr()
-            .set_context_profile(sdl3::video::GLProfile::Core);
-        video.gl_attr().set_context_version(3, 3);
-        let window = video
-            .window("library lifetime test", 64, 64)
-            .opengl()
-            .hidden()
-            .build()
-            .unwrap();
-        let context = window.gl_create_context().unwrap();
-        window.gl_make_current(&context).unwrap();
-        // SAFETY: the test keeps this context current through library/renderer teardown.
-        let gl = Rc::new(unsafe {
-            glow::Context::from_loader_function(|name| {
-                video
-                    .gl_get_proc_address(name)
-                    .map_or(std::ptr::null(), |f| f as *const () as *const _)
-            })
-        });
+        let fixture = crate::test_support::HiddenGl::new("library lifetime test");
+        let gl = std::rc::Rc::clone(&fixture.gl);
         let mut imgui = crate::dev::context().unwrap();
         let mut renderer = GlowRenderer::with_shared_context(Rc::clone(&gl), &mut imgui).unwrap();
         let mut library = SpriteLibrary::default();
-        let default_grid = Grid {
-            tile: 16,
-            offset: [0, 0],
-            spacing: 0,
-        };
+        let default_grid = Grid::DEFAULT;
         library.pending.push(Action::Replace {
             image: crate::sprite::example().0,
             name: "cropped".into(),
@@ -1731,7 +1675,7 @@ mod tests {
         library.close_all(&mut renderer).unwrap();
         assert!(library.sheets.is_empty());
         assert!(renderer.unregister_external_texture(latest).is_err());
-        let temp = extract::tests::Temp::new();
+        let temp = crate::test_support::TempDir::new("extract");
         let first = temp.0.join("first.png");
         let second = temp.0.join("second.png");
         let bytes = crate::sprite::example().0.to_png().unwrap();
@@ -1843,8 +1787,8 @@ mod tests {
         renderer: &mut GlowRenderer,
     ) {
         use std::{fs, os::unix::fs::symlink};
-        let links = extract::tests::Temp::new();
-        let outside = extract::tests::Temp::new();
+        let links = crate::test_support::TempDir::new("extract");
+        let outside = crate::test_support::TempDir::new("extract");
         let SheetSource::File(opened) = &library.sheets[0].sheet.source else {
             panic!("expected a file-backed editor")
         };

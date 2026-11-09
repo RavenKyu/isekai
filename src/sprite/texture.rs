@@ -86,28 +86,8 @@ mod tests {
     #[test]
     #[ignore = "requires a display; run under Xvfb"]
     fn upload_limit_filtering_and_drop() {
-        let sdl = sdl3::init().unwrap();
-        let video = sdl.video().unwrap();
-        video
-            .gl_attr()
-            .set_context_profile(sdl3::video::GLProfile::Core);
-        video.gl_attr().set_context_version(3, 3);
-        let window = video
-            .window("texture lifetime test", 64, 64)
-            .opengl()
-            .hidden()
-            .build()
-            .unwrap();
-        let context = window.gl_create_context().unwrap();
-        window.gl_make_current(&context).unwrap();
-        // SAFETY: this test owns a current context until after texture drop.
-        let gl = Rc::new(unsafe {
-            glow::Context::from_loader_function(|name| {
-                video
-                    .gl_get_proc_address(name)
-                    .map_or(std::ptr::null(), |f| f as *const () as *const _)
-            })
-        });
+        let fixture = crate::test_support::HiddenGl::new("texture lifetime test");
+        let gl = std::rc::Rc::clone(&fixture.gl);
         let texture = SheetTexture::upload(&gl, &crate::sprite::example().0).unwrap();
         let raw = texture.raw();
         // SAFETY: context is current and texture is alive.

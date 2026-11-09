@@ -4,6 +4,8 @@ mod dev;
 mod raster;
 mod smoke;
 mod sprite;
+#[cfg(test)]
+mod test_support;
 #[cfg(feature = "dev")]
 mod ui;
 

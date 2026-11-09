@@ -115,10 +115,19 @@ pub fn save(sidecar: &Path, sheet: &SpriteSheet) -> Result<(), StoreError> {
 }
 
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
-struct Staged(PathBuf);
+struct Staged(Option<PathBuf>);
+impl Staged {
+    fn rename_to(&mut self, path: &Path) -> Result<(), std::io::Error> {
+        fs::rename(self.0.as_ref().unwrap(), path)?;
+        self.0 = None;
+        Ok(())
+    }
+}
 impl Drop for Staged {
     fn drop(&mut self) {
-        let _ = fs::remove_file(&self.0);
+        if let Some(path) = &self.0 {
+            let _ = fs::remove_file(path);
+        }
     }
 }
 fn stage_bytes(path: &Path, bytes: &[u8]) -> Result<Staged, StoreError> {
@@ -143,7 +152,7 @@ fn stage_bytes(path: &Path, bytes: &[u8]) -> Result<Staged, StoreError> {
         ));
         let temp = parent.join(filename);
         match OpenOptions::new().write(true).create_new(true).open(&temp) {
-            Ok(file) => break (Staged(temp), file),
+            Ok(file) => break (Staged(Some(temp)), file),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(e) => return Err(e.into()),
         }
@@ -169,8 +178,8 @@ fn stage_bytes(path: &Path, bytes: &[u8]) -> Result<Staged, StoreError> {
 /// still show its previous state and a temporary file may remain: crash
 /// durability of the published name is not guaranteed on any platform.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
-    let temp = stage_bytes(path, bytes)?;
-    fs::rename(&temp.0, path)?;
+    let mut temp = stage_bytes(path, bytes)?;
+    temp.rename_to(path)?;
     Ok(())
 }
 /// Publish complete, synced bytes without replacing any existing destination,
@@ -187,7 +196,7 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
 /// published name is not guaranteed on any platform.
 pub fn publish_new(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
     let temp = stage_bytes(path, bytes)?;
-    fs::hard_link(&temp.0, path)?;
+    fs::hard_link(temp.0.as_ref().unwrap(), path)?;
     Ok(())
 }
 
@@ -195,22 +204,17 @@ pub fn publish_new(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
 mod tests {
     use super::*;
     use std::io::Read;
-    struct Temp(PathBuf);
-    impl Temp {
-        fn new() -> Self {
-            let path = std::env::temp_dir().join(format!(
-                "rusty-nails-store-{}-{}",
-                std::process::id(),
-                NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
-            ));
-            fs::create_dir(&path).unwrap();
-            Self(path)
-        }
-    }
-    impl Drop for Temp {
-        fn drop(&mut self) {
-            fs::remove_dir_all(&self.0).unwrap();
-        }
+    #[test]
+    fn renamed_stage_does_not_remove_a_reused_name() {
+        let dir = crate::test_support::TempDir::new("rename-reuse");
+        let destination = dir.0.join("destination");
+        let mut staged = stage_bytes(&destination, b"first").unwrap();
+        let old_name = staged.0.as_ref().unwrap().clone();
+        staged.rename_to(&destination).unwrap();
+        fs::write(&old_name, b"second").unwrap();
+        drop(staged);
+        assert_eq!(fs::read(&destination).unwrap(), b"first");
+        assert_eq!(fs::read(&old_name).unwrap(), b"second");
     }
     #[test]
     fn lexical_paths_are_portable_and_strict() {
@@ -245,7 +249,7 @@ mod tests {
     }
     #[test]
     fn atomic_replacement_preserves_old_inode_and_cleans_failures() {
-        let dir = Temp::new();
+        let dir = crate::test_support::TempDir::new("store");
         let path = dir.0.join("sheet.json");
         fs::write(&path, b"old complete content").unwrap();
         let mut old_handle = fs::File::open(&path).unwrap();
@@ -279,7 +283,7 @@ mod tests {
     }
     #[test]
     fn publication_is_exclusive_and_cleans_success_and_failure() {
-        let dir = Temp::new();
+        let dir = crate::test_support::TempDir::new("store");
         let path = dir.0.join("image.png");
         publish_new(&path, b"complete PNG").unwrap();
         assert_eq!(fs::read(&path).unwrap(), b"complete PNG");
@@ -302,8 +306,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn publication_refuses_live_and_dangling_symlink_names() {
-        let dir = Temp::new();
-        let outside = Temp::new();
+        let dir = crate::test_support::TempDir::new("store");
+        let outside = crate::test_support::TempDir::new("store");
         let target = outside.0.join("target.png");
         fs::write(&target, b"original").unwrap();
         for (name, target) in [
@@ -324,7 +328,7 @@ mod tests {
     }
     #[test]
     fn concurrent_publication_has_one_winner_and_keeps_its_complete_bytes() {
-        let dir = Temp::new();
+        let dir = crate::test_support::TempDir::new("store");
         let path = dir.0.join("image.png");
         let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
         let writers: Vec<_> = (0..2)
@@ -353,7 +357,7 @@ mod tests {
     }
     #[test]
     fn canonical_roundtrip_and_load() {
-        let dir = Temp::new();
+        let dir = crate::test_support::TempDir::new("store");
         let path = super::super::example::write_example(&dir.0).unwrap();
         let loaded = load(&path).unwrap();
         assert_eq!(
@@ -371,8 +375,8 @@ mod tests {
     #[test]
     fn image_directory_check_matches_loader_for_symlinks_and_missing_files() {
         use std::os::unix::fs::symlink;
-        let dir = Temp::new();
-        let outside = Temp::new();
+        let dir = crate::test_support::TempDir::new("store");
+        let outside = crate::test_support::TempDir::new("store");
         let image = dir.0.join("example.png");
         let target = outside.0.join("out.png");
         fs::write(&target, b"outside image").unwrap();
@@ -441,8 +445,8 @@ mod tests {
     #[test]
     fn checked_image_paths_keep_the_resolved_target_after_alias_replacement() {
         use std::os::unix::fs::symlink;
-        let dir = Temp::new();
-        let outside = Temp::new();
+        let dir = crate::test_support::TempDir::new("store");
+        let outside = crate::test_support::TempDir::new("store");
         let local = dir.0.join("local.png");
         let foreign = outside.0.join("foreign.png");
         fs::write(&local, b"checked local image").unwrap();
@@ -470,8 +474,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn existing_image_symlink_cannot_escape_sidecar_directory() {
-        let dir = Temp::new();
-        let outside = Temp::new();
+        let dir = crate::test_support::TempDir::new("store");
+        let outside = crate::test_support::TempDir::new("store");
         fs::write(outside.0.join("out.png"), b"image").unwrap();
         std::os::unix::fs::symlink(outside.0.join("out.png"), dir.0.join("example.png")).unwrap();
         let path = dir.0.join("example.sprites.json");

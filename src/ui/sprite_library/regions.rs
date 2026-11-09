@@ -317,10 +317,7 @@ fn crop_action(
 }
 fn default_image_output(source: &SheetSource, checkout: &Path) -> PathBuf {
     let stem = extract::source_stem(source);
-    checkout
-        .join("assets/splites")
-        .join(&stem)
-        .join(format!("{stem}.png"))
+    extract::default_directory(source, checkout).join(format!("{stem}.png"))
 }
 fn save_memory(
     sheet: &mut OpenSheet,
@@ -534,9 +531,7 @@ pub(super) fn tab(editor: &mut SheetEditor, ui: &Ui, open_files: &[PathBuf]) {
     };
     let stem = extract::source_stem(&sheet.source);
     if state.batch_dir.is_empty() {
-        state.batch_dir = checkout
-            .join("assets/splites")
-            .join(&stem)
+        state.batch_dir = extract::default_directory(&sheet.source, &checkout)
             .to_string_lossy()
             .into_owned();
     }
@@ -585,7 +580,7 @@ mod tests {
     use super::*;
     #[test]
     fn batch_preflight_rejects_sidecars_and_unsafe_directories_without_writes() {
-        let temp = super::super::extract::tests::Temp::new();
+        let temp = crate::test_support::TempDir::new("extract");
         let boxes = vec![
             ObjectBox {
                 x: 0,
@@ -633,7 +628,7 @@ mod tests {
     }
     #[test]
     fn batch_preflight_refuses_a_png_open_in_any_editor() {
-        let temp = super::super::extract::tests::Temp::new();
+        let temp = crate::test_support::TempDir::new("extract");
         let boxes = vec![
             ObjectBox {
                 x: 0,
@@ -745,7 +740,7 @@ mod tests {
     }
     #[test]
     fn cancelled_batch_writes_nothing() {
-        let temp = super::super::extract::tests::Temp::new();
+        let temp = crate::test_support::TempDir::new("extract");
         let bbox = ObjectBox {
             x: 0,
             y: 0,
@@ -777,7 +772,7 @@ mod tests {
     }
     #[test]
     fn cancel_during_encoding_starts_no_write() {
-        let temp = super::super::extract::tests::Temp::new();
+        let temp = crate::test_support::TempDir::new("extract");
         let bbox = ObjectBox {
             x: 0,
             y: 0,
@@ -821,7 +816,7 @@ mod tests {
     }
     #[test]
     fn batch_worker_saves_exact_crops_and_drop_signals_cancel() {
-        let temp = super::super::extract::tests::Temp::new();
+        let temp = crate::test_support::TempDir::new("extract");
         let mut image = RgbaImage::new(4, 2);
         for y in 0..2 {
             for x in 0..4 {
@@ -972,27 +967,15 @@ mod tests {
         use std::cell::{Cell, RefCell};
         // Both the default wrapper and bulk --ignored runs must enter a fresh
         // process before creating ImGui's single-thread-owned context.
-        if std::env::var_os("RN_MEMORY_SAVE_CHILD").is_none() {
-            let output = std::process::Command::new(std::env::current_exe().unwrap())
-                .env("RN_MEMORY_SAVE_CHILD", "1")
-                .args([
-                    "--exact",
-                    "ui::sprite_library::regions::tests::memory_save_button_preserves_state_on_refusal",
-                    "--ignored",
-                    "--nocapture",
-                ])
-                .output()
-                .unwrap();
-            assert!(
-                output.status.success(),
-                "{}{}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            );
-            assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+        if !crate::test_support::in_child_process(
+            "ui::sprite_library::regions::tests::memory_save_button_preserves_state_on_refusal",
+            Some("RN_MEMORY_SAVE_CHILD"),
+            true,
+            None,
+        ) {
             return;
         }
-        let temp = super::super::extract::tests::Temp::new();
+        let temp = crate::test_support::TempDir::new("extract");
         let path = temp.0.join("existing.png");
         std::fs::write(&path, b"existing PNG without metadata").unwrap();
         let mut editor = SheetEditor::new(1, super::super::extract::tests::memory_sheet());
@@ -1040,8 +1023,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn save_memory_refuses_existing_symlink_names() {
-        let temp = super::super::extract::tests::Temp::new();
-        let outside = super::super::extract::tests::Temp::new();
+        let temp = crate::test_support::TempDir::new("extract");
+        let outside = crate::test_support::TempDir::new("extract");
         let target = outside.0.join("original.png");
         std::fs::write(&target, b"original PNG").unwrap();
         for (name, target) in [
@@ -1087,7 +1070,7 @@ mod tests {
     }
     #[test]
     fn save_memory_uses_png_and_changes_source_only_after_success() {
-        let temp = super::super::extract::tests::Temp::new();
+        let temp = crate::test_support::TempDir::new("extract");
         let mut sheet = super::super::extract::tests::memory_sheet();
         let output = default_image_output(&sheet.source, &temp.0);
         assert_eq!(output, temp.0.join("assets/splites/map/map.png"));

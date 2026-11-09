@@ -17,6 +17,11 @@ pub struct Cells {
 }
 
 impl Grid {
+    pub const DEFAULT: Self = Self {
+        tile: 16,
+        offset: [0, 0],
+        spacing: 0,
+    };
     pub fn validate(&self) -> Result<(), String> {
         if self.tile == 0 || self.tile.checked_add(self.spacing).is_none() {
             Err("grid tile must be positive and tile + spacing must fit u32".into())
@@ -87,11 +92,7 @@ mod tests {
     use super::*;
     #[test]
     fn dimensions_spacing_and_independent_offsets() {
-        let grid = Grid {
-            tile: 16,
-            offset: [0, 0],
-            spacing: 0,
-        };
+        let grid = Grid::DEFAULT;
         assert_eq!(
             (grid.cells(256, 64).cols, grid.cells(256, 64).rows),
             (16, 4)

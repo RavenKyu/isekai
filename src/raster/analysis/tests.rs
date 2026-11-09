@@ -61,11 +61,7 @@ fn alpha_key_and_hex_are_exact() {
 
 #[test]
 fn tile_bounds_and_alpha_only_emptiness() {
-    let grid = Grid {
-        tile: 16,
-        offset: [0, 0],
-        spacing: 0,
-    };
+    let grid = Grid::DEFAULT;
     let mut image = solid(256, 64, [9, 8, 7, 0]);
     assert!(image.tile(&grid, 15, 3).is_some());
     assert!(image.tile(&grid, 16, 3).is_none());
@@ -284,11 +280,7 @@ fn objects_use_eight_neighbors_background_and_sorted_bounds() {
 
 #[test]
 fn snap_clips_to_cells_and_skips_gaps_and_leftovers() {
-    let grid = Grid {
-        tile: 16,
-        offset: [0, 0],
-        spacing: 0,
-    };
+    let grid = Grid::DEFAULT;
     assert_eq!(
         ObjectBox {
             x: 17,
@@ -437,11 +429,7 @@ fn local_assets_report() {
             continue;
         };
         let image = RgbaImage::from_png(&bytes).unwrap();
-        let grid = Grid {
-            tile: 16,
-            offset: [0, 0],
-            spacing: 0,
-        };
+        let grid = Grid::DEFAULT;
         let cells = grid.cells(image.width, image.height);
         if path.starts_with(root.join("assets/splites/cave")) {
             assert!([(256, 64), (256, 144)].contains(&(image.width, image.height)));

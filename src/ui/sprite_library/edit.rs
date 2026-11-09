@@ -201,9 +201,9 @@ mod tests {
     }
     #[test]
     fn example_files_open_and_rename_roundtrip() {
-        let dir = std::env::temp_dir().join(format!("rn-editor-roundtrip-{}", std::process::id()));
-        std::fs::create_dir(&dir).unwrap();
-        let path = crate::sprite::example::write_example(&dir).unwrap();
+        let temp = crate::test_support::TempDir::new("editor-roundtrip");
+        let dir = &temp.0;
+        let path = crate::sprite::example::write_example(dir).unwrap();
         let loaded = crate::sprite::store::load(&path).unwrap();
         let (_, mut sheet, dirty) = super::super::open_sheet(
             &loaded.image_path,
@@ -220,6 +220,5 @@ mod tests {
             std::fs::read_to_string(&path).unwrap(),
             crate::sprite::example::EXAMPLE_JSON
         );
-        std::fs::remove_dir_all(dir).unwrap();
     }
 }

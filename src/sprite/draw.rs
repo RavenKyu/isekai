@@ -175,24 +175,12 @@ mod tests {
     fn transformed_pixels_match_gpu_readback() {
         // SDL initialization belongs to one OS thread per process. The texture
         // test initializes SDL in this harness, so only our child may create it.
-        if std::env::var_os("RN_SPRITE_QUAD_GL_CHILD").is_none() {
-            let output = std::process::Command::new(std::env::current_exe().unwrap())
-                .args([
-                    "--ignored",
-                    "--exact",
-                    "sprite::draw::tests::transformed_pixels_match_gpu_readback",
-                    "--nocapture",
-                ])
-                .env("RN_SPRITE_QUAD_GL_CHILD", "1")
-                .output()
-                .unwrap();
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            assert!(
-                output.status.success() && stdout.contains("1 passed"),
-                "GPU readback child: {}\nstdout:\n{stdout}\nstderr:\n{stderr}",
-                output.status
-            );
+        if !crate::test_support::in_child_process(
+            "sprite::draw::tests::transformed_pixels_match_gpu_readback",
+            Some("RN_SPRITE_QUAD_GL_CHILD"),
+            true,
+            None,
+        ) {
             return;
         }
 
@@ -222,28 +210,8 @@ mod tests {
 
         // Declaration order keeps SDL/window/context alive through every GL
         // object drop, including assertion unwinding. No other thread uses GL.
-        let sdl = sdl3::init().unwrap();
-        let video = sdl.video().unwrap();
-        video
-            .gl_attr()
-            .set_context_profile(sdl3::video::GLProfile::Core);
-        video.gl_attr().set_context_version(3, 3);
-        let window = video
-            .window("sprite quad readback test", 64, 64)
-            .opengl()
-            .hidden()
-            .build()
-            .unwrap();
-        let context = window.gl_create_context().unwrap();
-        window.gl_make_current(&context).unwrap();
-        // SAFETY: the test owns this current context until all GL owners drop.
-        let gl = Rc::new(unsafe {
-            glow::Context::from_loader_function(|name| {
-                video
-                    .gl_get_proc_address(name)
-                    .map_or(std::ptr::null(), |f| f as *const () as *const _)
-            })
-        });
+        let fixture = crate::test_support::HiddenGl::new("sprite quad readback test");
+        let gl = std::rc::Rc::clone(&fixture.gl);
         let sheet = SheetTexture::upload(&gl, &image).unwrap();
         let quad = SpriteQuad::new(&gl).unwrap();
 

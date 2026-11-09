@@ -167,12 +167,13 @@ pub(super) fn source_stem(source: &SheetSource) -> String {
         SheetSource::Memory { name } => name.clone(),
     }
 }
+const LOCAL_ASSETS: &str = "assets/splites";
+pub(super) fn default_directory(source: &SheetSource, checkout: &Path) -> PathBuf {
+    checkout.join(LOCAL_ASSETS).join(source_stem(source))
+}
 pub(super) fn default_output(source: &SheetSource, checkout: &Path) -> PathBuf {
     let stem = source_stem(source);
-    checkout
-        .join("assets/splites")
-        .join(&stem)
-        .join(format!("{stem}-tileset.png"))
+    default_directory(source, checkout).join(format!("{stem}-tileset.png"))
 }
 pub(super) fn absolute_output(path: &Path, checkout: &Path) -> Result<PathBuf, StoreError> {
     if path.components().any(|c| matches!(c, Component::ParentDir)) {
@@ -212,8 +213,7 @@ pub(super) fn refuse_open_output(output: &Path, open_files: &[PathBuf]) -> Resul
     Ok(())
 }
 pub(super) fn inside_local_assets(path: &Path, checkout: &Path) -> bool {
-    absolute_output(path, checkout)
-        .is_ok_and(|path| path.starts_with(checkout.join("assets/splites")))
+    absolute_output(path, checkout).is_ok_and(|path| path.starts_with(checkout.join(LOCAL_ASSETS)))
 }
 pub(super) fn ensure_output_dir(path: &Path, checkout: &Path) -> Result<PathBuf, StoreError> {
     let output = absolute_output(path, checkout)?;
@@ -543,38 +543,10 @@ pub(super) fn tab(editor: &mut SheetEditor, ui: &Ui, open_files: &[PathBuf]) {
 pub(super) mod tests {
     use super::*;
     use crate::raster::RgbaImage;
-    use std::{
-        io::Read,
-        sync::atomic::{AtomicU64, Ordering},
-    };
-    static NEXT_STAGE: AtomicU64 = AtomicU64::new(0);
-    pub(crate) struct Temp(pub PathBuf);
-    impl Temp {
-        pub(crate) fn new() -> Self {
-            let path = std::env::temp_dir().join(format!(
-                "rn-extract-{}-{}",
-                std::process::id(),
-                NEXT_STAGE.fetch_add(1, Ordering::Relaxed)
-            ));
-            fs::create_dir(&path).unwrap();
-            Self(path)
-        }
-    }
-    impl Drop for Temp {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
+    use std::io::Read;
     pub(crate) fn memory_sheet() -> OpenSheet {
         let (image, _) = crate::sprite::example();
-        let meta = SpriteSheet::new_for(
-            "map.png",
-            Grid {
-                tile: 16,
-                offset: [0, 0],
-                spacing: 0,
-            },
-        );
+        let meta = SpriteSheet::new_for("map.png", Grid::DEFAULT);
         OpenSheet {
             source: SheetSource::Memory { name: "map".into() },
             image,
@@ -615,20 +587,13 @@ pub(super) mod tests {
     }
     #[test]
     fn extraction_plan_has_unique_tiles_empty_metadata_and_diagnostics() {
-        let temp = Temp::new();
+        let temp = crate::test_support::TempDir::new("extract");
         for (spacing, offset) in [(0, [0, 0]), (1, [2, 0])] {
             let (image, grid) = map(spacing, offset);
             let plan = plan_extract(&image, &grid, 16, &temp.0.join("map.png"), &temp.0).unwrap();
             let png = RgbaImage::from_png(&plan.png).unwrap();
             assert_eq!((png.width, png.height), (48, 16));
-            assert_eq!(
-                plan.sheet.grid,
-                Grid {
-                    tile: 16,
-                    offset: [0, 0],
-                    spacing: 0
-                }
-            );
+            assert_eq!(plan.sheet.grid, Grid::DEFAULT);
             assert_eq!(plan.sheet.image, "map.png");
             assert!(
                 plan.sheet.tiles.is_empty()
@@ -648,11 +613,7 @@ pub(super) mod tests {
         assert!(
             plan_extract(
                 &RgbaImage::new(7, 7),
-                &Grid {
-                    tile: 16,
-                    offset: [0, 0],
-                    spacing: 0
-                },
+                &Grid::DEFAULT,
                 16,
                 &temp.0.join("map.png"),
                 &temp.0
@@ -672,7 +633,7 @@ pub(super) mod tests {
     }
     #[test]
     fn grouped_map_rebuilds_all_eight_variants() {
-        let temp = Temp::new();
+        let temp = crate::test_support::TempDir::new("extract");
         let mut tile = RgbaImage::new(2, 2);
         for y in 0..2 {
             for x in 0..2 {
@@ -714,7 +675,7 @@ pub(super) mod tests {
     #[cfg(unix)]
     #[test]
     fn map_destination_symlink_is_refused() {
-        let temp = Temp::new();
+        let temp = crate::test_support::TempDir::new("extract");
         let (image, grid) = map(0, [0, 0]);
         let plan = plan_extract(&image, &grid, 16, &temp.0.join("tiles.png"), &temp.0).unwrap();
         let target = temp.0.join("untouched");
@@ -727,7 +688,7 @@ pub(super) mod tests {
     }
     #[test]
     fn defaults_and_output_directory_boundaries() {
-        let temp = Temp::new();
+        let temp = crate::test_support::TempDir::new("extract");
         let file = SheetSource::File("/x/map-01.png".into());
         let memory = SheetSource::Memory {
             name: "224070-region-1".into(),
@@ -775,7 +736,7 @@ pub(super) mod tests {
         assert_eq!(path_note(&output, &temp.0), "");
         #[cfg(unix)]
         {
-            let external = Temp::new();
+            let external = crate::test_support::TempDir::new("extract");
             std::os::unix::fs::symlink(&external.0, temp.0.join("assets/splites/link")).unwrap();
             assert!(
                 ensure_output_dir(&temp.0.join("assets/splites/link/new/out.png"), &temp.0)
@@ -786,7 +747,7 @@ pub(super) mod tests {
     }
     #[test]
     fn opened_output_is_refused_before_any_disk_changes() {
-        let temp = Temp::new();
+        let temp = crate::test_support::TempDir::new("extract");
         let (image, grid) = map(0, [0, 0]);
         let source = temp.0.join("original.png");
         fs::write(&source, image.to_png().unwrap()).unwrap();
@@ -828,7 +789,7 @@ pub(super) mod tests {
     }
     #[test]
     fn writes_are_atomic_png_replaced_sidecar_preserved_and_temps_cleaned() {
-        let temp = Temp::new();
+        let temp = crate::test_support::TempDir::new("extract");
         let (mut image, grid) = map(1, [2, 0]);
         let output = temp.0.join("assets/splites/map/tiles.png");
         let first = plan_extract(&image, &grid, 16, &output, &temp.0).unwrap();
@@ -886,7 +847,7 @@ pub(super) mod tests {
     }
     #[test]
     fn sidecar_publication_validates_before_creating_files() {
-        let temp = Temp::new();
+        let temp = crate::test_support::TempDir::new("extract");
         let path = temp.0.join("invalid.sprites.json");
         let mut sheet = memory_sheet().meta;
         sheet.grid.tile = 0;
@@ -898,7 +859,7 @@ pub(super) mod tests {
     }
     #[test]
     fn sidecar_publication_cannot_clobber_a_concurrent_writer() {
-        let temp = Temp::new();
+        let temp = crate::test_support::TempDir::new("extract");
         let path = temp.0.join("same.sprites.json");
         let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
         let workers: Vec<_> = (0..2)
@@ -906,14 +867,7 @@ pub(super) mod tests {
                 let path = path.clone();
                 let barrier = barrier.clone();
                 std::thread::spawn(move || {
-                    let sheet = SpriteSheet::new_for(
-                        &format!("image-{i}.png"),
-                        Grid {
-                            tile: 16,
-                            offset: [0, 0],
-                            spacing: 0,
-                        },
-                    );
+                    let sheet = SpriteSheet::new_for(&format!("image-{i}.png"), Grid::DEFAULT);
                     barrier.wait();
                     save_sidecar_new(&path, &sheet).is_ok()
                 })
@@ -981,7 +935,7 @@ pub(super) mod tests {
     }
     #[test]
     fn renaming_the_source_reports_the_dropped_analysis() {
-        let temp = Temp::new();
+        let temp = crate::test_support::TempDir::new("extract");
         let mut sheet = memory_sheet();
         let mut state = ExtractState::default();
         assert!(!state.sync(&sheet, &temp.0));
@@ -1014,7 +968,7 @@ pub(super) mod tests {
     }
     #[test]
     fn grid_and_image_changes_invalidate_analysis_and_written_result() {
-        let temp = Temp::new();
+        let temp = crate::test_support::TempDir::new("extract");
         let mut sheet = memory_sheet();
         let mut state = ExtractState::default();
         state.sync(&sheet, &temp.0);

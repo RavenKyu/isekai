@@ -275,18 +275,12 @@ mod tests {
     fn event_shutdown() {
         // Texture tests also initialize SDL. Keep each SDL-owning test in its
         // own process: SDL binds initialization to one OS thread per process.
-        if std::env::var_os("RN_APP_SHUTDOWN_CHILD").is_none() {
-            let output = std::process::Command::new(std::env::current_exe().unwrap())
-                .args([
-                    "--ignored",
-                    "--exact",
-                    "app::tests::event_shutdown",
-                    "--nocapture",
-                ])
-                .env("RN_APP_SHUTDOWN_CHILD", "1")
-                .output()
-                .unwrap();
-            assert!(output.status.success(), "shutdown child: {output:?}");
+        if !crate::test_support::in_child_process(
+            "app::tests::event_shutdown",
+            Some("RN_APP_SHUTDOWN_CHILD"),
+            true,
+            None,
+        ) {
             return;
         }
         let mut app = App::new(None, None).unwrap();

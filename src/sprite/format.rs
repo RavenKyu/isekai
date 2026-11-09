@@ -618,14 +618,7 @@ mod tests {
         };
         assert_eq!(set.bounds(&sheet.grid), (48, 32));
         assert_eq!(set.bounds_origin(), (-16, -8));
-        let mut sheet = SpriteSheet::new_for(
-            "x.png",
-            Grid {
-                tile: 16,
-                offset: [0, 0],
-                spacing: 0,
-            },
-        );
+        let mut sheet = SpriteSheet::new_for("x.png", Grid::DEFAULT);
         for (col, row) in [(16, 0), (0, 9)] {
             sheet.tiles = vec![TileMeta {
                 col,
