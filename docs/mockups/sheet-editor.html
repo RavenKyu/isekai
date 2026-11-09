@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Sheet Editor 시안</title>
+<style>
+  :root{
+    --bg:#1e1f22; --panel:#2a2c30; --panel2:#33363b; --line:#45484e; --text:#dcdfe4;
+    --dim:#8b9099; --acc:#4c8dff; --acc2:#2f6fe0; --warn:#e8b04b; --ok:#5fbf77; --bad:#e06464;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#121315;color:var(--text);font:13px/1.4 system-ui,-apple-system,"Noto Sans KR",sans-serif}
+  .note{max-width:1280px;margin:12px auto 0;padding:8px 12px;background:#2b2618;border:1px solid #5a4a20;border-radius:6px;color:#e9d9a8;font-size:12px}
+  .note b{color:#ffd76a}
+  .win{max-width:1280px;margin:12px auto;background:var(--bg);border:1px solid var(--line);border-radius:8px;overflow:hidden;box-shadow:0 8px 30px #0008}
+  .titlebar{display:flex;align-items:center;gap:8px;padding:6px 10px;background:#17181a;border-bottom:1px solid var(--line)}
+  .titlebar .t{flex:1;font-weight:600}
+  .titlebar .x{width:22px;height:22px;border-radius:4px;display:grid;place-items:center;color:var(--dim)}
+  .titlebar .x:hover{background:#c33;color:#fff}
+  .toolbar{display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .toolbar .sep{width:1px;height:20px;background:var(--line);margin:0 4px}
+  label.f{display:inline-flex;align-items:center;gap:4px;color:var(--dim)}
+  input,select{background:#1a1b1e;color:var(--text);border:1px solid var(--line);border-radius:4px;padding:3px 6px;font:inherit}
+  input[type=number]{width:56px}
+  button{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:4px;padding:4px 10px;font:inherit;cursor:pointer}
+  button:hover:not(:disabled){border-color:var(--acc)}
+  button.primary{background:var(--acc2);border-color:var(--acc2);color:#fff}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  button.sm{padding:1px 6px;font-size:12px}
+  .main{display:grid;grid-template-columns:auto 1fr 300px;min-height:560px}
+  .col{border-right:1px solid var(--line);display:flex;flex-direction:column;min-width:0}
+  .col:last-child{border-right:none}
+  .colhead{padding:6px 10px;background:var(--panel);border-bottom:1px solid var(--line);font-weight:600;display:flex;align-items:center;gap:8px}
+  .colhead .sub{font-weight:400;color:var(--dim);font-size:12px}
+  .sheetwrap{padding:10px;overflow:auto}
+  canvas{image-rendering:pixelated}
+  #sheet{cursor:crosshair;display:block;border:1px solid var(--line)}
+  .tabs{display:flex;gap:2px;padding:6px 8px 0;background:var(--panel);border-bottom:1px solid var(--line)}
+  .tab{padding:6px 14px;border:1px solid transparent;border-bottom:none;border-radius:6px 6px 0 0;color:var(--dim);cursor:pointer}
+  .tab.on{background:var(--bg);border-color:var(--line);color:var(--text);margin-bottom:-1px}
+  .tab .k{font-size:11px;color:var(--dim);margin-left:4px}
+  .pane{padding:12px;overflow:auto;flex:1}
+  .hidden{display:none!important}
+  .row{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap}
+  .field{display:grid;grid-template-columns:70px 1fr;gap:6px;align-items:center;margin-bottom:6px}
+  .field span{color:var(--dim)}
+  h4{margin:14px 0 6px;font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em}
+  table.props{width:100%;border-collapse:collapse}
+  table.props td{padding:2px}
+  table.props input{width:100%}
+  .empty{color:var(--dim);font-style:italic;padding:8px 0}
+  .list{border:1px solid var(--line);border-radius:6px;overflow:hidden}
+  .item{display:grid;grid-template-columns:40px 1fr auto;gap:8px;align-items:center;padding:6px 8px;border-bottom:1px solid var(--line);cursor:pointer}
+  .item:last-child{border-bottom:none}
+  .item:hover{background:#262830}
+  .item.on{background:#22324f}
+  .item canvas{background:#0d0e10;border-radius:3px}
+  .item .meta{color:var(--dim);font-size:11px}
+  .item .nm{font-weight:600}
+  .grid-edit{display:inline-grid;gap:2px;background:var(--line);padding:2px;border-radius:4px}
+  .cell{width:64px;height:64px;background:#141518 repeating-conic-gradient(#1b1c20 0 25%,#141518 0 50%) 0 0/16px 16px;position:relative}
+  .cell canvas{width:64px;height:64px;display:block}
+  .cell.hot{outline:2px solid var(--acc);outline-offset:-2px}
+  .cell .clr{position:absolute;top:1px;right:1px;display:none;font-size:10px;padding:0 4px;background:#000a;border:none}
+  .cell:hover .clr{display:block}
+  .hint{color:var(--dim);font-size:12px}
+  #animEdit,#spriteEdit{min-width:0}
+  .frames{display:flex;gap:6px;overflow-x:auto;padding:6px;border:1px solid var(--line);border-radius:6px;min-height:118px;background:#18191c}
+  .frame{width:92px;flex:none;border:1px solid var(--line);border-radius:5px;padding:4px;background:var(--panel)}
+  .frame.cur{border-color:var(--warn)}
+  .frame canvas{width:82px;height:56px;background:#0d0e10;border-radius:3px;display:block;margin-bottom:3px}
+  .frame select,.frame input{width:100%;margin-bottom:3px;font-size:11px;padding:2px 4px}
+  .frame .btns{display:flex;justify-content:space-between}
+  .preview{display:flex;flex-direction:column;align-items:center;padding:10px;gap:8px}
+  #pv{background:#0d0e10 repeating-conic-gradient(#16171a 0 25%,#0d0e10 0 50%) 0 0/24px 24px;border:1px solid var(--line);border-radius:4px}
+  .pvinfo{color:var(--dim);font-size:12px;text-align:center;min-height:34px}
+  .log{height:110px;background:#000;color:#fff;font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;padding:6px 10px;overflow:auto;border-top:1px solid var(--line)}
+  .log .ts{color:#888}
+  .logbar{display:flex;justify-content:space-between;align-items:center;padding:3px 10px;background:var(--panel);border-top:1px solid var(--line);color:var(--dim);font-size:12px}
+  .badge{font-size:11px;background:#3a3f48;border-radius:10px;padding:0 6px;color:var(--dim)}
+  #ghost{position:fixed;pointer-events:none;z-index:9;opacity:.85;display:none;border:1px solid var(--acc)}
+  .tools-card{border:1px solid var(--line);border-radius:6px;padding:10px;margin-bottom:10px}
+  .tools-card p{margin:4px 0 8px;color:var(--dim);font-size:12px}
+  .chips{display:flex;gap:4px;flex-wrap:wrap}
+  .chip{background:#30343b;border-radius:10px;padding:0 8px;font-size:11px}
+</style>
+</head>
+<body>
+
+<div class="note">
+  <b>시안 (HTML, 동작 흉내만 냄)</b> · 실제 구현은 Dear ImGui. 그림은 자리표시용 절차 생성 픽셀이다.<br>
+  바뀐 점: ① 오른쪽 <b>Preview 상시 표시</b>(Preview 탭 삭제) ② 탭 이름 <b>Tileset / Sprites / Animations</b> + 보조 <b>Import</b>
+  ③ Tileset에서 Pin·Tile animation 삭제, props는 key/value 표 ④ Sprites는 <b>W×H 격자 캔버스에 시트의 타일을 끌어다 놓아</b> 조립, 목록에 미리보기·이름·수정 시각
+  ⑤ 선택 없을 때 생성 버튼 비활성 ⑥ Suggest from objects 삭제 ⑦ Animations = 지금의 Clips.
+</div>
+
+<div class="win">
+  <div class="titlebar">
+    <div class="t" id="title">cave-01.png — Sheet Editor</div>
+    <div class="x" title="창 닫기 (변경 있으면 Discard/Cancel 확인)">✕</div>
+  </div>
+
+  <div class="toolbar">
+    <button id="save" class="primary" disabled>Save</button>
+    <button>Reload image</button>
+    <div class="sep"></div>
+    <label class="f">Tile <input type="number" value="16"></label>
+    <label class="f">Offset <input type="number" value="0"> <input type="number" value="0"></label>
+    <label class="f">Spacing <input type="number" value="0"></label>
+    <button>Guess</button>
+    <div class="sep"></div>
+    <label class="f"><input type="checkbox" checked> Grid</label>
+    <label class="f">Zoom <select id="zoom"><option>2</option><option selected>3</option><option>4</option></select></label>
+  </div>
+
+  <div class="main">
+    <!-- 왼쪽: 원본 시트 (모든 탭 공통) -->
+    <div class="col">
+      <div class="colhead">Sheet <span class="sub" id="sheetHint">클릭: 타일 선택</span></div>
+      <div class="sheetwrap"><canvas id="sheet"></canvas></div>
+    </div>
+
+    <!-- 가운데: 탭 -->
+    <div class="col">
+      <div class="tabs">
+        <div class="tab on" data-tab="tileset">Tileset</div>
+        <div class="tab" data-tab="sprites">Sprites <span class="k" id="nSprites"></span></div>
+        <div class="tab" data-tab="anims">Animations <span class="k" id="nAnims"></span></div>
+        <div class="tab" data-tab="tools" style="margin-left:auto">Import ▾</div>
+      </div>
+
+      <!-- Tileset -->
+      <div class="pane" id="p-tileset">
+        <div id="tileForm"></div>
+      </div>
+
+      <!-- Sprites -->
+      <div class="pane hidden" id="p-sprites">
+        <div class="row">
+          <button id="newSprite">+ New sprite</button>
+          <button id="fromSel" disabled title="시트에서 타일을 선택해야 켜짐">New from selection</button>
+          <span class="hint">시트에서 Shift/Ctrl로 여러 칸 선택 → 선택 범위 그대로 스프라이트로</span>
+        </div>
+        <div style="display:grid;grid-template-columns:240px 1fr;gap:14px">
+          <div><div class="list" id="spriteList"></div></div>
+          <div id="spriteEdit"></div>
+        </div>
+      </div>
+
+      <!-- Animations -->
+      <div class="pane hidden" id="p-anims">
+        <div class="row"><button id="newAnim">+ New animation</button><span class="hint">프레임은 스프라이트를 고르고 시간(ms)을 정한다</span></div>
+        <div style="display:grid;grid-template-columns:200px 1fr;gap:14px">
+          <div><div class="list" id="animList"></div></div>
+          <div id="animEdit"></div>
+        </div>
+      </div>
+
+      <!-- Import (지금의 Regions + Extract) -->
+      <div class="pane hidden" id="p-tools">
+        <div class="tools-card">
+          <b>1. Regions — 큰 그림에서 영역 잘라내기</b>
+          <p>여러 그림이 섞인 큰 PNG에서 배경으로 떨어진 덩어리를 찾아 새 PNG로 자른다. (지금의 Regions 탭)</p>
+          <div class="row"><label class="f">Background <select><option>Auto</option><option>Transparent</option><option>Color</option></select></label>
+            <label class="f">Min size <input type="number" value="32"></label><button>Find regions</button></div>
+        </div>
+        <div class="tools-card">
+          <b>2. Extract tileset — 맵 그림을 타일셋 + 맵 파일로</b>
+          <p>완성된 맵 이미지를 격자로 잘라 중복 타일을 합쳐 <code>-tileset.png</code>와 <code>.map.json</code>을 만든다. (지금의 Extract 탭)</p>
+          <div class="row"><label class="f"><input type="checkbox"> Group rotations/flips</label><button>Analyze</button><button disabled>Write tileset</button></div>
+        </div>
+        <div class="hint">※ 이 두 기능은 편집이 아니라 "가져오기 전처리"라서 보조 메뉴로 내렸다. Library 창으로 옮기는 안도 있음.</div>
+      </div>
+    </div>
+
+    <!-- 오른쪽: 상시 Preview -->
+    <div class="col">
+      <div class="colhead">Preview <span class="sub" id="pvKind"></span></div>
+      <div class="preview">
+        <canvas id="pv" width="240" height="240"></canvas>
+        <div class="row" id="pvCtl">
+          <button class="sm" id="play">❚❚ Pause</button>
+          <button class="sm" id="restart">⟲ Restart</button>
+          <label class="f">×<select id="pvZoom"><option>4</option><option selected>6</option><option>8</option></select></label>
+          <label class="f"><input type="checkbox" id="pivot" checked> pivot</label>
+        </div>
+        <div class="pvinfo" id="pvInfo"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="logbar"><span>Log</span><button class="sm" id="clearLog">Clear</button></div>
+  <div class="log" id="log"></div>
+</div>
+<canvas id="ghost" width="48" height="48"></canvas>
+
+<script>
+// ---------- 자리표시 타일셋 (8×4, 16px) ----------
+const T=16, COLS=8, ROWS=4;
+const src=document.createElement('canvas'); src.width=T*COLS; src.height=T*ROWS;
+const S=src.getContext('2d');
+function rnd(seed){let s=seed*9301+49297;return()=>((s=(s*9301+49297)%233280)/233280)}
+function fill(i,c){const x=(i%COLS)*T,y=Math.floor(i/COLS)*T;S.fillStyle=c;S.fillRect(x,y,T,T)}
+function px(i,a,b,c,w=1,h=1){const x=(i%COLS)*T,y=Math.floor(i/COLS)*T;S.fillStyle=c;S.fillRect(x+a,y+b,w,h)}
+function speck(i,base,cols,n,seed){fill(i,base);const r=rnd(seed);for(let k=0;k<n;k++)px(i,Math.floor(r()*16),Math.floor(r()*16),cols[k%cols.length])}
+speck(0,'#3f8f3a',['#58b04e','#2f6e2b'],30,1);
+speck(1,'#3f8f3a',['#58b04e','#2f6e2b','#e6d84a'],34,2);
+speck(2,'#7a5532',['#8f6640','#5e3f23'],30,3);
+speck(3,'#b08a5a',['#c49c6a','#94744a'],26,4);
+for(let f=0;f<3;f++){const i=4+f;fill(i,'#2a62b8');for(let y=2;y<16;y+=5)for(let x=0;x<16;x++)if((x+f*2+y)%6<2)px(i,x,y,'#5d93e6')}
+speck(7,'#d9c27a',['#e8d494','#bfa560'],24,7);
+fill(8,'#5a5f69');for(let y=0;y<16;y+=4){px(8,0,y,'#3d4148',16,1);for(let x=(y/4%2)*4;x<16;x+=8)px(8,x,y,'#3d4148',1,4)}
+fill(9,'#9b4a35');for(let y=0;y<16;y+=4){px(9,0,y,'#6d3022',16,1);for(let x=(y/4%2)*4;x<16;x+=8)px(9,x,y,'#6d3022',1,4)}
+fill(10,'#a0703f');for(let y=0;y<16;y+=4)px(10,0,y,'#7b532c',16,1);
+speck(11,'#3f8f3a',['#58b04e'],20,11);[[4,5],[11,9],[6,12]].forEach(([a,b])=>{px(11,a,b,'#e05a7a',2,2);px(11,a+0.5,b+0.5,'#ffe36a',1,1)});
+// 나무 2×2
+[[12,0],[13,1]].forEach(([i,s])=>{S.clearRect((i%COLS)*T,0,T,T);const r=rnd(20+s);for(let k=0;k<160;k++){const x=Math.floor(r()*16),y=Math.floor(r()*16);const dx=s?x:16-x,d=Math.hypot(dx-0,y-12);if(d<15)px(i,x,y,r()<.5?'#2e7d32':'#43a047')}});
+[[16,0],[17,1]].forEach(([i,s])=>{px(i,s?0:10,0,'#6d4c2f',6,16);px(i,s?1:11,0,'#8a6440',2,16);px(i,s?0:6,13,'#6d4c2f',10,3)});
+speck(14,'#3f8f3a',['#58b04e'],10,14);px(14,2,4,'#2e7d32',12,10);px(14,4,2,'#43a047',8,4);
+speck(15,'#3f8f3a',['#58b04e'],10,15);px(15,3,6,'#7d8590',10,8);px(15,5,5,'#a1a8b2',5,3);
+px(18,2,5,'#8a5a2b',12,9);px(18,2,8,'#5d3a17',12,1);px(18,7,8,'#f2c94c',2,3);
+for(let f=0;f<3;f++){const w=[6,4,2][f];px(19+f,8-w/2,4,'#f2c94c',w,8);px(19+f,8-w/2,4,'#fff3a0',1,8)}
+[[5,4],[9,4],[3,6],[11,6],[4,8],[10,8],[6,10],[8,12]].forEach(([a,b],k)=>px(22,a,b,'#e04848',k<2?3:k<4?3:k<6?3:2,2));px(22,4,6,'#e04848',8,4);
+px(23,3,6,'#f2c94c',4,4);px(23,7,7,'#f2c94c',7,2);px(23,12,9,'#f2c94c',2,2);
+// 주인공
+px(24,5,4,'#f1c27d',6,7);px(24,4,2,'#5b3a1e',8,3);px(24,6,7,'#222',1,1);px(24,9,7,'#222',1,1);
+for(let f=0;f<3;f++){const i=25+f;px(i,4,0,'#3b6fd8',8,8);px(i,3,1,'#f1c27d',1,5);px(i,12,1,'#f1c27d',1,5);
+  const l=[[5,8,2,8],[5,8,2,6],[5,8,2,8]][f],r=[[9,8,2,8],[9,8,2,8],[9,8,2,6]][f];
+  if(f===1){px(i,4,8,'#333',3,7);px(i,9,8,'#333',3,8)}else if(f===2){px(i,4,8,'#333',3,8);px(i,9,8,'#333',3,7)}else{px(i,5,8,'#333',2,8);px(i,9,8,'#333',2,8)}}
+for(let f=0;f<2;f++){const i=28+f,h=f?6:8;px(i,3,16-h,'#57c26a',10,h);px(i,2,16-h+2,'#57c26a',12,h-2);px(i,5,16-h+2,'#111',1,2);px(i,10,16-h+2,'#111',1,2)}
+for(let f=0;f<2;f++){const i=30+f;px(i,7,7,'#6d4c2f',2,9);px(i,6,f?2:3,'#ff9a2e',4,f?5:4);px(i,7,f?3:4,'#ffe36a',2,2)}
+
+// ---------- 상태 ----------
+const now=()=>new Date();
+const fmt=d=>d.toISOString().slice(0,10)+' '+d.toTimeString().slice(0,5);
+const st={
+  tab:'tileset', sel:new Set([0]), anchor:0, dirty:false,
+  tiles:{4:{name:'water',tags:'liquid, slow',props:[['speed','0.5'],['swim','1']]},8:{name:'wall',tags:'solid',props:[['solid','1']]}},
+  sprites:[
+    {name:'hero-idle',w:1,h:2,cells:[24,25],props:[],updated:new Date(Date.now()-3600e3)},
+    {name:'hero-walk-1',w:1,h:2,cells:[24,26],props:[],updated:new Date(Date.now()-3500e3)},
+    {name:'hero-walk-2',w:1,h:2,cells:[24,27],props:[],updated:new Date(Date.now()-3400e3)},
+    {name:'tree',w:2,h:2,cells:[12,13,16,17],props:[['solid','1']],updated:new Date(Date.now()-86400e3)},
+    {name:'slime-a',w:1,h:1,cells:[28],props:[],updated:new Date(Date.now()-7200e3)},
+    {name:'slime-b',w:1,h:1,cells:[29],props:[],updated:new Date(Date.now()-7100e3)},
+  ],
+  curSprite:0,
+  anims:[
+    {name:'hero-walk',mode:'loop',frames:[{s:'hero-walk-1',ms:140},{s:'hero-idle',ms:140},{s:'hero-walk-2',ms:140},{s:'hero-idle',ms:140}],props:[['speed','2']]},
+    {name:'slime-bounce',mode:'pingpong',frames:[{s:'slime-a',ms:200},{s:'slime-b',ms:200}],props:[]},
+  ],
+  curAnim:0, playing:true, t0:performance.now(), paused:0,
+};
+
+// ---------- 로그 ----------
+const logEl=document.getElementById('log');
+function log(m){const d=document.createElement('div');d.innerHTML=`<span class="ts">${now().toTimeString().slice(0,8)}</span> ${m}`;logEl.appendChild(d);logEl.scrollTop=1e9}
+document.getElementById('clearLog').onclick=()=>logEl.innerHTML='';
+function dirty(msg){st.dirty=true;document.getElementById('save').disabled=false;document.getElementById('title').textContent='cave-01.png * — Sheet Editor';if(msg)log(msg)}
+document.getElementById('save').onclick=()=>{st.dirty=false;document.getElementById('save').disabled=true;document.getElementById('title').textContent='cave-01.png — Sheet Editor';log('Saved cave-01.sprites.json')};
+
+// ---------- 시트 ----------
+const sheet=document.getElementById('sheet'), SC=sheet.getContext('2d');
+let Z=3;
+function drawSheet(){
+  sheet.width=src.width*Z;sheet.height=src.height*Z;SC.imageSmoothingEnabled=false;
+  SC.fillStyle='#0d0e10';SC.fillRect(0,0,sheet.width,sheet.height);SC.drawImage(src,0,0,sheet.width,sheet.height);
+  SC.strokeStyle='#ffffff22';for(let x=0;x<=COLS;x++){SC.beginPath();SC.moveTo(x*T*Z+.5,0);SC.lineTo(x*T*Z+.5,sheet.height);SC.stroke()}
+  for(let y=0;y<=ROWS;y++){SC.beginPath();SC.moveTo(0,y*T*Z+.5);SC.lineTo(sheet.width,y*T*Z+.5);SC.stroke()}
+  // 메타 있는 타일 표시
+  SC.fillStyle='#e8b04b';for(const k in st.tiles){const i=+k,m=st.tiles[k];if(!m.name&&!m.tags&&!m.props.length)continue;SC.fillRect((i%COLS)*T*Z+2,Math.floor(i/COLS)*T*Z+2,5,5)}
+  SC.strokeStyle='#4c8dff';SC.lineWidth=2;for(const i of st.sel)SC.strokeRect((i%COLS)*T*Z+1,Math.floor(i/COLS)*T*Z+1,T*Z-2,T*Z-2);SC.lineWidth=1;
+}
+document.getElementById('zoom').onchange=e=>{Z=+e.target.value;drawSheet()};
+function tileAt(e){const r=sheet.getBoundingClientRect();const c=Math.floor((e.clientX-r.left)/(T*Z)),w=Math.floor((e.clientY-r.top)/(T*Z));return c>=0&&c<COLS&&w>=0&&w<ROWS?w*COLS+c:-1}
+function drawTile(ctx,i,x,y,s){if(i==null)return;ctx.imageSmoothingEnabled=false;ctx.drawImage(src,(i%COLS)*T,Math.floor(i/COLS)*T,T,T,x,y,s,s)}
+
+// 드래그 (Sprites 탭에서 시트 → 격자 칸)
+const ghost=document.getElementById('ghost'),G=ghost.getContext('2d');let drag=null;
+sheet.addEventListener('mousedown',e=>{
+  const i=tileAt(e);if(i<0)return;
+  if(e.shiftKey){st.sel.clear();const a=st.anchor;const c0=Math.min(a%COLS,i%COLS),c1=Math.max(a%COLS,i%COLS),r0=Math.min(Math.floor(a/COLS),Math.floor(i/COLS)),r1=Math.max(Math.floor(a/COLS),Math.floor(i/COLS));for(let r=r0;r<=r1;r++)for(let c=c0;c<=c1;c++)st.sel.add(r*COLS+c)}
+  else if(e.ctrlKey||e.metaKey){st.sel.has(i)?st.sel.delete(i):st.sel.add(i);st.anchor=i}
+  else{st.sel=new Set([i]);st.anchor=i;if(st.tab==='sprites'){drag={i,x:e.clientX,y:e.clientY,moved:false}}}
+  drawSheet();render();
+});
+document.addEventListener('mousemove',e=>{if(!drag)return;if(!drag.moved&&Math.hypot(e.clientX-drag.x,e.clientY-drag.y)>4){drag.moved=true;G.clearRect(0,0,48,48);drawTile(G,drag.i,0,0,48);ghost.style.display='block'}
+  if(drag.moved){ghost.style.left=e.clientX-24+'px';ghost.style.top=e.clientY-24+'px';document.querySelectorAll('.cell').forEach(c=>c.classList.remove('hot'));const el=document.elementFromPoint(e.clientX,e.clientY)?.closest('.cell');if(el)el.classList.add('hot')}});
+document.addEventListener('mouseup',e=>{if(!drag)return;ghost.style.display='none';document.querySelectorAll('.cell').forEach(c=>c.classList.remove('hot'));
+  if(drag.moved){const el=document.elementFromPoint(e.clientX,e.clientY)?.closest('.cell');const sp=st.sprites[st.curSprite];if(el&&sp){sp.cells[+el.dataset.k]=drag.i;sp.updated=now();dirty(`Sprite ${sp.name}: cell ${+el.dataset.k} ← tile (${drag.i%COLS},${Math.floor(drag.i/COLS)})`);render()}}
+  drag=null});
+
+// ---------- props 편집기 (공통) ----------
+function propsEditor(list,onchange){
+  const wrap=document.createElement('div');
+  const t=document.createElement('table');t.className='props';
+  list.forEach((p,k)=>{const tr=document.createElement('tr');tr.innerHTML=`<td><input value="${p[0]}" placeholder="key"></td><td><input value="${p[1]}" placeholder="value"></td><td><button class="sm">✕</button></td>`;
+    const [a,b]=tr.querySelectorAll('input');a.onchange=()=>{p[0]=a.value;onchange()};b.onchange=()=>{p[1]=b.value;onchange()};tr.querySelector('button').onclick=()=>{list.splice(k,1);onchange();render()};t.appendChild(tr)});
+  if(!list.length){const tr=document.createElement('tr');tr.innerHTML='<td class="empty" colspan=3>속성 없음</td>';t.appendChild(tr)}
+  const add=document.createElement('button');add.className='sm';add.textContent='+ property';add.onclick=()=>{list.push(['','']);render()};
+  wrap.appendChild(t);wrap.appendChild(add);return wrap;
+}
+function h4(t){const h=document.createElement('h4');h.textContent=t;return h}
+
+// ---------- Tileset 탭 ----------
+function renderTileset(){
+  const f=document.getElementById('tileForm');f.innerHTML='';
+  if(st.sel.size!==1){f.innerHTML=`<div class="empty">${st.sel.size}개 선택됨 — 메타는 타일 하나씩 편집한다.<br>(여러 칸 선택은 Sprites 탭의 "New from selection"에 쓴다)</div>`;return}
+  const i=[...st.sel][0], m=st.tiles[i]||(st.tiles[i]={name:'',tags:'',props:[]});
+  const head=document.createElement('div');head.className='row';
+  const c=document.createElement('canvas');c.width=c.height=48;drawTile(c.getContext('2d'),i,0,0,48);c.style.background='#0d0e10';
+  head.appendChild(c);const s=document.createElement('div');s.innerHTML=`<b>Tile (${i%COLS}, ${Math.floor(i/COLS)})</b><div class="hint">#${i} · 금색 점 = 메타가 있는 타일</div>`;head.appendChild(s);f.appendChild(head);
+  const mk=(lab,key,ph)=>{const d=document.createElement('div');d.className='field';d.innerHTML=`<span>${lab}</span><input placeholder="${ph}" value="${m[key]}">`;d.querySelector('input').onchange=e=>{m[key]=e.target.value;dirty(`Tile ${i}: ${lab.toLowerCase()} = ${e.target.value}`);drawSheet()};return d};
+  f.appendChild(mk('Name','name','예: water'));f.appendChild(mk('Tags','tags','쉼표 구분: solid, liquid'));
+  f.appendChild(h4('Properties'));f.appendChild(propsEditor(m.props,()=>dirty(`Tile ${i}: properties updated`)));
+}
+
+// ---------- Sprites 탭 ----------
+function spriteThumb(sp,size){const c=document.createElement('canvas');const u=Math.floor(size/Math.max(sp.w,sp.h));c.width=c.height=size;const x=c.getContext('2d');const ox=(size-u*sp.w)/2,oy=(size-u*sp.h)/2;sp.cells.forEach((t,k)=>drawTile(x,t,ox+(k%sp.w)*u,oy+Math.floor(k/sp.w)*u,u));return c}
+function renderSprites(){
+  document.getElementById('fromSel').disabled=st.sel.size===0;
+  const L=document.getElementById('spriteList');L.innerHTML='';
+  st.sprites.forEach((sp,k)=>{const it=document.createElement('div');it.className='item'+(k===st.curSprite?' on':'');it.appendChild(spriteThumb(sp,32));
+    const d=document.createElement('div');d.innerHTML=`<div class="nm">${sp.name}</div><div class="meta">${sp.w}×${sp.h} · ${fmt(sp.updated)}</div>`;it.appendChild(d);
+    const b=document.createElement('span');b.className='badge';b.textContent=sp.props.length?`${sp.props.length} props`:'';it.appendChild(b);
+    it.onclick=()=>{st.curSprite=k;render()};L.appendChild(it)});
+  const E=document.getElementById('spriteEdit');E.innerHTML='';const sp=st.sprites[st.curSprite];if(!sp){E.innerHTML='<div class="empty">스프라이트를 고르거나 새로 만든다</div>';return}
+  const r=document.createElement('div');r.className='row';
+  r.innerHTML=`<label class="f">Name <input id="spName" value="${sp.name}" style="width:140px"></label>
+    <label class="f">Size <select id="spW">${[1,2,3,4].map(n=>`<option ${n===sp.w?'selected':''}>${n}</option>`)}</select> × <select id="spH">${[1,2,3,4].map(n=>`<option ${n===sp.h?'selected':''}>${n}</option>`)}</select></label>
+    <button class="sm" id="spDel">Delete</button>`;E.appendChild(r);
+  r.querySelector('#spName').onchange=e=>{const old=sp.name;sp.name=e.target.value;sp.updated=now();st.anims.forEach(a=>a.frames.forEach(f=>{if(f.s===old)f.s=sp.name}));dirty(`Sprite renamed ${old} → ${sp.name} (animation references updated)`);render()};
+  const resize=()=>{const w=+r.querySelector('#spW').value,h=+r.querySelector('#spH').value;const n=Array(w*h).fill(null);for(let y=0;y<Math.min(h,sp.h);y++)for(let x=0;x<Math.min(w,sp.w);x++)n[y*w+x]=sp.cells[y*sp.w+x];sp.w=w;sp.h=h;sp.cells=n;sp.updated=now();dirty(`Sprite ${sp.name}: size ${w}×${h}`);render()};
+  r.querySelector('#spW').onchange=resize;r.querySelector('#spH').onchange=resize;
+  r.querySelector('#spDel').onclick=()=>{if(st.anims.some(a=>a.frames.some(f=>f.s===sp.name))){log(`<span style="color:#e06464">Cannot delete ${sp.name}: used by an animation</span>`);return}st.sprites.splice(st.curSprite,1);st.curSprite=0;dirty(`Sprite ${sp.name} deleted`);render()};
+  E.appendChild(h4('Canvas — 시트의 타일을 칸에 끌어다 놓기'));
+  const g=document.createElement('div');g.className='grid-edit';g.style.gridTemplateColumns=`repeat(${sp.w},64px)`;
+  sp.cells.forEach((t,k)=>{const c=document.createElement('div');c.className='cell';c.dataset.k=k;const cv=document.createElement('canvas');cv.width=cv.height=64;drawTile(cv.getContext('2d'),t,0,0,64);c.appendChild(cv);
+    const x=document.createElement('button');x.className='clr';x.textContent='✕';x.onclick=()=>{sp.cells[k]=null;sp.updated=now();dirty(`Sprite ${sp.name}: cell ${k} cleared`);render()};c.appendChild(x);g.appendChild(c)});
+  E.appendChild(g);
+  const hint=document.createElement('div');hint.className='hint';hint.style.marginTop='6px';hint.textContent='칸 위에 올리면 ✕로 비움 · 빈 칸은 투명 · 셀마다 Flip/Rotate는 우클릭 메뉴(시안 생략)';E.appendChild(hint);
+  E.appendChild(h4('Pivot'));const pv=document.createElement('div');pv.className='row';pv.innerHTML=`<label class="f">x <input type="number" value="${sp.w*8}"></label><label class="f">y <input type="number" value="${sp.h*16}"></label><span class="hint">기본: 바닥 가운데</span>`;E.appendChild(pv);
+  E.appendChild(h4('Properties'));E.appendChild(propsEditor(sp.props,()=>{sp.updated=now();dirty(`Sprite ${sp.name}: properties updated`)}));
+}
+document.getElementById('newSprite').onclick=()=>{let n=1;while(st.sprites.some(s=>s.name==='sprite-'+n))n++;st.sprites.push({name:'sprite-'+n,w:2,h:2,cells:[null,null,null,null],props:[],updated:now()});st.curSprite=st.sprites.length-1;dirty('New sprite sprite-'+n);render()};
+document.getElementById('fromSel').onclick=()=>{const a=[...st.sel];const cs=a.map(i=>i%COLS),rs=a.map(i=>Math.floor(i/COLS));const c0=Math.min(...cs),r0=Math.min(...rs),w=Math.max(...cs)-c0+1,h=Math.max(...rs)-r0+1;const cells=Array(w*h).fill(null);a.forEach(i=>cells[(Math.floor(i/COLS)-r0)*w+(i%COLS-c0)]=i);let n=1;while(st.sprites.some(s=>s.name==='sprite-'+n))n++;st.sprites.push({name:'sprite-'+n,w,h,cells,props:[],updated:now()});st.curSprite=st.sprites.length-1;dirty(`New sprite sprite-${n} from ${a.length} selected tiles`);render()};
+
+// ---------- Animations 탭 ----------
+function renderAnims(){
+  const L=document.getElementById('animList');L.innerHTML='';
+  st.anims.forEach((a,k)=>{const it=document.createElement('div');it.className='item'+(k===st.curAnim?' on':'');const sp=st.sprites.find(s=>s.name===a.frames[0]?.s);it.appendChild(sp?spriteThumb(sp,32):document.createElement('span'));
+    const d=document.createElement('div');d.innerHTML=`<div class="nm">${a.name}</div><div class="meta">${a.mode} · ${a.frames.length} frames · ${a.frames.reduce((s,f)=>s+f.ms,0)}ms</div>`;it.appendChild(d);it.appendChild(document.createElement('span'));
+    it.onclick=()=>{st.curAnim=k;st.t0=performance.now();render()};L.appendChild(it)});
+  const E=document.getElementById('animEdit');E.innerHTML='';const a=st.anims[st.curAnim];if(!a){E.innerHTML='<div class="empty">애니메이션을 고르거나 새로 만든다</div>';return}
+  const r=document.createElement('div');r.className='row';r.innerHTML=`<label class="f">Name <input value="${a.name}" style="width:140px"></label><label class="f">Mode <select>${['loop','once','pingpong'].map(m=>`<option ${m===a.mode?'selected':''}>${m}</option>`)}</select></label><label class="f">Tags <input placeholder="쉼표 구분" style="width:120px"></label>`;
+  r.querySelector('input').onchange=e=>{a.name=e.target.value;dirty('Animation renamed');render()};r.querySelector('select').onchange=e=>{a.mode=e.target.value;st.t0=performance.now();dirty(`Animation ${a.name}: mode ${a.mode}`);render()};E.appendChild(r);
+  E.appendChild(h4('Frames'));
+  const fr=document.createElement('div');fr.className='frames';const cur=curFrame(a);
+  a.frames.forEach((f,k)=>{const d=document.createElement('div');d.className='frame'+(k===cur?' cur':'');const sp=st.sprites.find(s=>s.name===f.s);const cv=sp?spriteThumb(sp,56):document.createElement('canvas');cv.style.width='82px';cv.style.height='56px';d.appendChild(cv);
+    const sel=document.createElement('select');sel.innerHTML=st.sprites.map(s=>`<option ${s.name===f.s?'selected':''}>${s.name}</option>`).join('');sel.onchange=()=>{f.s=sel.value;dirty(`Frame ${k}: ${f.s}`);render()};d.appendChild(sel);
+    const ms=document.createElement('input');ms.type='number';ms.value=f.ms;ms.min=1;ms.onchange=()=>{f.ms=Math.max(1,+ms.value);dirty(`Frame ${k}: ${f.ms}ms`);render()};d.appendChild(ms);
+    const b=document.createElement('div');b.className='btns';b.innerHTML='<button class="sm">◀</button><button class="sm">✕</button><button class="sm">▶</button>';const [l,x,rr]=b.querySelectorAll('button');
+    l.onclick=()=>{if(k>0){[a.frames[k-1],a.frames[k]]=[a.frames[k],a.frames[k-1]];dirty('Frame moved');render()}};rr.onclick=()=>{if(k<a.frames.length-1){[a.frames[k+1],a.frames[k]]=[a.frames[k],a.frames[k+1]];dirty('Frame moved');render()}};x.onclick=()=>{a.frames.splice(k,1);dirty('Frame removed');render()};
+    d.appendChild(b);fr.appendChild(d)});
+  const add=document.createElement('button');add.textContent='+ frame';add.style.flex='none';add.onclick=()=>{a.frames.push({s:st.sprites[0]?.name,ms:a.frames.at(-1)?.ms||100});dirty('Frame added');render()};fr.appendChild(add);E.appendChild(fr);
+  if(!a.frames.length){const w=document.createElement('div');w.className='hint';w.style.color='var(--warn)';w.textContent='프레임이 하나 이상 있어야 저장된다';E.appendChild(w)}
+  E.appendChild(h4('Properties'));E.appendChild(propsEditor(a.props,()=>dirty(`Animation ${a.name}: properties updated`)));
+}
+document.getElementById('newAnim').onclick=()=>{let n=1;while(st.anims.some(s=>s.name==='anim-'+n))n++;st.anims.push({name:'anim-'+n,mode:'loop',frames:[],props:[]});st.curAnim=st.anims.length-1;dirty('New animation anim-'+n);render()};
+
+// ---------- 타임라인 ----------
+function seq(a){const n=a.frames.length;if(a.mode!=='pingpong'||n<3)return a.frames.map((_,i)=>i);const s=[];for(let i=0;i<n;i++)s.push(i);for(let i=n-2;i>0;i--)s.push(i);return s}
+function elapsed(){return st.playing?performance.now()-st.t0:st.paused}
+function curFrame(a){if(!a||!a.frames.length)return -1;const s=seq(a),tot=s.reduce((x,i)=>x+a.frames[i].ms,0);let t=elapsed();if(a.mode==='once'&&t>=tot)return s.at(-1);t%=tot;for(const i of s){if(t<a.frames[i].ms)return i;t-=a.frames[i].ms}return s.at(-1)}
+
+// ---------- Preview (상시) ----------
+const pv=document.getElementById('pv'),P=pv.getContext('2d');
+document.getElementById('play').onclick=e=>{if(st.playing){st.paused=performance.now()-st.t0;st.playing=false;e.target.textContent='▶ Play'}else{st.t0=performance.now()-st.paused;st.playing=true;e.target.textContent='❚❚ Pause'}};
+document.getElementById('restart').onclick=()=>{st.t0=performance.now();st.paused=0};
+let lastFrame=-2;
+function drawSpriteAt(sp,u){const w=sp.w*u,h=sp.h*u,ox=(pv.width-w)/2,oy=(pv.height-h)/2;sp.cells.forEach((t,k)=>drawTile(P,t,ox+(k%sp.w)*u,oy+Math.floor(k/sp.w)*u,u));
+  if(document.getElementById('pivot').checked){const px=ox+sp.w*8*u/T*1,py=oy+sp.h*16*u/T;P.strokeStyle='#ff4d6d';P.beginPath();P.moveTo(px-6,py);P.lineTo(px+6,py);P.moveTo(px,py-6);P.lineTo(px,py+6);P.stroke()}}
+function tick(){
+  P.clearRect(0,0,pv.width,pv.height);P.imageSmoothingEnabled=false;
+  const z=+document.getElementById('pvZoom').value, info=document.getElementById('pvInfo'), kind=document.getElementById('pvKind'), ctl=document.getElementById('pvCtl');
+  let showCtl=false;
+  if(st.tab==='tileset'||st.tab==='tools'){
+    kind.textContent='선택한 타일';const a=[...st.sel];
+    if(a.length===1){drawTile(P,a[0],(pv.width-T*z*2)/2,(pv.height-T*z*2)/2,T*z*2);const m=st.tiles[a[0]];info.innerHTML=`(${a[0]%COLS}, ${Math.floor(a[0]/COLS)})${m&&m.name?' · <b>'+m.name+'</b>':''}<br>${m&&m.props.length?m.props.map(p=>p.join('=')).join(', '):'속성 없음'}`}
+    else if(a.length){const cs=a.map(i=>i%COLS),rs=a.map(i=>Math.floor(i/COLS));const c0=Math.min(...cs),r0=Math.min(...rs),w=Math.max(...cs)-c0+1,h=Math.max(...rs)-r0+1;const u=Math.min(T*z,Math.floor(200/Math.max(w,h)));a.forEach(i=>drawTile(P,i,(pv.width-w*u)/2+(i%COLS-c0)*u,(pv.height-h*u)/2+(Math.floor(i/COLS)-r0)*u,u));info.textContent=`${a.length}칸 선택 (${w}×${h})`}
+    else info.textContent='선택 없음';
+  } else if(st.tab==='sprites'){
+    kind.textContent='편집 중인 스프라이트';const sp=st.sprites[st.curSprite];
+    if(sp){drawSpriteAt(sp,Math.min(T*z,Math.floor(210/Math.max(sp.w,sp.h))));info.innerHTML=`<b>${sp.name}</b> · ${sp.w*T}×${sp.h*T}px<br>수정 ${fmt(sp.updated)}`}else info.textContent='';
+  } else if(st.tab==='anims'){
+    kind.textContent='재생 중인 애니메이션';showCtl=true;const a=st.anims[st.curAnim];
+    if(a&&a.frames.length){const i=curFrame(a);const sp=st.sprites.find(s=>s.name===a.frames[i].s);if(sp)drawSpriteAt(sp,Math.min(T*z,Math.floor(210/Math.max(sp.w,sp.h))));
+      info.innerHTML=`<b>${a.name}</b> · ${a.mode}<br>frame ${i+1}/${a.frames.length} · ${Math.floor(elapsed())}ms`;
+      if(i!==lastFrame){lastFrame=i;document.querySelectorAll('.frame').forEach((d,k)=>d.classList.toggle('cur',k===i))}}
+    else info.textContent=a?'프레임 없음':'';
+  }
+  ctl.querySelectorAll('button').forEach(b=>b.style.visibility=showCtl?'visible':'hidden');
+  requestAnimationFrame(tick);
+}
+
+// ---------- 탭 ----------
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{st.tab=t.dataset.tab;document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('on',x===t));['tileset','sprites','anims','tools'].forEach(p=>document.getElementById('p-'+p).classList.toggle('hidden',p!==st.tab));
+  document.getElementById('sheetHint').textContent=st.tab==='sprites'?'타일을 끌어 오른쪽 Canvas 칸에 놓기 · Shift/Ctrl 다중 선택':'클릭: 타일 선택 · Shift 범위 · Ctrl 토글';render()});
+
+function render(){
+  document.getElementById('nSprites').textContent=st.sprites.length;document.getElementById('nAnims').textContent=st.anims.length;
+  if(st.tab==='tileset')renderTileset();if(st.tab==='sprites')renderSprites();if(st.tab==='anims')renderAnims();
+}
+drawSheet();render();tick();
+if(location.hash)document.querySelector(`.tab[data-tab="${location.hash.slice(1)}"]`)?.click();
+log('Loaded assets/cave-01.png (128×64, grid 16)');log('Loaded sidecar cave-01.sprites.json: 2 tiles, 6 sprites, 2 animations');
+</script>
+</body>
+</html>
