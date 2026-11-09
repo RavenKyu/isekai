@@ -1,16 +1,63 @@
-use super::{grid::Grid, timeline::Mode};
+use super::{Transform, grid::Grid, timeline::Mode};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct SpriteSheet {
+    #[serde(serialize_with = "serialize_version")]
     pub version: u32,
     pub image: String,
     pub grid: Grid,
     pub tiles: Vec<TileMeta>,
     pub sprites: Vec<Sprite>,
     pub clips: Vec<Clip>,
+}
+// Keep field presence while decoding: even explicit identity fields are illegal in v1.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SheetWire {
+    version: u32,
+    image: String,
+    grid: Grid,
+    tiles: Vec<TileMeta>,
+    sprites: Vec<SpriteWire>,
+    clips: Vec<Clip>,
+}
+fn serialize_version<S: serde::Serializer>(_: &u32, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_u32(2)
+}
+impl<'de> Deserialize<'de> for SpriteSheet {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let wire = SheetWire::deserialize(deserializer)?;
+        if !matches!(wire.version, 1 | 2) {
+            return Err(serde::de::Error::custom(
+                "expected sprites.json version 1 or 2",
+            ));
+        }
+        let sprites = wire
+            .sprites
+            .into_iter()
+            .map(|sprite| {
+                if wire.version == 1
+                    && matches!(&sprite, SpriteWire::Set { parts, .. }
+                if parts.iter().any(|p| p.flip_x.is_some() || p.rotation.is_some()))
+                {
+                    return Err(serde::de::Error::custom(
+                        "version 1 cannot contain part transforms",
+                    ));
+                }
+                sprite.into_sprite().map_err(serde::de::Error::custom)
+            })
+            .collect::<Result<_, D::Error>>()?;
+        Ok(Self {
+            version: wire.version,
+            image: wire.image,
+            grid: wire.grid,
+            tiles: wire.tiles,
+            sprites,
+            clips: wire.clips,
+        })
+    }
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -73,21 +120,28 @@ enum SpriteWire {
     },
     Set {
         name: String,
-        parts: Vec<Part>,
+        parts: Vec<PartWire>,
         pivot: [f32; 2],
     },
 }
 impl<'de> Deserialize<'de> for Sprite {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        Ok(match SpriteWire::deserialize(deserializer)? {
-            SpriteWire::Rect {
+        SpriteWire::deserialize(deserializer)?
+            .into_sprite()
+            .map_err(serde::de::Error::custom)
+    }
+}
+impl SpriteWire {
+    fn into_sprite(self) -> Result<Sprite, String> {
+        Ok(match self {
+            Self::Rect {
                 name,
                 col,
                 row,
                 cols,
                 rows,
                 pivot,
-            } => Self {
+            } => Sprite {
                 name,
                 pivot,
                 shape: Shape::Rect {
@@ -97,21 +151,72 @@ impl<'de> Deserialize<'de> for Sprite {
                     rows,
                 },
             },
-            SpriteWire::Set { name, parts, pivot } => Self {
+            Self::Set { name, parts, pivot } => Sprite {
                 name,
                 pivot,
-                shape: Shape::Set { parts },
+                shape: Shape::Set {
+                    parts: parts
+                        .into_iter()
+                        .map(|p| {
+                            let flip_x = p.flip_x.unwrap_or(false);
+                            let rotation = p.rotation.unwrap_or(0);
+                            Transform::new(flip_x, rotation)?;
+                            Ok(Part {
+                                col: p.col,
+                                row: p.row,
+                                dx: p.dx,
+                                dy: p.dy,
+                                flip_x,
+                                rotation,
+                            })
+                        })
+                        .collect::<Result<_, String>>()?,
+                },
             },
         })
     }
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PartWire {
+    col: u32,
+    row: u32,
+    dx: i32,
+    dy: i32,
+    #[serde(default, deserialize_with = "present")]
+    flip_x: Option<bool>,
+    #[serde(default, deserialize_with = "present")]
+    rotation: Option<u16>,
+}
+fn present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Part {
     pub col: u32,
     pub row: u32,
     pub dx: i32,
     pub dy: i32,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub flip_x: bool,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub rotation: u16,
+}
+fn is_false(value: &bool) -> bool {
+    !value
+}
+fn is_zero(value: &u16) -> bool {
+    *value == 0
+}
+impl Part {
+    pub fn transform(&self) -> Transform {
+        Transform::new(self.flip_x, self.rotation).expect("validated part transform")
+    }
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -145,6 +250,7 @@ impl Sprite {
                         row: row + r,
                         dx: (u64::from(c) * u64::from(grid.tile)) as i32,
                         dy: (u64::from(r) * u64::from(grid.tile)) as i32,
+                        ..Default::default()
                     })
                 })
                 .collect(),
@@ -188,7 +294,7 @@ impl Sprite {
 impl SpriteSheet {
     pub fn new_for(image_name: &str, grid: Grid) -> Self {
         Self {
-            version: 1,
+            version: 2,
             image: image_name.into(),
             grid,
             tiles: vec![],
@@ -203,9 +309,9 @@ impl SpriteSheet {
     }
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
-        if self.version != 1 {
+        if !matches!(self.version, 1 | 2) {
             errors.push(format!(
-                "unsupported sprites.json version {} (expected 1)",
+                "unsupported sprites.json version {} (expected 1 or 2)",
                 self.version
             ));
         }
@@ -264,6 +370,11 @@ impl SpriteSheet {
                     }
                 }
                 Shape::Set { parts } => {
+                    for part in parts {
+                        if let Err(error) = Transform::new(part.flip_x, part.rotation) {
+                            errors.push(error);
+                        }
+                    }
                     let (x, y) = sprite.bounds_origin();
                     if parts.is_empty()
                         || parts.iter().any(|p| {
@@ -369,7 +480,7 @@ mod tests {
     #[test]
     fn rejects_invalid_metadata_at_read_time() {
         let mutations: Vec<(&str, serde_json::Value)> = vec![
-            ("version", serde_json::json!(2)),
+            ("version", serde_json::json!(3)),
             ("unknown", serde_json::json!(true)),
         ];
         for (key, value) in mutations {
@@ -451,25 +562,29 @@ mod tests {
                     col: 1,
                     row: 2,
                     dx: 0,
-                    dy: 0
+                    dy: 0,
+                    ..Default::default()
                 },
                 Part {
                     col: 2,
                     row: 2,
                     dx: 16,
-                    dy: 0
+                    dy: 0,
+                    ..Default::default()
                 },
                 Part {
                     col: 1,
                     row: 3,
                     dx: 0,
-                    dy: 16
+                    dy: 16,
+                    ..Default::default()
                 },
                 Part {
                     col: 2,
                     row: 3,
                     dx: 16,
-                    dy: 16
+                    dy: 16,
+                    ..Default::default()
                 }
             ]
         );
@@ -484,12 +599,14 @@ mod tests {
                         row: 0,
                         dx: -16,
                         dy: -8,
+                        ..Default::default()
                     },
                     Part {
                         col: 1,
                         row: 0,
                         dx: 16,
                         dy: 8,
+                        ..Default::default()
                     },
                 ],
             },
@@ -528,5 +645,51 @@ mod tests {
             rows: 1,
         };
         assert!(sheet.validate_bounds(256, 144).is_err());
+    }
+}
+
+#[cfg(test)]
+mod version_tests {
+    use super::super::{example, store};
+    #[test]
+    fn legacy_reads_always_write_v2_and_transform_fields_are_strict() {
+        let mut value: serde_json::Value = serde_json::from_str(example::EXAMPLE_JSON).unwrap();
+        value["version"] = 1.into();
+        let legacy = store::parse(&value.to_string()).unwrap();
+        assert_eq!(legacy.version, 1);
+        assert_eq!(store::to_json(&legacy), example::EXAMPLE_JSON);
+        value["sprites"][0] = serde_json::json!({"name":"a", "kind":"set",
+            "parts":[{"col":0,"row":0,"dx":0,"dy":0}],"pivot":[0.0,0.0]});
+        for (field, identity) in [
+            ("flip_x", serde_json::json!(false)),
+            ("rotation", serde_json::json!(0)),
+        ] {
+            let mut v = value.clone();
+            v["sprites"][0]["parts"][0][field] = identity;
+            assert!(store::parse(&v.to_string()).is_err(), "v1 {field}");
+        }
+        value["version"] = 2.into();
+        for (field, invalid) in [
+            ("rotation", serde_json::json!(45)),
+            ("rotation", serde_json::json!(-90)),
+            ("rotation", serde_json::json!("90")),
+            ("rotation", serde_json::Value::Null),
+            ("flip_x", serde_json::Value::Null),
+            ("unknown", serde_json::json!(true)),
+        ] {
+            let mut v = value.clone();
+            v["sprites"][0]["parts"][0][field] = invalid;
+            assert!(store::parse(&v.to_string()).is_err(), "{field}: {v}");
+        }
+        value["sprites"][0]["parts"][0]["flip_x"] = true.into();
+        value["sprites"][0]["parts"][0]["rotation"] = 270.into();
+        let sheet = store::parse(&value.to_string()).unwrap();
+        let canonical = store::to_json(&sheet);
+        assert_eq!(
+            store::to_json(&store::parse(&canonical).unwrap()),
+            canonical
+        );
+        assert!(canonical.contains("\"flip_x\": true"));
+        assert!(canonical.contains("\"rotation\": 270"));
     }
 }

@@ -194,6 +194,7 @@ impl SheetEditor {
                         row: frame.row,
                         dx: 0,
                         dy: 0,
+                        ..Default::default()
                     });
                     bounds = (sheet.meta.grid.tile, sheet.meta.grid.tile);
                     pivot = [bounds.0 as f32 / 2.0, bounds.1 as f32 / 2.0];

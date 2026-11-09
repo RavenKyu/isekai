@@ -51,6 +51,7 @@ pub fn set_from_cells(name: String, cells: &BTreeSet<(u32, u32)>, grid: &Grid) -
                     row: r,
                     dx: ((c - col) * grid.tile) as i32,
                     dy: ((r - row) * grid.tile) as i32,
+                    ..Default::default()
                 })
                 .collect(),
         },
@@ -147,13 +148,15 @@ mod tests {
                     col: 1,
                     row: 2,
                     dx: 0,
-                    dy: 0
+                    dy: 0,
+                    ..Default::default()
                 },
                 Part {
                     col: 2,
                     row: 3,
                     dx: 16,
-                    dy: 16
+                    dy: 16,
+                    ..Default::default()
                 }
             ]
         );
