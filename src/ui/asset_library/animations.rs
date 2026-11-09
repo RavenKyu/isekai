@@ -1,17 +1,17 @@
 use super::log;
 use super::{
-    SheetEditor, edit, format_props, format_tags, parse_props, parse_tags, tiles::mode_combo,
+    SheetEditor, edit, format_props, format_tags, parse_props, parse_tags, tileset::mode_combo,
     view::input_u32,
 };
 use crate::sprite::{Clip, Mode, format::ClipFrame};
 use dear_imgui_rs::Ui;
 #[derive(Default)]
-pub struct ClipDraft {
+pub struct AnimationDraft {
     name: Option<String>,
     tags: String,
     props: String,
 }
-impl ClipDraft {
+impl AnimationDraft {
     pub fn validate(&self) -> Result<(), String> {
         if self.name.is_some() {
             parse_props(&self.props)?;
@@ -20,11 +20,11 @@ impl ClipDraft {
     }
 }
 impl SheetEditor {
-    pub fn clips_tab(&mut self, ui: &Ui) {
+    pub fn animations_tab(&mut self, ui: &Ui) {
         let sheet = &mut self.sheet;
         if ui.button("New clip") {
             let name = edit::next_name("clip", sheet.meta.clips.iter().map(|c| c.name.as_str()));
-            self.selected_clip = Some(name.clone());
+            self.selected_animation = Some(name.clone());
             sheet.meta.clips.push(Clip {
                 name,
                 mode: Mode::Loop,
@@ -41,23 +41,23 @@ impl SheetEditor {
         for clip in &sheet.meta.clips {
             if ui
                 .selectable_config(format!("{} ({} frames)", clip.name, clip.frames.len()))
-                .selected(self.selected_clip.as_ref() == Some(&clip.name))
+                .selected(self.selected_animation.as_ref() == Some(&clip.name))
                 .build()
             {
-                self.selected_clip = Some(clip.name.clone());
+                self.selected_animation = Some(clip.name.clone());
             }
         }
         let Some(index) = sheet
             .meta
             .clips
             .iter()
-            .position(|c| Some(&c.name) == self.selected_clip.as_ref())
+            .position(|c| Some(&c.name) == self.selected_animation.as_ref())
         else {
             return;
         };
         let mut clip = sheet.meta.clips[index].clone();
-        if self.clip_draft.name.as_ref() != Some(&clip.name) {
-            self.clip_draft = ClipDraft {
+        if self.animation_draft.name.as_ref() != Some(&clip.name) {
+            self.animation_draft = AnimationDraft {
                 name: Some(clip.name.clone()),
                 tags: format_tags(&clip.tags),
                 props: format_props(&clip.props),
@@ -79,29 +79,31 @@ impl SheetEditor {
                     format!("empty or duplicate clip name: {name:?}"),
                 );
             } else {
-                if self.preview.target == super::preview::PreviewTarget::Clip(clip.name.clone()) {
-                    self.preview.target = super::preview::PreviewTarget::Clip(name.clone());
+                if self.preview.target
+                    == super::preview::PreviewTarget::Animation(clip.name.clone())
+                {
+                    self.preview.target = super::preview::PreviewTarget::Animation(name.clone());
                 }
                 clip.name = name.clone();
-                self.selected_clip = Some(name.clone());
-                self.clip_draft.name = Some(name);
+                self.selected_animation = Some(name.clone());
+                self.animation_draft.name = Some(name);
                 changed = true;
             }
         }
         changed |= mode_combo(ui, "Clip mode", &mut clip.mode);
         let mut text_changed = ui
-            .input_text("Clip tags", &mut self.clip_draft.tags)
+            .input_text("Clip tags", &mut self.animation_draft.tags)
             .build();
         text_changed |= ui
             .input_text_multiline(
                 "Clip props (key=value)",
-                &mut self.clip_draft.props,
+                &mut self.animation_draft.props,
                 [0.0, 65.0],
             )
             .build();
         if text_changed {
-            clip.tags = parse_tags(&self.clip_draft.tags);
-            match parse_props(&self.clip_draft.props) {
+            clip.tags = parse_tags(&self.animation_draft.tags);
+            match parse_props(&self.animation_draft.props) {
                 Ok(props) => {
                     clip.props = props;
                     changed = true;
@@ -168,8 +170,8 @@ impl SheetEditor {
         }
         if ui.button("Delete clip") {
             sheet.meta.clips.remove(index);
-            self.selected_clip = None;
-            self.clip_draft = Default::default();
+            self.selected_animation = None;
+            self.animation_draft = Default::default();
             sheet.dirty = true;
         }
     }

@@ -84,7 +84,7 @@ pub fn mode_combo(ui: &Ui, label: &str, mode: &mut Mode) -> bool {
     }
 }
 impl SheetEditor {
-    pub fn tiles_tab(&mut self, ui: &Ui) {
+    pub fn tileset_tab(&mut self, ui: &Ui) {
         let sheet = &mut self.sheet;
         let Some((col, row)) = self.tile_draft.target(&sheet.selection) else {
             self.tile_draft = Default::default();

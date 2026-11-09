@@ -6,7 +6,7 @@ use dear_imgui_rs::{TextureId, Ui};
 pub enum PreviewTarget {
     #[default]
     None,
-    Clip(String),
+    Animation(String),
     Tile(u32, u32),
     Sprite(String),
 }
@@ -115,7 +115,7 @@ impl SheetEditor {
         for clip in &sheet.meta.clips {
             choices.push((
                 format!("Clip: {}", clip.name),
-                PreviewTarget::Clip(clip.name.clone()),
+                PreviewTarget::Animation(clip.name.clone()),
             ));
         }
         for tile in &sheet.meta.tiles {
@@ -159,7 +159,7 @@ impl SheetEditor {
         let mut frame_count = 1;
         let result: Result<(), String> = (|| {
             let sprite = match &self.preview.target {
-                PreviewTarget::Clip(name) => {
+                PreviewTarget::Animation(name) => {
                     let clip = sheet
                         .meta
                         .clips
@@ -231,7 +231,7 @@ impl SheetEditor {
         }
         let moving = matches!(
             self.preview.target,
-            PreviewTarget::Clip(_) | PreviewTarget::Tile(..)
+            PreviewTarget::Animation(_) | PreviewTarget::Tile(..)
         );
         let frame = if moving { self.preview.frame(now) } else { 0 };
         ui.text(format!(
@@ -309,7 +309,7 @@ mod tests {
     #[test]
     fn playback_clock_pause_restart_and_timeline_edits() {
         let mut state = PreviewState::default();
-        state.select(PreviewTarget::Clip("test".into()), 1000);
+        state.select(PreviewTarget::Animation("test".into()), 1000);
         state.update_timeline(vec![100, 100], Mode::Loop).unwrap();
         assert_eq!(state.frame(1150), 1);
         state.pause_or_play(1150);

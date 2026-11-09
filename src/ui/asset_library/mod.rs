@@ -1,4 +1,4 @@
-mod clips;
+mod animations;
 mod edit;
 mod extract;
 mod guess;
@@ -8,7 +8,7 @@ mod model;
 mod preview;
 mod regions;
 mod sprites;
-mod tiles;
+mod tileset;
 mod view;
 pub use model::*;
 
@@ -89,17 +89,17 @@ pub struct SheetEditor {
     pub pending: Vec<Action>,
     /// Where Save image as wrote the memory image, for the library's PNG path field.
     saved_path: Option<PathBuf>,
-    tile_draft: tiles::TileDraft,
+    tile_draft: tileset::TileDraft,
     selected_sprite: Option<String>,
-    selected_clip: Option<String>,
+    selected_animation: Option<String>,
     suggestions: Vec<raster::CellRect>,
     suggest_job: Option<job::Job<Vec<raster::ObjectBox>>>,
-    clip_draft: clips::ClipDraft,
+    animation_draft: animations::AnimationDraft,
     preview: preview::PreviewState,
     regions: regions::RegionsState,
     extract: extract::ExtractState,
 }
-pub struct SpriteLibrary {
+pub struct AssetLibrary {
     pub open: bool,
     pub path_input: String,
     pub status: String,
@@ -113,7 +113,7 @@ pub struct SpriteLibrary {
     #[cfg(test)]
     import_controls: tests::ImportControls,
 }
-impl Default for SpriteLibrary {
+impl Default for AssetLibrary {
     fn default() -> Self {
         Self {
             open: false,
@@ -131,7 +131,7 @@ impl Default for SpriteLibrary {
         }
     }
 }
-impl SpriteLibrary {
+impl AssetLibrary {
     pub fn queue_drop(&mut self, path: PathBuf) {
         self.open = true;
         self.pending.push(Action::Load(path));
@@ -433,10 +433,10 @@ impl SheetEditor {
             saved_path: None,
             tile_draft: Default::default(),
             selected_sprite: None,
-            selected_clip: None,
+            selected_animation: None,
             suggestions: Vec::new(),
             suggest_job: None,
-            clip_draft: Default::default(),
+            animation_draft: Default::default(),
             preview: Default::default(),
             regions: Default::default(),
             extract: Default::default(),
@@ -462,9 +462,9 @@ impl SheetEditor {
         self.cancel_batch();
         self.sheet = opened;
         self.selected_sprite = None;
-        self.selected_clip = None;
+        self.selected_animation = None;
         self.suggestions.clear();
-        self.clip_draft = Default::default();
+        self.animation_draft = Default::default();
         self.preview = Default::default();
         self.guess = None;
         self.tile_draft = Default::default();
@@ -484,7 +484,7 @@ impl SheetEditor {
     }
     fn save(&mut self) -> Result<String, String> {
         self.tile_draft.validate(&self.sheet.meta)?;
-        self.clip_draft.validate()?;
+        self.animation_draft.validate()?;
         let sheet = &mut self.sheet;
         let SheetSource::File(path) = &sheet.source else {
             return Err("save the image first".into());
@@ -608,13 +608,13 @@ impl SheetEditor {
         regions::sheet_view(self, ui, overlays);
         if let Some(_tabs) = ui.tab_bar("Sprite library tabs") {
             if let Some(_tab) = ui.tab_item("Tiles") {
-                self.tiles_tab(ui);
+                self.tileset_tab(ui);
             }
             if let Some(_tab) = ui.tab_item("Sprites") {
                 self.sprites_tab(ui);
             }
             if let Some(_tab) = ui.tab_item("Clips") {
-                self.clips_tab(ui);
+                self.animations_tab(ui);
             }
             if let Some(_tab) = ui.tab_item("Preview") {
                 self.preview_tab(ui, now_ms);
@@ -868,7 +868,7 @@ mod tests {
         if std::env::var_os(CHILD).is_none() {
             let fixture = crate::test_support::TempDir::new("extract");
             crate::test_support::in_child_process(
-                "ui::sprite_library::tests::load_path_rules_in_their_own_process",
+                "ui::asset_library::tests::load_path_rules_in_their_own_process",
                 Some(CHILD),
                 false,
                 Some(&fixture.0),
@@ -1026,7 +1026,7 @@ mod tests {
             // Refresh only lists the name; no PNG decoding, GL or local assets.
             std::fs::write(fixture.0.join("assets/from-refresh.png"), []).unwrap();
             crate::test_support::in_child_process(
-                "ui::sprite_library::tests::import_panel_clicks_and_layout",
+                "ui::asset_library::tests::import_panel_clicks_and_layout",
                 Some(CHILD),
                 true,
                 Some(&fixture.0),
@@ -1034,7 +1034,7 @@ mod tests {
             return;
         }
         let (mut context, consumer) = context();
-        let library = RefCell::new(SpriteLibrary::default());
+        let library = RefCell::new(AssetLibrary::default());
         let content_right = Cell::new(0.0);
         for width in [320.0, 620.0, 900.0] {
             let render = |context: &mut Context| {
@@ -1177,7 +1177,7 @@ mod tests {
             fs::read_dir(&temp.0).unwrap().count(),
             fs::read_dir(&outside.0).unwrap().count(),
         );
-        let mut library = SpriteLibrary {
+        let mut library = AssetLibrary {
             path_input: "keep this user input".into(),
             status: "before preparation".into(),
             ..Default::default()
@@ -1186,7 +1186,7 @@ mod tests {
         sheet.source = SheetSource::File(first.canonicalize().unwrap());
         library.install(sheet);
         library.sheets[0].focus_requested = false;
-        let snapshot = |library: &SpriteLibrary| {
+        let snapshot = |library: &AssetLibrary| {
             (
                 library.next_id,
                 library.path_input.clone(),
@@ -1340,7 +1340,7 @@ mod tests {
                     ui.window(format!("Tile input test {id}"))
                         .position([40.0, y], Condition::Always)
                         .size([900.0, 220.0], Condition::Always)
-                        .build(|| target.borrow_mut().tiles_tab(ui));
+                        .build(|| target.borrow_mut().tileset_tab(ui));
                 }
             });
         };
@@ -1397,7 +1397,7 @@ mod tests {
         consumer: &SynchronousRendererConsumer,
     ) {
         use std::cell::RefCell;
-        let library = RefCell::new(SpriteLibrary::default());
+        let library = RefCell::new(AssetLibrary::default());
         library.borrow_mut().sheets.extend([
             SheetEditor::new(10, fake_sheet()),
             SheetEditor::new(11, fake_sheet()),
@@ -1595,7 +1595,7 @@ mod tests {
     }
     #[test]
     fn editor_output_moves_into_the_library_after_drawing() {
-        let mut library = SpriteLibrary::default();
+        let mut library = AssetLibrary::default();
         library.sheets.push(SheetEditor::new(7, fake_sheet()));
         library.status = "old".into();
         library.collect_editor_output();
@@ -1631,7 +1631,7 @@ mod tests {
         // Both the default wrapper and bulk --ignored runs enter here. Only
         // the exact-test child owns an ImGui context.
         if !crate::test_support::in_child_process(
-            "ui::sprite_library::tests::hidden_library_grid_and_zoom_geometry",
+            "ui::asset_library::tests::hidden_library_grid_and_zoom_geometry",
             Some("RN_LIBRARY_GEOMETRY_CHILD"),
             true,
             None,
@@ -1642,7 +1642,7 @@ mod tests {
         let (mut context, consumer) = context();
         check_tile_log_input(&mut context, &consumer);
         check_sprite_rename_log_input(&mut context, &consumer);
-        let library = std::cell::RefCell::new(SpriteLibrary::default());
+        let library = std::cell::RefCell::new(AssetLibrary::default());
         assert!(!library.borrow().open);
         assert_eq!(
             vertices(&mut context, &consumer, |ui| library
@@ -1747,7 +1747,7 @@ mod tests {
     #[ignore = "requires a display; run under Xvfb"]
     fn queued_replacement_registration_and_close() {
         if !crate::test_support::in_child_process(
-            "ui::sprite_library::tests::queued_replacement_registration_and_close",
+            "ui::asset_library::tests::queued_replacement_registration_and_close",
             Some("RN_LIBRARY_GL_CHILD"),
             true,
             None,
@@ -1758,7 +1758,7 @@ mod tests {
         let gl = std::rc::Rc::clone(&fixture.gl);
         let mut imgui = crate::dev::context().unwrap();
         let mut renderer = GlowRenderer::with_shared_context(Rc::clone(&gl), &mut imgui).unwrap();
-        let mut library = SpriteLibrary::default();
+        let mut library = AssetLibrary::default();
         let default_grid = Grid::DEFAULT;
         library.pending.push(Action::Replace {
             image: crate::sprite::example().0,
@@ -1910,7 +1910,7 @@ mod tests {
 
     #[cfg(unix)]
     fn check_escaping_load_refusals(
-        library: &mut SpriteLibrary,
+        library: &mut AssetLibrary,
         gl: &Rc<glow::Context>,
         renderer: &mut GlowRenderer,
     ) {
@@ -1929,7 +1929,7 @@ mod tests {
         for (target, alias) in targets.iter().zip(&aliases) {
             symlink(target, alias).unwrap();
         }
-        let snapshot = |library: &SpriteLibrary| {
+        let snapshot = |library: &AssetLibrary| {
             library
                 .sheets
                 .iter()

@@ -998,7 +998,7 @@ mod tests {
         // Both the default wrapper and bulk --ignored runs must enter a fresh
         // process before creating ImGui's single-thread-owned context.
         if !crate::test_support::in_child_process(
-            "ui::sprite_library::regions::tests::memory_save_button_preserves_state_on_refusal",
+            "ui::asset_library::regions::tests::memory_save_button_preserves_state_on_refusal",
             Some("RN_MEMORY_SAVE_CHILD"),
             true,
             None,

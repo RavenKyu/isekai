@@ -1,11 +1,11 @@
 #[cfg(not(target_os = "emscripten"))]
-pub mod sprite_library;
+pub mod asset_library;
 
 use dear_imgui_rs::{Condition, Ui, WindowFlags};
 
 pub struct DevTools {
     #[cfg(not(target_os = "emscripten"))]
-    pub library: sprite_library::SpriteLibrary,
+    pub library: asset_library::AssetLibrary,
     visible: bool,
     frame_stats: bool,
     demo: bool,
@@ -16,7 +16,7 @@ impl Default for DevTools {
     fn default() -> Self {
         Self {
             #[cfg(not(target_os = "emscripten"))]
-            library: sprite_library::SpriteLibrary::default(),
+            library: asset_library::AssetLibrary::default(),
             visible: false,
             frame_stats: true,
             demo: false,
