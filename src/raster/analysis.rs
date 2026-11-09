@@ -1,5 +1,5 @@
 use super::RgbaImage;
-use crate::sprite::grid::Grid;
+use crate::sprite::{Transform, grid::Grid};
 use std::{
     collections::{HashMap, HashSet},
     sync::atomic::{AtomicBool, Ordering},
@@ -194,13 +194,17 @@ pub fn guess_grid_with(
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Dedupe {
     pub unique: Vec<RgbaImage>,
-    pub map: Vec<usize>,
+    pub map: Vec<(usize, Transform)>,
     pub cols: u32,
     pub rows: u32,
     pub counts: Vec<usize>,
 }
 
 pub fn dedupe(image: &RgbaImage, grid: &Grid) -> Dedupe {
+    dedupe_with(image, grid, false)
+}
+
+pub fn dedupe_with(image: &RgbaImage, grid: &Grid, group_transforms: bool) -> Dedupe {
     let cells = grid.cells(image.width, image.height);
     let mut result = Dedupe {
         unique: Vec::new(),
@@ -209,22 +213,35 @@ pub fn dedupe(image: &RgbaImage, grid: &Grid) -> Dedupe {
         rows: cells.rows,
         counts: Vec::new(),
     };
-    let mut indices = HashMap::<Vec<u8>, usize>::new();
+    let mut indices = HashMap::<Vec<u8>, (usize, Transform)>::new();
     for row in 0..cells.rows {
         for col in 0..cells.cols {
             let bytes = image.normalized_tile_bytes(grid, col, row);
-            let next = result.unique.len();
-            let index = *indices.entry(bytes.clone()).or_insert_with(|| {
-                result.unique.push(RgbaImage {
+            let entry = if let Some(&entry) = indices.get(&bytes) {
+                entry
+            } else {
+                let index = result.unique.len();
+                let tile = RgbaImage {
                     width: grid.tile,
                     height: grid.tile,
                     pixels: bytes,
-                });
+                };
+                let transforms: &[Transform] = if group_transforms {
+                    &Transform::ALL
+                } else {
+                    &Transform::ALL[..1]
+                };
+                for &transform in transforms {
+                    indices
+                        .entry(tile.transformed(transform).pixels)
+                        .or_insert((index, transform));
+                }
+                result.unique.push(tile);
                 result.counts.push(0);
-                next
-            });
-            result.map.push(index);
-            result.counts[index] += 1;
+                (index, Transform::IDENTITY)
+            };
+            result.map.push(entry);
+            result.counts[entry.0] += 1;
         }
     }
     result
@@ -262,11 +279,16 @@ pub fn rebuild_matches(
         for col in 0..cells.cols {
             let index = row as usize * cells.cols as usize + col as usize;
             let expected = image.normalized_tile_bytes(grid, col, row);
-            let actual = dedupe.map.get(index).and_then(|&i| dedupe.unique.get(i));
+            let actual = dedupe
+                .map
+                .get(index)
+                .and_then(|&(i, transform)| dedupe.unique.get(i).map(|tile| (tile, transform)));
             if dedupe.cols != cells.cols
                 || dedupe.rows != cells.rows
-                || actual.is_none_or(|tile| {
-                    tile.width != grid.tile || tile.height != grid.tile || tile.pixels != expected
+                || actual.is_none_or(|(tile, transform)| {
+                    tile.width != grid.tile
+                        || tile.height != grid.tile
+                        || tile.transformed(transform).pixels != expected
                 })
             {
                 different.push((col, row));

@@ -16,12 +16,17 @@ use std::{
 struct Analysis {
     dedupe: Dedupe,
     rebuild: Result<(), Vec<(u32, u32)>>,
+    grouped: bool,
 }
 impl Analysis {
-    fn new(image: &RgbaImage, grid: &Grid) -> Self {
-        let dedupe = raster::dedupe(image, grid);
+    fn new(image: &RgbaImage, grid: &Grid, grouped: bool) -> Self {
+        let dedupe = raster::dedupe_with(image, grid, grouped);
         let rebuild = raster::rebuild_matches(image, grid, &dedupe);
-        Self { dedupe, rebuild }
+        Self {
+            dedupe,
+            rebuild,
+            grouped,
+        }
     }
     fn report(&self) -> String {
         let d = &self.dedupe;
@@ -40,13 +45,18 @@ impl Analysis {
             d.rows,
             u64::from(d.cols) * u64::from(d.rows),
             d.unique.len()
-        )
+        ) + if self.grouped {
+            " (rotations/flips grouped)"
+        } else {
+            ""
+        }
     }
 }
 pub(super) struct ExtractState {
     source: Option<(TextureId, String)>,
     grid: Option<Grid>,
     columns: u32,
+    group_transforms: bool,
     output: String,
     analysis: Option<Analysis>,
     written: Option<PathBuf>,
@@ -57,6 +67,7 @@ impl Default for ExtractState {
             source: None,
             grid: None,
             columns: raster::DEFAULT_SHEET_COLUMNS,
+            group_transforms: false,
             output: String::new(),
             analysis: None,
             written: None,
@@ -78,6 +89,12 @@ impl ExtractState {
             self.analysis = None;
             self.written = None;
             self.grid = Some(sheet.meta.grid);
+        }
+    }
+    fn set_group_transforms(&mut self, grouped: bool) {
+        if self.group_transforms != grouped {
+            self.group_transforms = grouped;
+            self.invalidate();
         }
     }
     pub(super) fn invalidate(&mut self) {
@@ -246,7 +263,13 @@ fn plan_extract(
     output: &Path,
     checkout: &Path,
 ) -> Result<ExtractPlan, String> {
-    plan_from_analysis(&Analysis::new(image, grid), grid, columns, output, checkout)
+    plan_from_analysis(
+        &Analysis::new(image, grid, false),
+        grid,
+        columns,
+        output,
+        checkout,
+    )
 }
 
 fn save_sidecar_new(path: &Path, sheet: &SpriteSheet) -> Result<(), StoreError> {
@@ -305,9 +328,17 @@ pub(super) fn tab(editor: &mut SheetEditor, ui: &Ui, open_files: &[PathBuf]) {
     if changed {
         state.written = None;
     }
+    let mut grouped = state.group_transforms;
+    if ui.checkbox("Group rotations/flips", &mut grouped) {
+        state.set_group_transforms(grouped);
+    }
     if ui.button("Analyze") {
         // Synchronous, explicit action. Large sheets pause this dev tool.
-        state.analysis = Some(Analysis::new(&sheet.image, &sheet.meta.grid));
+        state.analysis = Some(Analysis::new(
+            &sheet.image,
+            &sheet.meta.grid,
+            state.group_transforms,
+        ));
         state.written = None;
     }
     if let Some(analysis) = &state.analysis {
@@ -452,8 +483,8 @@ pub(super) mod tests {
                 png,
                 raster::build_sheet(&raster::dedupe(&image, &grid).unique, 16, 16)
             );
-            let mut analysis = Analysis::new(&image, &grid);
-            analysis.dedupe.map[0] = 1;
+            let mut analysis = Analysis::new(&image, &grid, false);
+            analysis.dedupe.map[0] = (1, crate::sprite::Transform::IDENTITY);
             analysis.rebuild = raster::rebuild_matches(&image, &grid, &analysis.dedupe);
             assert!(analysis.report().contains("1 cells differ (first 0,0)"));
         }
@@ -678,25 +709,56 @@ pub(super) mod tests {
         assert_no_temps(&temp.0);
     }
     #[test]
+    fn grouping_toggle_invalidates_results_and_is_reported() {
+        let sheet = memory_sheet();
+        let mut state = ExtractState::default();
+        assert!(!state.group_transforms);
+        state.analysis = Some(Analysis::new(&sheet.image, &sheet.meta.grid, false));
+        state.written = Some("old.png".into());
+        state.set_group_transforms(true);
+        assert!(state.analysis.is_none() && state.written.is_none());
+        assert!(
+            Analysis::new(&sheet.image, &sheet.meta.grid, true)
+                .report()
+                .contains("rotations/flips grouped")
+        );
+    }
+    #[test]
     fn grid_and_image_changes_invalidate_analysis_and_written_result() {
         let temp = Temp::new();
         let mut sheet = memory_sheet();
         let mut state = ExtractState::default();
         state.sync(&sheet, &temp.0);
-        state.analysis = Some(Analysis::new(&sheet.image, &sheet.meta.grid));
+        state.analysis = Some(Analysis::new(
+            &sheet.image,
+            &sheet.meta.grid,
+            state.group_transforms,
+        ));
         state.written = Some("old.png".into());
         sheet.meta.grid.offset = [2, 0];
         state.sync(&sheet, &temp.0);
         assert!(state.analysis.is_none() && state.written.is_none());
-        state.analysis = Some(Analysis::new(&sheet.image, &sheet.meta.grid));
+        state.analysis = Some(Analysis::new(
+            &sheet.image,
+            &sheet.meta.grid,
+            state.group_transforms,
+        ));
         sheet.meta.grid.spacing = 1;
         state.sync(&sheet, &temp.0);
         assert!(state.analysis.is_none());
-        state.analysis = Some(Analysis::new(&sheet.image, &sheet.meta.grid));
+        state.analysis = Some(Analysis::new(
+            &sheet.image,
+            &sheet.meta.grid,
+            state.group_transforms,
+        ));
         sheet.meta.grid.tile = 8;
         state.sync(&sheet, &temp.0);
         assert!(state.analysis.is_none());
-        state.analysis = Some(Analysis::new(&sheet.image, &sheet.meta.grid));
+        state.analysis = Some(Analysis::new(
+            &sheet.image,
+            &sheet.meta.grid,
+            state.group_transforms,
+        ));
         sheet.imgui_id = TextureId::new(51);
         state.sync(&sheet, &temp.0);
         assert!(state.analysis.is_none());
