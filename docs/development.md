@@ -129,6 +129,7 @@ scripts/check-no-imgui.sh --release
 [웹 스모크](web.md#웹-스모크)로 이어 간다. 회귀 검사를 바꿀 때는
 [실패하는 변이로 약속을 확인하는 교훈](lessons/verify-promises-with-mutations.md)을 따른다.
 성공 경로 검사에서는 [fixture의 전제조건](lessons/prepare-valid-fixtures-for-success-paths.md)을 먼저 맞춘다.
+파일 재열기 방식을 바꿀 때는 [쓰기 경로와 파일 식별 기준](lessons/inspect-write-paths-when-deduplicating-open-files.md)도 함께 확인한다.
 
 ## 스모크 출력 계약
 
