@@ -128,6 +128,7 @@ scripts/check-no-imgui.sh --release
 버전 교체 및 인자 보존을 검사한다. 실제 SDK·웹 검사를 대신하지 않는다.
 [웹 스모크](web.md#웹-스모크)로 이어 간다. 회귀 검사를 바꿀 때는
 [실패하는 변이로 약속을 확인하는 교훈](lessons/verify-promises-with-mutations.md)을 따른다.
+성공 경로 검사는 [fixture의 전제조건](lessons/prepare-valid-fixtures-for-success-paths.md)을 먼저 맞춘다.
 
 ## 스모크 출력 계약
 
