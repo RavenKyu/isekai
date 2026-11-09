@@ -154,6 +154,11 @@ fn stage_bytes(path: &Path, bytes: &[u8]) -> Result<Staged, StoreError> {
     drop(file);
     Ok(temp)
 }
+/// Atomically replace the destination with complete bytes.
+/// On success, the bytes were written to a same-directory temporary file,
+/// synced with `sync_all`, closed, and published with `rename`.
+/// The parent directory is not synced, so crash durability of the published
+/// name is not guaranteed on any platform.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
     let temp = stage_bytes(path, bytes)?;
     fs::rename(&temp.0, path)?;
@@ -161,6 +166,10 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
 }
 /// Publish complete, synced bytes without replacing any existing destination,
 /// including a dangling symlink. Competing publishers cannot both succeed.
+/// On success, the bytes were written to a same-directory temporary file,
+/// synced with `sync_all`, closed, and published with `hard_link`.
+/// The parent directory is not synced, so crash durability of the published
+/// name is not guaranteed on any platform.
 pub fn publish_new(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
     let temp = stage_bytes(path, bytes)?;
     fs::hard_link(&temp.0, path)?;
