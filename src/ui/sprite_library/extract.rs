@@ -227,6 +227,13 @@ pub(super) fn inside_local_assets(path: &Path, checkout: &Path) -> bool {
 }
 /// Prepares the parent of an already validated, absolute output path.
 pub(super) fn create_output_dir(output: &Path, checkout: &Path) -> Result<(), StoreError> {
+    debug_assert!(
+        output.is_absolute()
+            && !output
+                .components()
+                .any(|c| matches!(c, Component::ParentDir)),
+        "create_output_dir takes an output from absolute_output"
+    );
     let parent = output
         .parent()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "output needs a parent"))?;
@@ -694,6 +701,27 @@ pub(super) mod tests {
         assert!(error.contains("map not written: map output is a symlink"));
         assert_eq!(fs::read(target).unwrap(), b"untouched");
         assert_no_temps(&temp.0);
+    }
+    #[cfg(debug_assertions)]
+    #[test]
+    fn output_directory_requires_a_validated_absolute_path() {
+        let temp = crate::test_support::TempDir::new("output-precondition");
+        for output in [
+            temp.0.join("assets/splites/../../escaped/out.png"),
+            PathBuf::from("assets/splites/new/out.png"),
+        ] {
+            let panic = std::panic::catch_unwind(|| create_output_dir(&output, &temp.0))
+                .expect_err(
+                    "unchecked output must trip the precondition before creating directories",
+                );
+            let message = panic
+                .downcast_ref::<String>()
+                .map(String::as_str)
+                .or_else(|| panic.downcast_ref::<&str>().copied())
+                .unwrap();
+            assert!(message.contains("create_output_dir takes an output from absolute_output"));
+            assert_eq!(fs::read_dir(&temp.0).unwrap().count(), 0);
+        }
     }
     #[test]
     fn defaults_and_output_directory_boundaries() {

@@ -169,8 +169,9 @@ impl SpriteLibrary {
         self.sheets.iter_mut().find(|e| e.id == id)
     }
     /// Refuse escaping paths before focus, reads or uploads, even if their target is open.
-    fn begin_load(&mut self, given: &Path) -> Result<LoadStep, String> {
-        let path = resolve_load_path(given)?;
+    /// Takes the input by value, so a caller can only open the path `Open` returns.
+    fn begin_load(&mut self, given: PathBuf) -> Result<LoadStep, String> {
+        let path = resolve_load_path(&given)?;
         if let Some(editor) = self
             .sheets
             .iter_mut()
@@ -189,7 +190,7 @@ impl SpriteLibrary {
     ) -> Result<(), String> {
         match action {
             Action::Load(path) => {
-                let path = match self.begin_load(&path)? {
+                let path = match self.begin_load(path)? {
                     LoadStep::Focused => return Ok(()),
                     LoadStep::Open(path) => path,
                 };
@@ -1218,27 +1219,31 @@ mod tests {
         let before = snapshot(&library);
         // This is the preparation used by Action::Load. Bypassing it in that arm
         // still needs the GL queue test; this test observes the preparation itself.
+        // The arm moves its path in, so it cannot open the input instead of `Open`.
         #[cfg(unix)]
         for name in ["opened\n\r.png", "unopened.png"] {
-            let error = library.begin_load(&outside.0.join(name)).unwrap_err();
+            let error = library.begin_load(outside.0.join(name)).unwrap_err();
             assert!(error.starts_with("unsafe image path:"), "{error}");
             assert!(error.is_ascii() && !error.contains(['\n', '\r']));
             assert_eq!(snapshot(&library), before, "refusal must precede focus");
         }
         let missing = temp.0.join("missing.png");
         assert_eq!(
-            library.begin_load(&missing).unwrap_err(),
+            library.begin_load(missing.clone()).unwrap_err(),
             missing.canonicalize().unwrap_err().to_string()
         );
         assert_eq!(snapshot(&library), before);
-        assert_eq!(
-            library.begin_load(&second).unwrap(),
-            LoadStep::Open(second.canonicalize().unwrap())
-        );
-        assert_eq!(snapshot(&library), before);
+        // An alias of an unopened file opens the checked path, not the input.
+        for given in [second.clone(), temp.0.join("alias/../second.png")] {
+            assert_eq!(
+                library.begin_load(given).unwrap(),
+                LoadStep::Open(second.canonicalize().unwrap())
+            );
+            assert_eq!(snapshot(&library), before);
+        }
         assert_eq!(
             library
-                .begin_load(&temp.0.join("alias/../first.png"))
+                .begin_load(temp.0.join("alias/../first.png"))
                 .unwrap(),
             LoadStep::Focused
         );
