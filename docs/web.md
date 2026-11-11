@@ -5,6 +5,46 @@
 이 경로는 upstream 공식 지원 경로가 아니며 [의존성과 패치](dependencies.md)에
 설명한 두 로컬 crate 패치가 필요하다. 명령은 checkout 최상단 기준이다.
 
+
+## isekai의 wasm-bindgen 웹 경로
+
+새 앱은 `wasm32-unknown-unknown`이다. 아래 명령은 기존 Emscripten 경로와 나란히
+사용하며 기존 `build-web.sh` 산출물을 덮지 않는다.
+
+```sh
+scripts/setup-wasm-bindgen.sh
+scripts/build-web-isekai.sh --dev
+scripts/smoke-web-isekai.sh --dev
+scripts/build-web-isekai.sh
+scripts/smoke-web-isekai.sh
+scripts/smoke-web-isekai.sh --play
+scripts/smoke-web-isekai.sh --webgl2
+scripts/smoke-web-isekai.sh --no-webgpu
+scripts/serve-web-isekai.sh
+```
+
+산출물은 `target/web-isekai/{index.html,isekai.js,isekai_bg.wasm}`이다.
+서버는 loopback과 PORT(기본 8080, 0이면 자동 선택)를 쓴다.
+CLI 버전 정본은 Cargo.lock의 wasm-bindgen이다. 주 checkout의
+`.tools/wasm-bindgen/<version>/`에 flock 아래 한 번 설치하며 실제 버전과 완료 표시를
+검사한다. 완료 표시가 없으면 중단된 설치로 보고 다시 설치한다. PATH의 CLI는 쓰지 않는다.
+완료된 설치의 버전이 다르면 실패한다.
+
+쿼리는 `play=example`, `animation=cycle`(`clip` 별칭), `smoke=3`,
+`backend=auto|webgpu|webgl2`다. auto는 WebGPU 어댑터·장치 요청이 실패하면
+새 GL 인스턴스로 WebGL2를 시도한다. Rust가 쿼리를 같은 clap 인자로 변환한다.
+코드로 만든 example만 임베드하며 웹 파일 편집·저장은 제공하지 않는다.
+
+`isekai-smoke:` 결과는 `#isekai-log`와 콘솔에 기록한다. 비동기 초기화와 첫 프레임
+그리기를 마친 뒤 `data-ready=true`를 내고 CDP의 실제 Backquote 이벤트를 받는다.
+픽셀 읽기는 다음 이벤트 루프로 돌아가 완료를 받으며 완료 뒤 마지막 canvas를 유지한다.
+웹에서 블로킹 GPU 대기나 std::time::Instant를 쓰지 않는다.
+
+자동 검사는 auto에서 backend=webgpu 또는 gl을 허용하고, WebGL2 강제와 WebGPU 꺼짐
+모드에서는 gl만 허용한다. 준비 전 실패도 dom.html·screenshot.png·console.json·chrome.log·
+server.log를 `target/smoke-web-isekai.<임의값>/`에 보존한다. 모드 조합·중복은 종료 2다.
+
+
 ## SDK 설치와 worktree 공유
 
 ```sh
@@ -163,4 +203,4 @@ stderr에 출력되는 `evidence:` 경로는 `target/smoke-web.<임의값>/`다.
 | `dev tools did not open within 5s`·`smoke key probe did not arrive within 5s` | evidence와 준비 속성, canvas 포커스, CDP 키가 SDL에 도착하는지 확인한다. 고정 sleep이나 앱 내부의 강제 표시로 우회하지 않는다. |
 | `missing smoke result`·DevTools timeout | 결과 줄이 없는지, 앱이 초기화·RAF·렌더 중 멈췄는지 증거 로그를 본다. 페이지가 응답하지 않아 DevTools도 멈추면 DOM과 스크린샷은 남지 않고 `chrome.log`와 `server.log`만 남는다. CLI `--dump-dom`만으로 완료 시점을 추정하지 않는다. |
 
-Decided in: isk-35g9, isk-7w7b, isk-fcuz
+Decided in: isk-srq5, isk-35g9, isk-7w7b, isk-fcuz

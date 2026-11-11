@@ -4,6 +4,23 @@
 판을 올릴 때는 정본을 먼저 바꾸고 문서와 [네이티브 검사](development.md),
 [웹 검사](web.md)를 함께 확인한다. 처음 실행은 [개발 시작](README.md)을 따른다.
 
+
+## isekai 스택의 판 맞춤
+
+워크스페이스 의존성의 범위는 루트 Cargo.toml, 해결된 판은 Cargo.lock이 정본이다.
+egui 릴리스가 사용하는 egui-wgpu·egui-winit의 wgpu·winit 판을 함께 맞춘다.
+현재 잠금은 egui/egui-wgpu/egui-winit 0.37.0, wgpu 30.0.1, winit 0.30.13이다.
+wgpu의 WebGPU와 webgl을 함께 켜고 WebGL2 downlevel limits를 바탕으로 장치를 요청한다.
+색 타깃·시트는 Rgba8Unorm이며 nearest와 straight alpha를 쓴다.
+clap은 CLI 하위 명령, web-time은 네이티브·웹 공통 시간, wasm-bindgen과
+wasm-bindgen-futures는 웹 진입·비동기 초기화를 맡는다.
+wasm-bindgen-cli는 반드시 Cargo.lock의 wasm-bindgen과 같은 판을 설치한다.
+
+isekai-editor는 isekai의 optional dev 의존이다. egui-winit의 기본 feature를 끄고
+x11·wayland만 선택한다. 기존 SDL3·dear-imgui 패치와 emsdk는 옛 rusty-nails를 위해
+v0.6.0까지 유지한다. 두 스택의 부재 검사는 각각 check-no-egui.sh와 check-no-imgui.sh다.
+
+
 ## 고정값과 이유
 
 | 항목 | 현재 값과 정본 | 이유 |
@@ -116,4 +133,4 @@ Rust의 `-fwasm-exceptions`와 Emscripten 기본 `WASM_LEGACY_EXCEPTIONS` 조합
    실측 Rust/LLVM·emcc 버전, 성공한 설정, 크기와 검사 결과를 트래커에 기록한다.
    [CI 상태](README.md#더-읽기와-ci-상태)의 원격 미실행과 로컬 성공을 구분한다.
 
-Decided in: isk-35g9, isk-7w7b, isk-fcuz
+Decided in: isk-srq5, isk-35g9, isk-7w7b, isk-fcuz

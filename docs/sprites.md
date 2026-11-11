@@ -2,6 +2,23 @@
 
 PNG 시트의 타일 메타데이터, sprite와 animation을 편집한다. 편집·영역 오려 내기·타일셋 추출은 네이티브 `dev`에서만 제공한다. 런타임 재생은 모든 빌드에서 가능하며 웹은 코드로 만든 예제의 재생만 제공한다. 명령은 checkout 최상단 기준이다. 처음 실행 환경은 [개발 시작](README.md)을 따른다. [화면 시안](mockups/sheet-editor.html)도 볼 수 있다.
 
+
+## isekai 런타임 재생
+
+시트 편집·추출은 v0.6.0까지 기존 `cargo run --features dev`로 실행한다.
+재생에는 새 CLI를 쓸 수 있다.
+
+```sh
+cargo run -p isekai -- play tests/fixtures/example.sprites.json cycle
+```
+
+v1·v2·v3 읽기와 안전한 이미지 경로 검사는 공통 isekai-core를 사용한다.
+배율은 `max(1, floor(viewport_height / 4 / sprite_height))`이며 pivot을 창 중앙에 둔다.
+새 웹은 `scripts/build-web-isekai.sh`·`scripts/serve-web-isekai.sh` 뒤
+`http://127.0.0.1:8080/?play=example&animation=cycle`로 연다. 기존 `--play` 문법은
+옛 rusty-nails에 남고 새 앱은 `play` 하위 명령을 쓴다.
+
+
 ## 용어
 
 - **타일**은 시트를 격자로 나눈 한 칸이다. **타일셋**은 바닥·벽·물처럼 칸 단위로 쓰는 타일과 이름·태그·속성의 모음이다. `Tileset`에서 편집한다.
@@ -452,4 +469,4 @@ PNG만 지원하며 undo, 프레임 이벤트, 상태머신·타일맵 배치는
 
 캔버스에서 8칸 넘는 이전 set은 읽기 전용이다. 타일 배수가 아닌 옛 set은 틀의 크기를 올림하면서 런타임 배율이 달라질 수 있다. 실제 FPS와 수백 프레임 띠의 비용은 측정하지 않았다.
 
-Decided in: isk-79ss, isk-aqpa, isk-fcuz, isk-hk1c, isk-aw9h, isk-ut06, isk-6ptr, isk-8v66, isk-y594, isk-utmw
+Decided in: isk-srq5, isk-79ss, isk-aqpa, isk-fcuz, isk-hk1c, isk-aw9h, isk-ut06, isk-6ptr, isk-8v66, isk-y594, isk-utmw

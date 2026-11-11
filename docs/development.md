@@ -4,6 +4,59 @@
 웹 드라이버는 [웹 실행](web.md), 라이브러리와 버전 정책은
 [의존성과 패치](dependencies.md)를 참고한다. 명령은 checkout 최상단 기준이다.
 
+
+## isekai 워크스페이스와 검사
+
+`crates/isekai-core`는 CPU 이미지·시트 형식·저장·시간표와 순수 편집 연산을 공유한다.
+`isekai_core::sprite::edit`의 SpriteSheet 메서드는 ID·modified·검증 순서를 유지한다.
+선택과 기하 UI helper는 옛 `src/ui/asset_library/edit.rs`에 남는다.
+`crates/isekai-render`는 wgpu 배치·프레임 타깃·읽기·표면 전달,
+`crates/isekai-editor`는 egui 셸, `crates/isekai`는 CLI·winit 루프·웹 진입이다.
+
+```sh
+cargo fmt --all --check
+cargo clippy --locked --workspace --all-targets -- -D warnings
+cargo clippy --locked -p rusty-nails --all-targets --features dev -- -D warnings
+cargo clippy --locked -p isekai --all-targets --features dev -- -D warnings
+cargo test --locked --workspace
+cargo test --locked -p rusty-nails --features dev
+cargo test --locked -p isekai --features dev
+scripts/check-no-egui.sh
+scripts/smoke-native-isekai.sh
+scripts/smoke-native-isekai.sh --dev
+```
+
+루트의 `cargo test`만으로는 옮긴 코어 테스트가 실행되지 않는다. dev 검사는 각 패키지를
+명시한다. 새 앱의 수명은 egui → 렌더 자원 → Surface → Arc 창 순서다.
+모든 장면은 Rgba8Unorm 화면 밖 타깃에 그린 후 표면 전달 패스 한 번을 거친다.
+읽기는 256바이트 행 정렬 패딩을 제거하며 RGB가 검정이 아닌 픽셀만 센다.
+
+### isekai-smoke 출력 계약
+
+성공은 stdout 한 줄 `isekai-smoke: ok frames=N vtx=M lit=K backend=B`이고,
+실패는 `isekai-smoke: fail reason`과 비정상 종료 코드다. backend는
+`vulkan`, `metal`, `dx12`, `gl`, `webgpu` 중 하나다. 진단은 stderr로 간다.
+
+| 모드 | vtx | lit |
+| --- | --- | --- |
+| 비dev 빈 화면 | 0 | 0 |
+| 비dev 재생 | 0 | 양수 |
+| dev | 양수 | 양수 |
+
+첫 숨김 프레임 뒤 stderr의 `isekai-smoke: ready`를 본 하네스가 창에 포커스를 주고
+xdotool XTEST로 실제 백틱 눌림·반복·뗌을 보낸다. 비dev도 프로브가 도착해야 센다.
+키 미도착 또는 dev 미열림은 5초 제한이며 디스플레이·어댑터가 없으면 실패한다.
+네이티브 스모크는 별도 Xvfb, `WGPU_BACKEND=vulkan`,
+`VK_LOADER_DRIVERS_SELECT='*lvp*'`로 lavapipe를 고정하고 전체 60초 제한을 둔다.
+일반 `--smoke-frames` 실행도 외부의 실제 입력이 필요하다.
+
+비dev isekai 그래프·기호에는 egui가 없어야 하며 dev 그래프에는 있어야 한다.
+모든 isekai 그래프에서 SDL3·dear-imgui를 금지한다. wgpu GL의 glow는 허용한다.
+egui Context는 인스턴스별 상태이며 옛 ImGui처럼 전역 컨텍스트 검사 격리가 필요하지 않다.
+진단 창은 파일 저장 경로를 연결하지 않고 persistence·clipboard feature도 켜지 않는다.
+기존 `scripts/check-no-imgui.sh`와 옛 네이티브 스모크도 계속 실행한다.
+
+
 ## 창 실행과 종료
 
 ```sh
@@ -183,4 +236,4 @@ rn-smoke: ok frames=<N> vtx=<M> lit=<K>
 - `sheet ... exceeds GL_MAX_TEXTURE_SIZE ...`: 이미지 크기가 GL 한계를 넘는다. 시트를 작게 나누거나 지원 가능한 환경에서 연다.
 - `missing required tool`: 오류에 표시된 Xvfb, Python, timeout, nm 등을 준비한다.
 
-Decided in: isk-35g9, isk-7w7b, isk-fcuz, isk-hk1c
+Decided in: isk-srq5, isk-35g9, isk-7w7b, isk-fcuz, isk-hk1c

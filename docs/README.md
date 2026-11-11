@@ -6,6 +6,37 @@ Cargo의 `dev` feature를 켰을 때만 포함된다. 기본 개발 창은 두 �
 이 문서는 Linux에서 개발 환경을 준비하고 두 실행 경로를 확인하는 안내다.
 모든 명령은 전달받은 저장소 checkout의 최상단에서 실행한다.
 
+
+## v0.5.0: isekai 런타임과 기존 편집기
+
+새 게임 런타임은 wgpu·winit을 사용하는 `isekai`다. 네이티브에서 다음 명령을 쓴다.
+
+```sh
+cargo run -p isekai
+cargo run -p isekai -- play tests/fixtures/example.sprites.json cycle
+cargo run -p isekai --features dev
+```
+
+빈 창은 1280×720이고 제목은 `isekai`다. 창 닫기로 정상 종료한다. dev는 숨김으로
+시작하며 물리 백틱으로 `View` 메뉴와 `Frame stats`를 연다. `egui Inspection`과
+`egui Settings`도 View에서 연다. 새 셸에는 Assets 메뉴가 없다.
+시트 편집·Regions·Extract는 v0.6.0까지 기존 `cargo run --features dev`를 쓴다.
+루트 default member는 여전히 `rusty-nails`이므로 패키지를 생략한 기존 명령도 유지된다.
+
+새 네이티브 스모크에는 `xdotool`, `mesa-vulkan-drivers`, `libvulkan1`,
+`libxkbcommon-x11-dev`가 추가로 필요하다. 새 웹 경로는 다음과 같다.
+
+```sh
+scripts/build-web-isekai.sh
+scripts/serve-web-isekai.sh
+```
+
+`http://127.0.0.1:8080/?play=example`을 연다. 설치와 검사 상세는
+[네이티브 개발](development.md#isekai-워크스페이스와-검사)과
+[새 웹 경로](web.md#isekai의-wasm-bindgen-웹-경로)를 따른다.
+CI는 기존 native·web 외에 isekai-native·isekai-web도 검사한다.
+
+
 ## 필요한 것
 
 검증 환경은 Ubuntu 26.04 계열이다. Windows와 macOS의 설치 절차는 다루지 않는다.
@@ -122,4 +153,4 @@ dev·비dev 검사와 재생 스모크는 통합 브랜치에서 로컬로 확�
 이 에픽의 원격 CI는 미실행이며 origin push도 하지 않았다.
 CI도 로컬과 같은 스모크 스크립트를 쓰고 웹 비dev 빌드에 `--play` 검사를 추가한다.
 
-Decided in: isk-35g9, isk-7w7b, isk-fcuz
+Decided in: isk-srq5, isk-35g9, isk-7w7b, isk-fcuz
