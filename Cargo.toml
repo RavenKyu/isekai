@@ -8,6 +8,9 @@ edition = "2024"
 rust-version = "1.95"
 
 [workspace.dependencies]
+egui = "0.37"
+egui-wgpu = { version = "0.37", default-features = false }
+egui-winit = { version = "0.37", default-features = false, features = ["x11", "wayland"] }
 winit = "0.30.13"
 clap = { version = "4", features = ["derive"] }
 web-time = "1"

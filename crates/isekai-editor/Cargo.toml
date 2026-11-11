@@ -3,3 +3,12 @@ name = "isekai-editor"
 version = "0.5.0"
 edition.workspace = true
 rust-version.workspace = true
+
+[dependencies]
+isekai-core = { path = "../isekai-core" }
+isekai-render = { path = "../isekai-render" }
+egui.workspace = true
+egui-wgpu.workspace = true
+egui-winit.workspace = true
+wgpu.workspace = true
+winit.workspace = true

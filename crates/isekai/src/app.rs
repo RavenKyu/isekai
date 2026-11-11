@@ -14,6 +14,8 @@ use winit::{
     window::{Window, WindowId},
 };
 struct Render {
+    #[cfg(feature = "dev")]
+    dev: isekai_editor::DevShell,
     playback: Option<Playback>,
     batch: SpriteBatch,
     pipeline: SpritePipeline,
@@ -80,7 +82,11 @@ impl App {
             )?),
             None => None,
         };
+        #[cfg(feature = "dev")]
+        let dev = isekai_editor::DevShell::new(&gpu, &window);
         self.render = Some(Render {
+            #[cfg(feature = "dev")]
+            dev,
             playback,
             batch,
             pipeline,
@@ -125,10 +131,28 @@ impl App {
                 r.batch.draw(&mut pass, &r.pipeline, &[&play.texture]);
             }
         }
+        #[cfg(feature = "dev")]
+        let vtx = r.dev.paint(
+            &r.gpu,
+            &r.window,
+            now_ms as f64 / 1000.0,
+            &mut encoder,
+            &r.target.frame,
+        );
+        #[cfg(not(feature = "dev"))]
+        let vtx = 0;
+        #[cfg(feature = "dev")]
+        let visible = r.dev.tools.visible;
+        #[cfg(not(feature = "dev"))]
+        let visible = false;
         let view = surface.texture.create_view(&Default::default());
         r.target.blit(&mut encoder, &view);
         r.gpu.queue.submit([encoder.finish()]);
-        let lit = if self.smoke.as_ref().is_some_and(|s| s.is_last_frame(false)) {
+        let lit = if self
+            .smoke
+            .as_ref()
+            .is_some_and(|s| s.is_last_frame(visible))
+        {
             let read = Readback::begin(&r.gpu, &r.target.frame);
             r.gpu
                 .device
@@ -140,7 +164,7 @@ impl App {
         };
         r.gpu.queue.present(surface);
         if let Some(smoke) = self.smoke.as_mut() {
-            match smoke.finish_frame(now_ms, false, 0, lit)? {
+            match smoke.finish_frame(now_ms, visible, vtx, lit)? {
                 Step::SendKeys => eprintln!("isekai-smoke: ready"),
                 Step::Complete(report) => {
                     self.result = Ok(Some(report.line(r.gpu.backend())));
@@ -155,13 +179,21 @@ impl App {
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.render.is_none()
-            && let Err(e) = self.init(event_loop) {
-                self.fail(event_loop, e);
-            }
+            && let Err(e) = self.init(event_loop)
+        {
+            self.fail(event_loop, e);
+        }
     }
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         if self.done {
             return;
+        }
+        #[cfg(feature = "dev")]
+        if let Some(r) = self.render.as_mut() {
+            if let WindowEvent::KeyboardInput { event, .. } = &event {
+                r.dev.on_key(&crate::input::convert(event, self.modifiers));
+            }
+            r.dev.on_window_event(&r.window, &event);
         }
         match event {
             WindowEvent::CloseRequested => {
@@ -188,10 +220,13 @@ impl ApplicationHandler for App {
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 let key = crate::input::convert(&event, self.modifiers);
-                if key.key == Key::Backquote && key.pressed && !key.repeat
-                    && let Some(smoke) = self.smoke.as_mut() {
-                        smoke.observe_key_probe();
-                    }
+                if key.key == Key::Backquote
+                    && key.pressed
+                    && !key.repeat
+                    && let Some(smoke) = self.smoke.as_mut()
+                {
+                    smoke.observe_key_probe();
+                }
             }
             WindowEvent::RedrawRequested => {
                 if let Err(e) = self.frame() {
@@ -206,8 +241,9 @@ impl ApplicationHandler for App {
     }
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
         if !self.done
-            && let Some(r) = &self.render {
-                r.window.request_redraw();
-            }
+            && let Some(r) = &self.render
+        {
+            r.window.request_redraw();
+        }
     }
 }
