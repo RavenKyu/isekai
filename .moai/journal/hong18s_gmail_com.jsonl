@@ -605,3 +605,52 @@
 {"ts":"2026-11-09T15:07:56Z","id":"isk-79ss.73y","kind":"note","by":"Raven","by_email":"hong18s@gmail.com","text":"시안은 isk-5u3z에서 이미 docs/mockups/sheet-editor.html로 커밋됐다. 복사 단계는 건너뛴다."}
 {"ts":"2026-11-09T15:07:56Z","id":"isk-ijay","kind":"status","by":"Raven","by_email":"hong18s@gmail.com","from":"todo","to":"done","note":"닫음(사람 결정 2026-11-10): isk-79ss에서 타일 애니메이션을 형식 v3에서 빼기로 해 대상 기능이 없어졌다. 맵에서 애니메이션을 쓰는 일은 isk-9tfj·isk-fy7v에서 다룬다."}
 {"ts":"2026-11-09T15:09:12Z","id":"isk-jazt","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.4.0"}
+{"ts":"2026-11-11T05:34:11Z","id":"isk-wk3s","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.5.0"}
+{"ts":"2026-11-11T05:34:34Z","id":"isk-9404","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.6.0"}
+{"ts":"2026-11-11T05:34:34Z","id":"isk-89y5","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.7.0"}
+{"ts":"2026-11-11T05:34:34Z","id":"isk-1vxs","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.8.0"}
+{"ts":"2026-11-11T05:34:34Z","id":"isk-cdl6","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.9.0"}
+{"ts":"2026-11-11T05:34:34Z","id":"isk-gydx","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.10.0"}
+{"ts":"2026-11-11T05:34:34Z","id":"isk-tjtk","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.11.0"}
+{"ts":"2026-11-11T05:34:35Z","id":"isk-ov72","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.12.0"}
+{"ts":"2026-11-11T05:34:35Z","id":"isk-ru8q","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.13.0"}
+{"ts":"2026-11-11T05:34:35Z","id":"isk-gz9i","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.14.0"}
+{"ts":"2026-11-11T05:34:35Z","id":"isk-lu9o","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.15.0"}
+{"ts":"2026-11-11T05:34:35Z","id":"isk-39em","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.16.0"}
+{"ts":"2026-11-11T05:34:35Z","id":"isk-2x4s","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.17.0"}
+{"ts":"2026-11-11T05:34:35Z","id":"isk-yd97","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.18.0"}
+{"ts":"2026-11-11T05:34:35Z","id":"isk-6hbx","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.19.0"}
+{"ts":"2026-11-11T05:34:35Z","id":"isk-6mep","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.20.0"}
+{"ts":"2026-11-11T05:34:35Z","id":"isk-04o8","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.21.0"}
+{"ts":"2026-11-11T05:34:35Z","id":"isk-p9me","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.22.0"}
+{"ts":"2026-11-11T05:34:35Z","id":"isk-13vv","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.23.0"}
+{"ts":"2026-11-11T05:34:35Z","id":"isk-6exk","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v1.0.0"}
+{"ts":"2026-11-11T05:34:40Z","id":"isk-srq5","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.5.0 기반 이주: 워크스페이스·wgpu·winit·웹"}
+{"ts":"2026-11-11T05:34:40Z","id":"isk-srq5.ob4","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"워크스페이스와 isekai-core 분리"}
+{"ts":"2026-11-11T05:34:40Z","id":"isk-srq5.dzy","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"isekai-render: wgpu 스프라이트 렌더러"}
+{"ts":"2026-11-11T05:34:40Z","id":"isk-srq5.jvx","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"isekai 바이너리: winit 앱·play·네이티브 스모크"}
+{"ts":"2026-11-11T05:34:40Z","id":"isk-srq5.px6","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"isekai-editor: egui 개발 셸"}
+{"ts":"2026-11-11T05:34:40Z","id":"isk-srq5.zip","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"wasm-bindgen 웹 빌드와 웹 스모크"}
+{"ts":"2026-11-11T05:34:40Z","id":"isk-srq5.o0l","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"새 스택 CI 연결과 문서"}
+{"ts":"2026-11-11T05:34:45Z","id":"isk-srq5","kind":"note","by":"Raven","by_email":"hong18s@gmail.com","text":"model: opus-5.5 (high — plan: interview and detailed plan)"}
+{"ts":"2026-11-11T05:34:58Z","id":"isk-6hcb","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.6.0 에디터 egui 이주와 옛 스택 제거"}
+{"ts":"2026-11-11T05:34:58Z","id":"isk-2c0l","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.7.0 게임 루프와 ECS 코어"}
+{"ts":"2026-11-11T05:34:58Z","id":"isk-aj83","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.8.0 스프라이트 렌더 파이프라인: 배칭·아틀라스·카메라·레이어"}
+{"ts":"2026-11-11T05:34:58Z","id":"isk-7npd","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.9.0 게임 프로젝트와 isekai CLI"}
+{"ts":"2026-11-11T05:34:58Z","id":"isk-75a6","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.10.0 입력과 행동 매핑"}
+{"ts":"2026-11-11T05:34:58Z","id":"isk-l1bo","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.11.0 헤드리스 실행과 시트 CLI"}
+{"ts":"2026-11-11T05:34:58Z","id":"isk-iqox","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.12.0 MCP 서버"}
+{"ts":"2026-11-11T05:34:58Z","id":"isk-8lav","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.13.0 rhai 스크립트"}
+{"ts":"2026-11-11T05:34:58Z","id":"isk-w9ge","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.14.0 Rapier2D 물리"}
+{"ts":"2026-11-11T05:34:58Z","id":"isk-aeqa","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.15.0 씬·씬 매니저·타일맵"}
+{"ts":"2026-11-11T05:34:58Z","id":"isk-p0i5","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.16.0 프리팹과 맵 인스턴스"}
+{"ts":"2026-11-11T05:34:58Z","id":"isk-50nz","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.17.0 실행 중 게임 제어"}
+{"ts":"2026-11-11T05:34:58Z","id":"isk-cn5g","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.18.0 오디오: 믹싱과 2D 공간 음향"}
+{"ts":"2026-11-11T05:34:58Z","id":"isk-6k2c","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.19.0 UI/HUD와 텍스트"}
+{"ts":"2026-11-11T05:34:58Z","id":"isk-dnp6","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.20.0 성능 예산"}
+{"ts":"2026-11-11T05:34:58Z","id":"isk-bv4l","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.21.0 데스크톱 플랫폼과 패키징"}
+{"ts":"2026-11-11T05:34:58Z","id":"isk-cmzv","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.22.0 Android"}
+{"ts":"2026-11-11T05:34:58Z","id":"isk-5ny2","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.23.0 iOS"}
+{"ts":"2026-11-11T05:34:58Z","id":"isk-a6aa","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v1.0.0 1.0 출시: 형식 고정·예제 게임·문서"}
+{"ts":"2026-11-11T05:35:07Z","id":"isk-9tfj","kind":"status","by":"Raven","by_email":"hong18s@gmail.com","from":"todo","to":"done","note":"흡수(2026-11-11 로드맵 결정): 내용은 v0.7.0 에픽 isk-2c0l \"게임 루프와 ECS 코어\"의 흡수한 backlog 절로 옮겼다. \"스크립트는 지금 넣지 않는다\"는 rhai 결정으로 대체됐다."}
+{"ts":"2026-11-11T05:35:07Z","id":"isk-fy7v","kind":"status","by":"Raven","by_email":"hong18s@gmail.com","from":"todo","to":"done","note":"흡수(2026-11-11 로드맵 결정): 내용은 v0.16.0 에픽 isk-p0i5 \"프리팹과 맵 인스턴스\"의 흡수한 backlog 절로 옮겼다. 스크립트 엔진 제외는 rhai 결정으로 대체됐다."}
