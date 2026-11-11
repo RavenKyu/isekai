@@ -41,8 +41,10 @@ egui `Context`는 인스턴스별 상태이므로 기존 ImGui처럼 전역 컨�
 
 egui 0.37은 기본 feature에 폰트를 포함하지 않는다. workspace 의존성에서 `default_fonts`를
 명시해 Latin·기호를 복구하고, `isekai-editor::fonts::context()`가 내장 나눔고딕 Regular를
-Proportional·Monospace 양쪽의 마지막 fallback으로 붙인다. 한글 음절 11,172자와 붙여 넣은
-한글 문자열을 표시할 수 있으며, IME 조합은 지원 범위에 포함하지 않는다.
+Proportional·Monospace 양쪽의 마지막 fallback으로 붙인다. 한글 음절 11,172자를 표시하고,
+egui에 들어온 붙여넣기(`Paste`) 문자열의 한글도 그대로 입력·표시한다. 다만 `egui-winit`의
+`clipboard` feature를 켜지 않아 앱 안의 대체 클립보드만 쓰므로, 앱 밖에서 복사한 글은 붙여 넣을 수 없다.
+IME 조합은 지원 범위에 포함하지 않는다.
 이 fallback은 한글을 고정폭으로 바꾸지는 않는다. OS 폰트 설치나 실행 중 다운로드는 필요 없다.
 자산의 OFL 전문·출처·버전·SHA256은 [폰트 기록](../assets/fonts/nanum-gothic/README.md)에 있다.
 
@@ -53,17 +55,20 @@ scripts/build-web-isekai.sh --dev
 scripts/smoke-web-isekai.sh --dev
 ```
 
-단위 검사는 설정된 두 family에서 `has_glyph`로 Latin·기호와 한글 음절 전체를 조회하며,
-대체 글리프를 성공으로 세지 않는다. dev 스모크는 실제 셸을 연 뒤 별도 라벨 띠에
-`A`, `é`, `가`, `힣`과 없는 문자 U+10FFFF를 그린다. 동일한 GPU framebuffer에서
-각 문자의 흰색 픽셀 mask를 그 family의 대체 글리프 mask와 비교하므로 빈 네모도 실패한다.
+단위 검사는 설정한 두 family에서 `has_glyph`로 Latin·기호와 한글 음절 전체를 조회하며,
+대체 글리프는 성공으로 세지 않는다. dev 스모크는 실제 셸을 연 뒤 별도 라벨 띠에
+`A`, `é`, `가`, `힣`과 없는 문자 U+10FFFF를 그린다. 같은 GPU framebuffer에서
+각 문자의 흰색 픽셀 mask를 해당 family의 대체 글리프 mask와 비교하므로 빈 네모도 실패로 처리한다.
 이 검사는 네이티브·웹의 공통 readback 경로에서 수행한다. 일반 실행에는 검사 띠가 나오지 않는다.
-`é`는 기본 폰트, `가`·`힣`은 한글 fallback의 누락을 잡는다.
+기본 폰트가 빠지면 대체 글리프 control이 비거나(나눔고딕의 `.notdef`는 빈 글리프다) `é`가 대체
+글리프와 같아져 실패하고, 한글 fallback이 빠지면 `가`·`힣`에서 실패한다.
 실패는 `isekai-smoke: fail glyph probe: ...`로 보고한다.
+검사 띠는 셸의 도형과 따로 tessellate해 맨 위에 그리고, 판정한 뒤 readback 사본에서 지운다.
+따라서 출력 계약의 `vtx`·`lit`은 띠를 빼고 셸만 센다.
 
 폰트는 optional editor 안에서만 `include_bytes!`로 넣는다. `scripts/check-no-egui.sh`는
-두 target의 그래프와 네이티브 기호 검사에 더해, 새 비dev native/wasm 산출물에 저장소의
-폰트 원본 bytes가 포함되지 않았는지 검사한다.
+두 target의 그래프, 비dev 네이티브 실행 파일의 기호(`nm`), 비dev wasm `name` section의 함수
+이름에 더해 두 산출물에 저장소의 폰트 원본 bytes가 포함되지 않았는지도 검사한다.
 
 ### isekai-smoke 출력 계약
 

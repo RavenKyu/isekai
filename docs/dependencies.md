@@ -23,9 +23,9 @@ v0.6.0까지 남겨 둔다. 두 스택의 부재 검사는 각각 `check-no-egui
 egui 0.37의 기본 feature는 빈 목록이므로 `default_fonts`를 명시한다. 이에 따라 잠긴
 `epaint_default_fonts` 0.37.0이 기본 Latin·기호를 제공한다. 한글은
 `assets/fonts/nanum-gothic/NanumGothic-Regular.ttf`(3.020, 2,054,744 bytes)를
-`isekai-editor`에서만 컴파일 시 포함한다. 이 파일은 수정하지 않은 SIL OFL 1.1 자산이며,
+`isekai-editor`에서만 컴파일할 때 포함한다. 이 파일은 수정하지 않은 SIL OFL 1.1 자산이며,
 [자산 기록](../assets/fonts/nanum-gothic/README.md)에 출처 revision·불변 다운로드 URL·SHA256과
-라이선스 전문 경로를 적었다. 두 font family의 fallback으로 사용하며 한글 음절 11,172자를 덮는다.
+라이선스 전문 경로를 적었다. 두 font family의 fallback으로 사용하며 한글 음절 11,172자를 지원한다.
 게임 텍스트 렌더링은 이 셸 폰트와 별개다. 기본·한글 폰트 모두 비dev native/wasm에는 포함하지 않는다.
 
 

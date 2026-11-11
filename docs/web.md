@@ -31,9 +31,10 @@ CLI 버전의 정본은 `Cargo.lock`에 잠긴 `wasm-bindgen` 버전이다. 주 
 완료된 설치의 버전이 정본과 다르면 실패한다.
 
 dev 빌드는 egui 기본 폰트와 OFL 나눔고딕 Regular를 wasm에 내장한다. OS 폰트나 별도 폰트
-다운로드 없이 한글 음절 전체와 붙여 넣은 한글을 표시하며, 비dev wasm에는 폰트가 들어가지 않는다.
+다운로드 없이 한글 음절 전체를 표시하며, 비dev wasm에는 폰트가 들어가지 않는다.
+브라우저 클립보드는 연결하지 않았으므로 페이지 밖에서 복사한 글은 붙여 넣을 수 없다.
 `--dev` 스모크는 실제 canvas readback에서 두 family의 Latin·한글을 대체 글리프와 비교한다.
-검사 띠와 실패 판정은 [egui 셸 폰트](development.md#egui-셸-폰트)에 설명되어 있다.
+검사 띠와 실패 판정은 [egui 셸 폰트](development.md#egui-셸-폰트)에서 설명한다.
 
 지원하는 URL 쿼리는 `play=example`, `animation=cycle`(`clip` 별칭 허용), `smoke=3`,
 `backend=auto|webgpu|webgl2`다. `auto`는 WebGPU 어댑터·장치 요청이 실패하면
