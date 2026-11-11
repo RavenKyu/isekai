@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>isekai</title><link rel="icon" href="data:,">
+<style>html,body{margin:0;background:#000;color:#ddd}canvas{width:1280px;height:720px;max-width:100%;display:block}pre{white-space:pre-wrap}</style>
+<canvas id="isekai-canvas" tabindex="0"></canvas><pre id="isekai-log"></pre>
+<script type="module">
+const log=document.getElementById('isekai-log');
+const fail=reason=>{log.dataset.error='true';log.textContent='isekai-smoke: fail '+String(reason).replace(/\s+/g,' ')+'\n';};
+window.addEventListener('error',e=>fail(e.message));
+window.addEventListener('unhandledrejection',e=>fail(e.reason));
+try{const {default:init}=await import('./isekai.js');await init();}catch(error){fail(error);}
+</script></html>

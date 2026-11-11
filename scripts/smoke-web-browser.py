@@ -10,7 +10,7 @@ import sys
 import time
 
 
-def main(browser, url, directory):
+def main(browser, url, directory, log_id="rn-log", prefix="rn-smoke:", canvas_id="canvas", no_webgpu="0"):
     directory = pathlib.Path(directory)
     # Chrome reads FD 3 and writes FD 4. The tiny exec wrapper maps our ordinary
     # subprocess pipes to those descriptors without a TCP debugging listener.
@@ -19,6 +19,8 @@ def main(browser, url, directory):
                '--use-angle=swiftshader', '--no-first-run', '--no-default-browser-check',
                '--enable-logging=stderr', '--log-level=0', '--remote-debugging-pipe',
                '--window-size=1280,900', '--user-data-dir=' + str(directory / 'chrome-profile')]
+    if no_webgpu == '1':
+        command.append('--disable-features=WebGPU')
     with (directory / 'chrome.log').open('w') as log:
         child = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=log)
         (directory / 'browser.pid').write_text(str(child.pid))
@@ -80,11 +82,11 @@ def main(browser, url, directory):
             while time.monotonic() < poll_deadline:
                 result = call('Runtime.evaluate', {
                     'expression': "(log => log ? [log.dataset.ready === 'true', log.textContent]"
-                                  " : [false, ''])(document.getElementById('rn-log'))",
+                                  " : [false, ''])(document.getElementById('rn-log'))".replace("rn-log", log_id),
                     'returnByValue': True,
                 }, session)
                 ready, text = result.get('result', {}).get('value') or [False, '']
-                if ready or errors or 'rn-smoke:' in text:
+                if ready or errors or prefix in text:
                     break
                 time.sleep(0.05)
             if ready and not errors:
@@ -92,7 +94,7 @@ def main(browser, url, directory):
                     'expression': 'new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))',
                     'awaitPromise': True,
                 }, session)
-                call('Runtime.evaluate', {'expression': "document.getElementById('canvas').focus()"}, session)
+                call('Runtime.evaluate', {'expression': "document.getElementById('canvas').focus()".replace("canvas", canvas_id)}, session)
                 for kind, repeat in [('keyDown', False), ('keyDown', True), ('keyUp', False)]:
                     call('Input.dispatchKeyEvent', {
                         'type': kind, 'code': 'Backquote', 'key': '`',
@@ -103,11 +105,11 @@ def main(browser, url, directory):
             line = ''
             while time.monotonic() < poll_deadline:
                 result = call('Runtime.evaluate', {
-                    'expression': "document.getElementById('rn-log')?.textContent || ''",
+                    'expression': "document.getElementById('rn-log')?.textContent || ''".replace("rn-log", log_id),
                     'returnByValue': True,
                 }, session)
                 line = result.get('result', {}).get('value', '')
-                if errors or 'rn-smoke:' in line:
+                if errors or prefix in line:
                     break
                 time.sleep(0.05)
             dom = call('Runtime.evaluate', {'expression': 'document.documentElement.outerHTML',
