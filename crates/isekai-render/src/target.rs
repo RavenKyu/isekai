@@ -148,11 +148,12 @@ impl Blit {
     }
 }
 pub struct SurfaceTarget {
-    pub surface: wgpu::Surface<'static>,
-    pub config: wgpu::SurfaceConfiguration,
+    // Render resources are released before the surface and its owned window handle.
     pub frame: FrameTarget,
     blit: Blit,
     bind: wgpu::BindGroup,
+    pub surface: wgpu::Surface<'static>,
+    pub config: wgpu::SurfaceConfiguration,
 }
 impl SurfaceTarget {
     pub fn new(
