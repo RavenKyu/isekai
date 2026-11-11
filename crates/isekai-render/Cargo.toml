@@ -1,0 +1,13 @@
+[package]
+name = "isekai-render"
+version = "0.5.0"
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+isekai-core = { path = "../isekai-core" }
+wgpu.workspace = true
+bytemuck.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+pollster.workspace = true
