@@ -1,6 +1,8 @@
 mod app;
 mod cli;
 mod input;
+#[cfg(not(target_arch = "wasm32"))]
+mod native_probe;
 mod playback;
 mod smoke;
 #[cfg(not(target_arch = "wasm32"))]

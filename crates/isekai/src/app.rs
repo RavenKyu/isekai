@@ -32,6 +32,8 @@ pub struct App {
     pub result: Result<Option<String>, String>,
     done: bool,
     pending_read: Option<(Readback, u64, bool, usize)>,
+    #[cfg(not(target_arch = "wasm32"))]
+    probe: crate::native_probe::NativeProbe,
     #[cfg(target_arch = "wasm32")]
     proxy: Option<winit::event_loop::EventLoopProxy<UserEvent>>,
     #[cfg(target_arch = "wasm32")]
@@ -50,6 +52,8 @@ impl App {
             result: Ok(None),
             done: false,
             pending_read: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            probe: Default::default(),
             #[cfg(target_arch = "wasm32")]
             proxy: None,
             #[cfg(target_arch = "wasm32")]
@@ -59,6 +63,13 @@ impl App {
         }
     }
     fn fail(&mut self, event_loop: &ActiveEventLoop, error: String) {
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.smoke.is_some() {
+            eprintln!(
+                "isekai-smoke-stage: failure missing={}",
+                self.probe.missing_stage()
+            );
+        }
         if !self.done {
             self.result = Err(error);
             self.done = true;
@@ -92,6 +103,9 @@ impl App {
             .map_err(|e| e.to_string())?;
         let gpu = pollster::block_on(Gpu::new(instance, Some(&surface)))?;
         self.render = Some(Render::new(window, gpu, surface, self.command.take())?);
+        if self.smoke.is_some() {
+            eprintln!("isekai-smoke-stage: window-mapped");
+        }
         Ok(())
     }
     fn frame(&mut self) -> Result<(), String> {
@@ -162,6 +176,10 @@ impl App {
         r.target.blit(&mut encoder, &view);
         r.gpu.queue.submit([encoder.finish()]);
         r.gpu.queue.present(surface);
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.smoke.is_some() {
+            self.probe.presented();
+        }
         if self
             .smoke
             .as_ref()
@@ -193,8 +211,6 @@ impl App {
         if let Some(smoke) = self.smoke.as_mut() {
             match smoke.finish_frame(now, visible, vtx, lit)? {
                 Step::SendKeys => {
-                    #[cfg(not(target_arch = "wasm32"))]
-                    eprintln!("isekai-smoke: ready");
                     #[cfg(target_arch = "wasm32")]
                     crate::web::ready();
                 }
@@ -326,11 +342,26 @@ impl ApplicationHandler<UserEvent> for App {
         #[cfg(feature = "dev")]
         if let Some(r) = self.render.as_mut() {
             if let WindowEvent::KeyboardInput { event, .. } = &event {
-                r.dev.on_key(&crate::input::convert(event, self.modifiers));
+                let key = crate::input::convert(event, self.modifiers);
+                #[cfg(not(target_arch = "wasm32"))]
+                let before = r.dev.tools.visible;
+                r.dev.on_key(&key);
+                #[cfg(not(target_arch = "wasm32"))]
+                if self.smoke.is_some() {
+                    self.probe.key(&key, before != r.dev.tools.visible);
+                }
             }
             r.dev.on_window_event(&r.window, &event);
         }
         match event {
+            WindowEvent::Focused(focused) => {
+                #[cfg(not(target_arch = "wasm32"))]
+                if self.smoke.is_some() {
+                    self.probe.focused(focused);
+                }
+                #[cfg(target_arch = "wasm32")]
+                let _ = focused;
+            }
             WindowEvent::CloseRequested => {
                 if self.smoke.is_some() {
                     self.fail(event_loop, "window closed before smoke completed".into());
@@ -355,6 +386,10 @@ impl ApplicationHandler<UserEvent> for App {
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 let key = crate::input::convert(&event, self.modifiers);
+                #[cfg(all(not(feature = "dev"), not(target_arch = "wasm32")))]
+                if self.smoke.is_some() {
+                    self.probe.key(&key, false);
+                }
                 if key.key == Key::Backquote
                     && key.pressed
                     && !key.repeat

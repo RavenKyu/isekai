@@ -2,43 +2,92 @@
 """Exercise the public executable with XTEST; stdout is matched in full."""
 import os
 import re
-import selectors
 import subprocess
 import sys
 import time
+import tempfile
 
 binary, mode = sys.argv[1:]
+short_only = mode == "dev-smoke"
+if short_only:
+    mode = "dev"
+
+
+class Session:
+    def __init__(self, args, env=None):
+        # Begin in the no-window-manager failure case: PointerRoot, pointer outside
+        # the app. Readiness must be earned by a delivered Focused(true).
+        if (env or os.environ).get('DISPLAY'):
+            subprocess.run(['xdotool', 'mousemove', '1590', '990', 'windowfocus', '1'], check=True)
+        self.error = tempfile.TemporaryFile()
+        self.process = subprocess.Popen([binary, *args], stdout=subprocess.PIPE,
+                                        stderr=self.error, text=True, env=env)
+
+    def diagnostics(self):
+        return os.pread(self.error.fileno(), 1024 * 1024, 0).decode(errors='replace')
+
+    def wait_stage(self, stage):
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if stage in self.diagnostics():
+                return
+            assert self.process.poll() is None, self.diagnostics()
+            time.sleep(0.01)
+        raise AssertionError('missing stage: ' + stage + '\n' + self.diagnostics())
+
+    def focus(self):
+        self.wait_stage('isekai-smoke-stage: window-mapped')
+        window = subprocess.check_output(['xdotool', 'search', '--sync', '--pid',
+                                         str(self.process.pid)], timeout=5, text=True).splitlines()[0]
+        subprocess.run(['xdotool', 'mousemove', '--window', window, '640', '360',
+                        'windowfocus', '--sync', window], check=True)
+        self.wait_stage('isekai-smoke: ready')
+        assert 'isekai-smoke-stage: focused=true' in self.diagnostics(), self.diagnostics()
+        assert 'isekai-smoke-stage: first-frame' in self.diagnostics(), self.diagnostics()
+
+    def finish(self):
+        stdout, _ = self.process.communicate(timeout=8)
+        return self.process.returncode, stdout, self.diagnostics()
+
+    def close(self):
+        if self.process.poll() is None:
+            self.process.kill()
+            self.process.communicate()
+        self.error.close()
 
 
 def run(args, probe=True, env=None):
-    process = subprocess.Popen([binary, *args], stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE, text=True, env=env)
+    session = Session(args, env)
     try:
         if probe:
-            selector = selectors.DefaultSelector()
-            selector.register(process.stderr, selectors.EVENT_READ)
-            deadline = time.monotonic() + 8
-            ready = False
-            while time.monotonic() < deadline:
-                if process.poll() is not None:
-                    break
-                if selector.select(0.05):
-                    if process.stderr.readline().strip() == 'isekai-smoke: ready':
-                        ready = True
-                        break
-            selector.close()
-            assert ready, 'app did not become ready'
-            window = subprocess.check_output(['xdotool', 'search', '--sync', '--pid',
-                                              str(process.pid)], text=True).splitlines()[0]
-            subprocess.run(['xdotool', 'windowfocus', '--sync', window], check=True)
-            subprocess.run(['xdotool', 'keydown', 'grave', 'keydown', 'grave',
-                            'keyup', 'grave'], check=True)
-        stdout, stderr = process.communicate(timeout=8)
-        return process.returncode, stdout, stderr
+            session.focus()
+            subprocess.run(['xdotool', 'key', '--delay', '0', 'grave'], check=True)
+        return session.finish()
     finally:
-        if process.poll() is None:
-            process.kill()
-            process.communicate()
+        session.close()
+
+
+def input_repeat():
+    session = Session(['--smoke-frames', '100000'])
+    try:
+        session.focus()
+        subprocess.run(['xdotool', 'keydown', 'grave'], check=True)
+        time.sleep(0.8)
+        subprocess.run(['xdotool', 'keyup', 'grave'], check=True)
+        session.wait_stage('isekai-smoke-input:')
+        match = re.search(r'isekai-smoke-input: presses=(\d+) repeats=(\d+) releases=(\d+) toggles=(\d+)', session.diagnostics())
+        assert match, session.diagnostics()
+        presses, repeats, releases, toggles = map(int, match.groups())
+        assert presses == 1 and repeats > 0 and releases == 1, session.diagnostics()
+        assert toggles == (1 if mode == 'input-dev' else 0), session.diagnostics()
+        print('native autorepeat contracts: ok ' + match.group(0))
+    finally:
+        session.close()
+
+
+if mode.startswith('input-'):
+    input_repeat()
+    sys.exit(0)
 
 
 def ok(args, sprite=False):
@@ -46,6 +95,8 @@ def ok(args, sprite=False):
     values = re.fullmatch(r'isekai-smoke: ok frames=3 vtx=(\d+) lit=(\d+) backend=vulkan\n', stdout)
     assert code == 0 and values, (code, stdout, stderr)
     vtx, lit = map(int, values.groups())
+    assert 'isekai-smoke-stage: key-received' in stderr, stderr
+    assert stderr.count('isekai-smoke-stage: tools-toggled') == (1 if mode == 'dev' else 0), stderr
     if mode == 'dev':
         assert vtx > 0 and lit > 0, stdout
     else:
@@ -53,6 +104,9 @@ def ok(args, sprite=False):
 
 
 ok(['--smoke-frames', '3'])
+if short_only:
+    print('dev three-frame smoke: ok')
+    sys.exit(0)
 ok(['play', 'tests/fixtures/example.sprites.json', 'cycle', '--smoke-frames', '3'], True)
 for args in [
     ['play', 'missing.json', '--smoke-frames', '1'],
