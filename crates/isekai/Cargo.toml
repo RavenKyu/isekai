@@ -8,6 +8,7 @@ rust-version.workspace = true
 dev = ["dep:isekai-editor"]
 
 [dependencies]
+egui.workspace = true
 isekai-editor = { path = "../isekai-editor", optional = true }
 isekai-core = { path = "../isekai-core" }
 isekai-render = { path = "../isekai-render" }
