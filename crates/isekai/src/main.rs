@@ -10,8 +10,8 @@ use clap::Parser;
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> std::process::ExitCode {
     let args: Vec<_> = std::env::args().collect();
-    let smoking = args.iter().any(|s| s == "--smoke-frames");
     let parsed = cli::Cli::try_parse_from(&args);
+    let smoking = cli::smoke_requested(&args, parsed.as_ref().ok());
     if let Err(error) = &parsed
         && error.exit_code() == 0
     {

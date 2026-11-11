@@ -91,6 +91,8 @@ def input_focus_snapshot():
         session.wait_stage('isekai-smoke-stage: first-frame')
         # The real press goes to PointerRoot. On focus, winit reports the held
         # key as a synthetic snapshot, which must not toggle the tools.
+        # The keyup must come before Xvfb's -ardelay (smoke-native-isekai.sh):
+        # the server's first autorepeat after focus arrives as a new press.
         subprocess.run(['xdotool', 'keydown', 'grave'], check=True)
         session.focus()
         session.wait_stage('isekai-smoke-stage: key-snapshot-ignored')
@@ -144,8 +146,10 @@ for args in [
 no_display = dict(os.environ)
 no_display.pop('DISPLAY', None)
 no_display.pop('WAYLAND_DISPLAY', None)
-code, stdout, stderr = run(['--smoke-frames', '1'], False, no_display)
-assert code != 0 and re.fullmatch(r'isekai-smoke: fail [^\n]+\n', stdout), (code, stdout, stderr)
+# clap accepts both spellings; each must keep the one-line failure contract.
+for args in (['--smoke-frames', '1'], ['--smoke-frames=1']):
+    code, stdout, stderr = run(args, False, no_display)
+    assert code != 0 and re.fullmatch(r'isekai-smoke: fail [^\n]+\n', stdout), (args, code, stdout, stderr)
 code, stdout, stderr = run(['--smoke-frames', '1'], False)
 assert code != 0 and ('did not arrive within 5s' in stdout or 'did not open within 5s' in stdout), (code, stdout, stderr)
 print('native isekai subprocess contracts: ok')

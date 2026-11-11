@@ -198,12 +198,19 @@ mod tests {
     #[test]
     fn animation_selection_is_named_or_lexical() {
         let (_, mut sheet) = isekai_core::sprite::example();
+        assert_eq!(select_animation(&sheet, None).unwrap(), 0);
         assert_eq!(select_animation(&sheet, Some("cycle")).unwrap(), 0);
         assert!(
             select_animation(&sheet, Some("missing"))
                 .unwrap_err()
                 .contains("no animation named")
         );
+        // Without a name the lexically first animation plays, not the first stored.
+        let mut another = sheet.animations[0].clone();
+        another.name = "aaa".into();
+        sheet.animations.push(another);
+        assert_eq!(select_animation(&sheet, None).unwrap(), 1);
+        assert_eq!(select_animation(&sheet, Some("cycle")).unwrap(), 0);
         sheet.animations.clear();
         assert_eq!(
             select_animation(&sheet, None).unwrap_err(),

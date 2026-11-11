@@ -54,7 +54,7 @@ server_pid=$!
 printf '%s\n' "$server_pid" >"$scratch/server.pid"
 url=$(python3 "$script_dir/smoke-web-check.py" ready "$scratch/server.log")
 printf 'Web smoke URL: %s; evidence: %s\n' "$url" "$scratch" >&2
-# example is the code-only entry in src/sprite/embedded.rs.
+# example is the only code-drawn sheet the web build embeds (crates/isekai/src/app.rs).
 query='?smoke=3'
 if [[ ${1:-} == --play ]]; then query+='&play=example'; fi
 if [[ ${1:-} == --webgl2 ]]; then query+='&backend=webgl2'; fi

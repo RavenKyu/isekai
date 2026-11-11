@@ -55,6 +55,11 @@ fn pixel_contracts() {
             );
         }
     }
+    let variants: std::collections::HashSet<_> = Transform::ALL
+        .into_iter()
+        .map(|t| image.transformed(t).pixels)
+        .collect();
+    assert_eq!(variants.len(), 8, "fixture must distinguish all transforms");
     let sheet = SheetTexture::upload(&gpu, &pipeline.layout, &image).unwrap();
     let target = FrameTarget::new(&gpu, 4, 4);
     let mut batch = SpriteBatch::new(&gpu);
@@ -98,6 +103,42 @@ fn pixel_contracts() {
         read(&gpu, &copied),
         read(&gpu, &target),
         "presentation preserves bytes"
+    );
+    // A surface offering only sRGB formats gets fs_srgb: decoding before the
+    // hardware re-encodes keeps the stored bytes within rounding.
+    let srgb = Blit::new(&gpu, wgpu::TextureFormat::Rgba8UnormSrgb);
+    let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("sRGB surface stand-in"),
+        size: wgpu::Extent3d {
+            width: 4,
+            height: 4,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&Default::default());
+    let encoded = FrameTarget {
+        texture,
+        view,
+        width: 4,
+        height: 4,
+    };
+    let bind = srgb.bind(&gpu, &target);
+    let mut encoder = gpu.device.create_command_encoder(&Default::default());
+    srgb.encode(&mut encoder, &bind, &encoded.view);
+    gpu.queue.submit([encoder.finish()]);
+    let (expected, actual) = (read(&gpu, &target), read(&gpu, &encoded));
+    assert!(
+        expected
+            .iter()
+            .zip(&actual)
+            .all(|(e, a)| e.abs_diff(*a) <= 1),
+        "sRGB presentation preserves bytes: {expected:?} vs {actual:?}"
     );
     let image = RgbaImage {
         width: 2,
