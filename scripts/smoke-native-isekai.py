@@ -217,3 +217,20 @@ with tempfile.TemporaryDirectory(prefix='isekai-paths-') as directory:
         sidecar.write_text(json.dumps(original))
         code, stdout, stderr = run(['play', str(sidecar), '--smoke-frames', '1'], False)
         assert code != 0 and re.fullmatch(r'isekai-smoke: fail [^\n]+\n', stdout), (code, stdout, stderr)
+
+with tempfile.TemporaryDirectory(prefix='isekai-legacy-') as directory:
+    directory = pathlib.Path(directory)
+    (directory / 'example.png').write_bytes(pathlib.Path('tests/fixtures/example.png').read_bytes())
+    legacy = json.loads(pathlib.Path('tests/fixtures/example-v2.sprites.json').read_text())
+    for version in (1, 2):
+        legacy['version'] = version
+        sidecar = directory / f'v{version}.json'
+        sidecar.write_text(json.dumps(legacy))
+        ok(['play', str(sidecar), 'cycle', '--smoke-frames', '3'], True)
+    inner = directory / 'sidecars'
+    inner.mkdir()
+    (inner / 'example.png').symlink_to(directory / 'example.png')
+    sidecar = inner / 'outside.json'
+    sidecar.write_text(pathlib.Path('tests/fixtures/example.sprites.json').read_text())
+    code, stdout, stderr = run(['play', str(sidecar), '--smoke-frames', '1'], False)
+    assert code != 0 and re.fullmatch(r'isekai-smoke: fail [^\n]+\n', stdout), (code, stdout, stderr)
