@@ -37,6 +37,34 @@ egui `Context`는 인스턴스별 상태이므로 기존 ImGui처럼 전역 컨�
 진단 창은 파일 저장 경로를 연결하지 않으며 persistence·clipboard feature도 켜지 않는다.
 기존 `scripts/check-no-imgui.sh`와 `rusty-nails` 네이티브 스모크도 계속 실행한다.
 
+### egui 셸 폰트
+
+egui 0.37은 기본 feature에 폰트를 포함하지 않는다. workspace 의존성에서 `default_fonts`를
+명시해 Latin·기호를 복구하고, `isekai-editor::fonts::context()`가 내장 나눔고딕 Regular를
+Proportional·Monospace 양쪽의 마지막 fallback으로 붙인다. 한글 음절 11,172자와 붙여 넣은
+한글 문자열을 표시할 수 있으며, IME 조합은 지원 범위에 포함하지 않는다.
+이 fallback은 한글을 고정폭으로 바꾸지는 않는다. OS 폰트 설치나 실행 중 다운로드는 필요 없다.
+자산의 OFL 전문·출처·버전·SHA256은 [폰트 기록](../assets/fonts/nanum-gothic/README.md)에 있다.
+
+```sh
+cargo test --locked -p isekai-editor
+scripts/smoke-native-isekai.sh --dev
+scripts/build-web-isekai.sh --dev
+scripts/smoke-web-isekai.sh --dev
+```
+
+단위 검사는 설정된 두 family에서 `has_glyph`로 Latin·기호와 한글 음절 전체를 조회하며,
+대체 글리프를 성공으로 세지 않는다. dev 스모크는 실제 셸을 연 뒤 별도 라벨 띠에
+`A`, `é`, `가`, `힣`과 없는 문자 U+10FFFF를 그린다. 동일한 GPU framebuffer에서
+각 문자의 흰색 픽셀 mask를 그 family의 대체 글리프 mask와 비교하므로 빈 네모도 실패한다.
+이 검사는 네이티브·웹의 공통 readback 경로에서 수행한다. 일반 실행에는 검사 띠가 나오지 않는다.
+`é`는 기본 폰트, `가`·`힣`은 한글 fallback의 누락을 잡는다.
+실패는 `isekai-smoke: fail glyph probe: ...`로 보고한다.
+
+폰트는 optional editor 안에서만 `include_bytes!`로 넣는다. `scripts/check-no-egui.sh`는
+두 target의 그래프와 네이티브 기호 검사에 더해, 새 비dev native/wasm 산출물에 저장소의
+폰트 원본 bytes가 포함되지 않았는지 검사한다.
+
 ### isekai-smoke 출력 계약
 
 성공 시 stdout에 `isekai-smoke: ok frames=N vtx=M lit=K backend=B` 한 줄을 출력하고,
@@ -241,4 +269,4 @@ rn-smoke: ok frames=<N> vtx=<M> lit=<K>
 - `sheet ... exceeds GL_MAX_TEXTURE_SIZE ...`: 이미지 크기가 GL 최대 텍스처 한계를 넘은 경우다. 시트를 작게 나누거나 더 큰 텍스처를 지원하는 환경에서 연다.
 - `missing required tool`: 오류 메시지에 표시된 `Xvfb`, `python3`, `timeout`, `nm` 등의 도구를 설치한다.
 
-Decided in: isk-srq5, isk-35g9, isk-7w7b, isk-fcuz, isk-hk1c
+Decided in: isk-kznl, isk-srq5, isk-35g9, isk-7w7b, isk-fcuz, isk-hk1c

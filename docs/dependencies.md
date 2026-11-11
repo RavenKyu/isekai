@@ -20,6 +20,14 @@ egui 릴리스가 요구하는 `egui-wgpu`·`egui-winit`의 `wgpu`·`winit` 버�
 `x11`과 `wayland`만 켠다. 기존 SDL3·dear-imgui 로컬 패치와 emsdk는 `rusty-nails` 유지를 위해
 v0.6.0까지 남겨 둔다. 두 스택의 부재 검사는 각각 `check-no-egui.sh`와 `check-no-imgui.sh`가 담당한다.
 
+egui 0.37의 기본 feature는 빈 목록이므로 `default_fonts`를 명시한다. 이에 따라 잠긴
+`epaint_default_fonts` 0.37.0이 기본 Latin·기호를 제공한다. 한글은
+`assets/fonts/nanum-gothic/NanumGothic-Regular.ttf`(3.020, 2,054,744 bytes)를
+`isekai-editor`에서만 컴파일 시 포함한다. 이 파일은 수정하지 않은 SIL OFL 1.1 자산이며,
+[자산 기록](../assets/fonts/nanum-gothic/README.md)에 출처 revision·불변 다운로드 URL·SHA256과
+라이선스 전문 경로를 적었다. 두 font family의 fallback으로 사용하며 한글 음절 11,172자를 덮는다.
+게임 텍스트 렌더링은 이 셸 폰트와 별개다. 기본·한글 폰트 모두 비dev native/wasm에는 포함하지 않는다.
+
 
 ## 고정값과 이유
 
@@ -133,4 +141,4 @@ Rust의 `-fwasm-exceptions`와 Emscripten 기본 `WASM_LEGACY_EXCEPTIONS` 조합
    실측한 Rust/LLVM·emcc 버전, 성공한 플래그 설정, 크기와 검사 결과를 트래커에 기록한다.
    [CI 상태](README.md#더-읽기와-ci-상태)에 적힌 원격 CI 미실행과 로컬 성공을 구분한다.
 
-Decided in: isk-srq5, isk-35g9, isk-7w7b, isk-fcuz
+Decided in: isk-kznl, isk-srq5, isk-35g9, isk-7w7b, isk-fcuz

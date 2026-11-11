@@ -30,6 +30,11 @@ CLI 버전의 정본은 `Cargo.lock`에 잠긴 `wasm-bindgen` 버전이다. 주 
 검사한다. 완료 표시가 없으면 중단된 설치로 보고 다시 설치한다. 외부 `PATH`의 CLI는 쓰지 않으며,
 완료된 설치의 버전이 정본과 다르면 실패한다.
 
+dev 빌드는 egui 기본 폰트와 OFL 나눔고딕 Regular를 wasm에 내장한다. OS 폰트나 별도 폰트
+다운로드 없이 한글 음절 전체와 붙여 넣은 한글을 표시하며, 비dev wasm에는 폰트가 들어가지 않는다.
+`--dev` 스모크는 실제 canvas readback에서 두 family의 Latin·한글을 대체 글리프와 비교한다.
+검사 띠와 실패 판정은 [egui 셸 폰트](development.md#egui-셸-폰트)에 설명되어 있다.
+
 지원하는 URL 쿼리는 `play=example`, `animation=cycle`(`clip` 별칭 허용), `smoke=3`,
 `backend=auto|webgpu|webgl2`다. `auto`는 WebGPU 어댑터·장치 요청이 실패하면
 새 GL 인스턴스를 만들어 WebGL2로 재시도한다. Rust 진입점이 URL 쿼리를 CLI와 동일한 clap 인자로 변환한다.
@@ -203,4 +208,4 @@ stderr에 출력되는 `evidence:` 경로는 `target/smoke-web.<임의값>/`이�
 | `dev tools did not open within 5s`·`smoke key probe did not arrive within 5s` | evidence와 준비 속성, canvas 포커스, CDP 키가 SDL에 도착하는지 확인한다. 고정 sleep이나 앱 내부의 강제 표시로 우회하지 않는다. |
 | `missing smoke result`·DevTools timeout | 결과 줄이 없는지, 앱이 초기화·RAF·렌더 중 멈췄는지 증거 로그를 본다. 페이지가 응답하지 않아 DevTools도 멈추면 DOM과 스크린샷은 남지 않고 `chrome.log`와 `server.log`만 남는다. CLI `--dump-dom`만으로 완료 시점을 추정하지 않는다. |
 
-Decided in: isk-srq5, isk-35g9, isk-7w7b, isk-fcuz
+Decided in: isk-kznl, isk-srq5, isk-35g9, isk-7w7b, isk-fcuz
