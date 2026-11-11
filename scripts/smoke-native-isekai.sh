@@ -15,5 +15,6 @@ unset WAYLAND_DISPLAY
 export WGPU_BACKEND=vulkan VK_LOADER_DRIVERS_SELECT='*lvp*'
 timeout --kill-after=2s 58s xvfb-run -a bash -c '
   cargo test --locked -p isekai-render -- --ignored &&
+  cargo test --locked -p isekai "$@" --bin isekai -- --ignored &&
   cargo test --locked -p isekai "$@" --test smoke -- --ignored
 ' bash "${args[@]}"

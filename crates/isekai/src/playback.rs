@@ -133,3 +133,81 @@ impl Playback {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    #[ignore = "requires a GPU adapter; run scripts/smoke-native-isekai.sh"]
+    fn example_scale_pivot_and_hole() {
+        let gpu = pollster::block_on(Gpu::new(Gpu::instance(), None)).unwrap();
+        let pipeline = SpritePipeline::new(&gpu);
+        let (image, sheet) = isekai_core::sprite::example();
+        let mut play = Playback::from_image(image, sheet, Some("cycle"), &gpu, &pipeline).unwrap();
+        let target = isekai_render::FrameTarget::new(&gpu, 1280, 720);
+        let mut batch = SpriteBatch::new(&gpu);
+        play.fill(0, 1280, 720, &mut batch).unwrap();
+        batch.upload(&gpu);
+        let mut encoder = gpu.device.create_command_encoder(&Default::default());
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: None,
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &target.view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                ..Default::default()
+            });
+            batch.draw(&mut pass, &pipeline, &[&play.texture]);
+        }
+        gpu.queue.submit([encoder.finish()]);
+        let read = isekai_render::Readback::begin(&gpu, &target);
+        gpu.device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .unwrap();
+        let pixels = read.try_finish().unwrap().unwrap();
+        let black =
+            |x: usize, y: usize| pixels[(y * 1280 + x) * 4..(y * 1280 + x) * 4 + 3] == [0, 0, 0];
+        for (x, y) in [
+            (551, 272),
+            (552, 271),
+            (728, 272),
+            (552, 448),
+            (618, 338),
+            (640, 360),
+            (661, 381),
+        ] {
+            assert!(black(x, y), "expected black at {x},{y}");
+        }
+        for (x, y) in [
+            (552, 272),
+            (727, 447),
+            (617, 360),
+            (662, 360),
+            (640, 337),
+            (640, 382),
+        ] {
+            assert!(!black(x, y), "expected sprite at {x},{y}");
+        }
+    }
+    #[test]
+    fn animation_selection_is_named_or_lexical() {
+        let (_, mut sheet) = isekai_core::sprite::example();
+        assert_eq!(select_animation(&sheet, Some("cycle")).unwrap(), 0);
+        assert!(
+            select_animation(&sheet, Some("missing"))
+                .unwrap_err()
+                .contains("no animation named")
+        );
+        sheet.animations.clear();
+        assert_eq!(
+            select_animation(&sheet, None).unwrap_err(),
+            "sprite sheet has no animations"
+        );
+    }
+}
