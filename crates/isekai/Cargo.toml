@@ -3,3 +3,17 @@ name = "isekai"
 version = "0.5.0"
 edition.workspace = true
 rust-version.workspace = true
+
+[features]
+dev = []
+
+[dependencies]
+isekai-core = { path = "../isekai-core" }
+isekai-render = { path = "../isekai-render" }
+wgpu.workspace = true
+winit.workspace = true
+clap.workspace = true
+web-time.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+pollster.workspace = true

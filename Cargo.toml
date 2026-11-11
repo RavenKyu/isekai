@@ -8,6 +8,9 @@ edition = "2024"
 rust-version = "1.95"
 
 [workspace.dependencies]
+winit = "0.30.13"
+clap = { version = "4", features = ["derive"] }
+web-time = "1"
 wgpu = { version = "30.0", features = ["webgl"] }
 bytemuck = { version = "1", features = ["derive"] }
 pollster = "1"
