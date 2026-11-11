@@ -85,6 +85,30 @@ def input_repeat():
         session.close()
 
 
+def input_focus_snapshot():
+    session = Session(['--smoke-frames', '100000'])
+    try:
+        session.wait_stage('isekai-smoke-stage: first-frame')
+        # The real press goes to PointerRoot. On focus, winit reports the held
+        # key as a synthetic snapshot, which must not toggle the tools.
+        subprocess.run(['xdotool', 'keydown', 'grave'], check=True)
+        session.focus()
+        session.wait_stage('isekai-smoke-stage: key-snapshot-ignored')
+        subprocess.run(['xdotool', 'keyup', 'grave'], check=True)
+        session.wait_stage('isekai-smoke-input: presses=0 repeats=0 releases=1 toggles=0')
+        subprocess.run(['xdotool', 'key', '--delay', '0', 'grave'], check=True)
+        expected = 1 if mode == 'focus-dev' else 0
+        session.wait_stage(f'isekai-smoke-input: presses=1 repeats=0 releases=2 toggles={expected}')
+        print('native focus snapshot contracts: ok')
+    finally:
+        session.close()
+
+
+if mode.startswith('focus-'):
+    input_focus_snapshot()
+    sys.exit(0)
+
+
 if mode.startswith('input-'):
     input_repeat()
     sys.exit(0)

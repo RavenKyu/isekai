@@ -339,9 +339,29 @@ impl ApplicationHandler<UserEvent> for App {
             self.pending_events.push((_id, event));
             return;
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.smoke.is_some()
+            && matches!(
+                &event,
+                WindowEvent::KeyboardInput {
+                    is_synthetic: true,
+                    ..
+                }
+            )
+        {
+            eprintln!("isekai-smoke-stage: key-snapshot-ignored");
+        }
+        // Winit's focus snapshot describes held state; it is not a new press.
+        // Keep forwarding every event to egui, but route only real key events
+        // into toggles and the smoke probe.
         #[cfg(feature = "dev")]
         if let Some(r) = self.render.as_mut() {
-            if let WindowEvent::KeyboardInput { event, .. } = &event {
+            if let WindowEvent::KeyboardInput {
+                event,
+                is_synthetic: false,
+                ..
+            } = &event
+            {
                 let key = crate::input::convert(event, self.modifiers);
                 #[cfg(not(target_arch = "wasm32"))]
                 let before = r.dev.tools.visible;
@@ -384,7 +404,11 @@ impl ApplicationHandler<UserEvent> for App {
                     shift: m.shift_key(),
                 };
             }
-            WindowEvent::KeyboardInput { event, .. } => {
+            WindowEvent::KeyboardInput {
+                event,
+                is_synthetic: false,
+                ..
+            } => {
                 let key = crate::input::convert(&event, self.modifiers);
                 #[cfg(all(not(feature = "dev"), not(target_arch = "wasm32")))]
                 if self.smoke.is_some() {

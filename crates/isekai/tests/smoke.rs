@@ -42,3 +42,13 @@ fn native_dev_smoke_stability() {
         run("dev-smoke");
     }
 }
+
+#[test]
+#[ignore = "requires X11 focus snapshots; run scripts/smoke-native-isekai.sh"]
+fn native_focus_snapshot() {
+    run(if cfg!(feature = "dev") {
+        "focus-dev"
+    } else {
+        "focus-blank"
+    });
+}
