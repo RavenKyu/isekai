@@ -122,7 +122,14 @@ impl App {
             };
             let (now, visible, vtx) = (*now, *visible, *vtx);
             self.pending_read = None;
-            return self.finish_smoke(now, visible, vtx, lit_count(&pixels?));
+            let pixels = pixels?;
+            #[cfg(feature = "dev")]
+            if visible {
+                let r = self.render.as_ref().unwrap();
+                r.dev
+                    .check_glyphs(&pixels, r.target.frame.width, r.target.frame.height)?;
+            }
+            return self.finish_smoke(now, visible, vtx, lit_count(&pixels));
         }
         let now_ms = self.started.elapsed().as_millis() as u64;
         let r = self.render.as_mut().unwrap();
@@ -165,6 +172,7 @@ impl App {
             now_ms as f64 / 1000.0,
             &mut encoder,
             &r.target.frame,
+            self.smoke.is_some(),
         );
         #[cfg(not(feature = "dev"))]
         let vtx = 0;

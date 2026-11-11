@@ -22,7 +22,7 @@ for target in host wasm32-unknown-unknown; do
     fi
     graph=$(cargo tree -p isekai --locked -e normal,build --prefix none "${target_args[@]}") \
         || fail "cannot inspect non-dev graph ($target)"
-    if grep -Eq '^(egui|egui-wgpu|egui-winit|isekai-editor) v' <<<"$graph"; then
+    if grep -Eq '^(egui|egui-wgpu|egui-winit|epaint|epaint_default_fonts|isekai-editor) v' <<<"$graph"; then
         fail "egui dependency in non-dev graph ($target)"
     fi
     if grep -Eq '^(sdl3|sdl3-sys|dear-imgui[^ ]*) v' <<<"$graph"; then
@@ -30,7 +30,7 @@ for target in host wasm32-unknown-unknown; do
     fi
     graph=$(cargo tree -p isekai --locked -e normal,build --prefix none "${target_args[@]}" --features dev) \
         || fail "cannot inspect dev graph ($target)"
-    for package in egui egui-wgpu egui-winit isekai-editor; do
+    for package in egui egui-wgpu egui-winit epaint_default_fonts isekai-editor; do
         grep -q "^$package v" <<<"$graph" || fail "positive control missing $package ($target)"
     done
     if grep -Eq '^(sdl3|sdl3-sys|dear-imgui[^ ]*) v' <<<"$graph"; then
@@ -52,4 +52,27 @@ symbols=$(nm -C -- "$executable") || fail 'cannot read executable symbols'
 if [[ "$symbols" == *egui::* || "$symbols" == *isekai_editor* ]]; then
     fail 'egui symbol in non-dev executable'
 fi
-printf 'check-no-egui: ok graphs=host,wasm32-unknown-unknown symbols=%s\n' "$executable"
+# Build the non-dev wasm too: a host symbol check cannot prove its asset boundary.
+artifacts=$(cargo build -p isekai --locked --bin isekai --target wasm32-unknown-unknown --message-format=json "${args[@]}") \
+    || fail 'non-dev wasm build failed'
+wasm=$(python3 -c '
+import json,sys
+paths = [row["executable"] for line in sys.stdin if (row := json.loads(line)).get("reason") == "compiler-artifact"
+         and row.get("executable") and row["target"]["name"] == "isekai"]
+if len(paths) != 1:
+    sys.exit("expected one isekai wasm executable artifact")
+print(paths[0])' <<<"$artifacts") || fail 'cannot locate non-dev wasm'
+python3 - "$executable" "$wasm" <<'PY'
+from pathlib import Path
+import sys
+
+fonts = [path for path in Path('assets/fonts').rglob('*') if path.suffix in ('.ttf', '.otf')]
+if not fonts:
+    sys.exit('check-no-egui: fail no font assets to check')
+for artifact in sys.argv[1:]:
+    data = Path(artifact).read_bytes()
+    for font in fonts:
+        if font.read_bytes() in data:
+            sys.exit(f'check-no-egui: fail embedded font {font} in {artifact}')
+PY
+printf 'check-no-egui: ok graphs=host,wasm32-unknown-unknown symbols=%s fonts=absent(native,wasm)\n' "$executable"

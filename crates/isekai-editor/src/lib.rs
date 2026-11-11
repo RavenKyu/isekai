@@ -1,3 +1,5 @@
+pub mod fonts;
+mod glyph_probe;
 pub mod toggle;
 pub mod tools;
 use isekai_render::{FRAME_FORMAT, FrameTarget, Gpu};
@@ -8,10 +10,11 @@ pub struct DevShell {
     renderer: egui_wgpu::Renderer,
     pub tools: tools::DevTools,
     previous_time: Option<f64>,
+    glyph_probe: Option<glyph_probe::GlyphProbe>,
 }
 impl DevShell {
     pub fn new(gpu: &Gpu, window: &Window) -> Self {
-        let ctx = egui::Context::default();
+        let ctx = fonts::context();
         let state = egui_winit::State::new(
             ctx.clone(),
             egui::ViewportId::ROOT,
@@ -27,6 +30,7 @@ impl DevShell {
             renderer,
             tools: Default::default(),
             previous_time: None,
+            glyph_probe: None,
         }
     }
     pub fn on_key(&mut self, key: &isekai_core::input::KeyInput) {
@@ -44,12 +48,18 @@ impl DevShell {
         now: f64,
         encoder: &mut wgpu::CommandEncoder,
         frame: &FrameTarget,
+        smoke: bool,
     ) -> usize {
         let fps = self.previous_time.map_or(0., |t| (1. / (now - t)) as f32);
         self.previous_time = Some(now);
         let mut input = self.state.take_egui_input(window);
         input.time = Some(now);
-        let mut output = self.ctx.run_pass(input, |ctx| self.tools.draw(ctx, fps));
+        let mut output = self.ctx.run_pass(input, |ctx| {
+            self.tools.draw(ctx, fps);
+            if smoke && self.tools.visible {
+                self.glyph_probe = Some(glyph_probe::GlyphProbe::draw(ctx));
+            }
+        });
         self.state
             .handle_platform_output(window, output.platform_output);
         let jobs = self.ctx.tessellate(output.shapes, output.pixels_per_point);
@@ -96,5 +106,12 @@ impl DevShell {
         }
         output.textures_delta.clear();
         vtx
+    }
+
+    pub fn check_glyphs(&self, pixels: &[u8], width: u32, height: u32) -> Result<(), String> {
+        self.glyph_probe
+            .as_ref()
+            .ok_or("glyph probe: label strip was not drawn")?
+            .check(pixels, width, height)
     }
 }

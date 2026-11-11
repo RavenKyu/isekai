@@ -92,7 +92,7 @@ mod geometry_tests {
     }
     #[test]
     fn windows_and_visibility() {
-        let ctx = egui::Context::default();
+        let ctx = crate::fonts::context();
         ctx.style_mut_of(egui::Theme::Dark, |s| s.animation_time = 0.);
         ctx.style_mut_of(egui::Theme::Light, |s| s.animation_time = 0.);
         let mut tools = DevTools::default();
@@ -118,7 +118,7 @@ mod geometry_tests {
     }
     #[test]
     fn hidden_frame_releases_text_focus() {
-        let ctx = egui::Context::default();
+        let ctx = crate::fonts::context();
         let id = egui::Id::unique("text");
         let mut text = String::new();
         let mut output = ctx.run_pass(Default::default(), |ctx| {
