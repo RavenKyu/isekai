@@ -1,3 +1,4 @@
+pub mod edit;
 pub mod grid;
 pub use grid::Grid;
 pub mod example;
@@ -10,4 +11,3 @@ pub use example::example;
 pub use format::{Animation, Sprite, SpriteSheet};
 pub use timeline::{Mode, Timeline};
 pub use transform::Transform;
-
