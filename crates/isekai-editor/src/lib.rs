@@ -54,15 +54,22 @@ impl DevShell {
         self.previous_time = Some(now);
         let mut input = self.state.take_egui_input(window);
         input.time = Some(now);
+        let mut probe = None;
         let mut output = self.ctx.run_pass(input, |ctx| {
             self.tools.draw(ctx, fps);
             if smoke && self.tools.visible {
-                self.glyph_probe = Some(glyph_probe::GlyphProbe::draw(ctx));
+                probe = Some(glyph_probe::GlyphProbe::draw(ctx));
             }
         });
         self.state
             .handle_platform_output(window, output.platform_output);
-        let jobs = self.ctx.tessellate(output.shapes, output.pixels_per_point);
+        // Tessellate the smoke-only strip first, so `vtx` and egui's paint
+        // stats describe the shell alone; the strip is painted on top of it.
+        let probe_jobs = probe.map(|(probe, shapes)| {
+            self.glyph_probe = Some(probe);
+            self.ctx.tessellate(shapes, output.pixels_per_point)
+        });
+        let mut jobs = self.ctx.tessellate(output.shapes, output.pixels_per_point);
         let vtx = jobs
             .iter()
             .map(|p| match &p.primitive {
@@ -70,6 +77,7 @@ impl DevShell {
                 _ => 0,
             })
             .sum();
+        jobs.extend(probe_jobs.into_iter().flatten());
         for (id, deltas) in &output.textures_delta.set {
             for delta in deltas {
                 self.renderer
@@ -108,7 +116,9 @@ impl DevShell {
         vtx
     }
 
-    pub fn check_glyphs(&self, pixels: &[u8], width: u32, height: u32) -> Result<(), String> {
+    /// Judges the smoke-only glyph strip in a read-back frame, then clears the
+    /// strip so the caller's light count measures the shell alone.
+    pub fn check_glyphs(&self, pixels: &mut [u8], width: u32, height: u32) -> Result<(), String> {
         self.glyph_probe
             .as_ref()
             .ok_or("glyph probe: label strip was not drawn")?

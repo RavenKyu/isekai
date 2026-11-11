@@ -121,15 +121,19 @@ impl App {
                 return Ok(());
             };
             let (now, visible, vtx) = (*now, *visible, *vtx);
-            self.pending_read = None;
-            let pixels = pixels?;
+            // Judge the glyph strip with the size that was read, then count
+            // light without it: the strip must not stand in for the shell.
             #[cfg(feature = "dev")]
-            if visible {
-                let r = self.render.as_ref().unwrap();
-                r.dev
-                    .check_glyphs(&pixels, r.target.frame.width, r.target.frame.height)?;
-            }
-            return self.finish_smoke(now, visible, vtx, lit_count(&pixels));
+            let pixels = pixels.and_then(|mut pixels| {
+                if visible {
+                    let (width, height) = read.size();
+                    let dev = &self.render.as_ref().unwrap().dev;
+                    dev.check_glyphs(&mut pixels, width, height)?;
+                }
+                Ok(pixels)
+            });
+            self.pending_read = None;
+            return self.finish_smoke(now, visible, vtx, lit_count(&pixels?));
         }
         let now_ms = self.started.elapsed().as_millis() as u64;
         let r = self.render.as_mut().unwrap();

@@ -57,6 +57,10 @@ impl Readback {
             stride,
         }
     }
+    /// The size of the frame this readback copied; the target may have been resized since.
+    pub fn size(&self) -> (u32, u32) {
+        (self.width, self.height)
+    }
     pub fn try_finish(&self) -> Option<Result<Vec<u8>, String>> {
         let status = self.result.lock().unwrap().take()?;
         Some(status.and_then(|()| {

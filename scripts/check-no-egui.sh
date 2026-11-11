@@ -66,6 +66,34 @@ python3 - "$executable" "$wasm" <<'PY'
 from pathlib import Path
 import sys
 
+def leb128(data, at):
+    value = shift = 0
+    while True:
+        byte = data[at]
+        at += 1
+        value |= (byte & 0x7F) << shift
+        shift += 7
+        if byte < 0x80:
+            return value, at
+
+# The wasm counterpart of the nm check: its function names, from the custom
+# section called "name".
+wasm = Path(sys.argv[2]).read_bytes()
+if wasm[:4] != b'\0asm':
+    sys.exit(f'check-no-egui: fail not a wasm module: {sys.argv[2]}')
+names, at = [], 8
+while at < len(wasm):
+    size, start = leb128(wasm, at + 1)
+    if wasm[at] == 0:
+        length, title = leb128(wasm, start)
+        if wasm[title:title + length] == b'name':
+            names.append(wasm[title + length:start + size])
+    at = start + size
+if len(names) != 1 or b'isekai' not in names[0]:
+    sys.exit('check-no-egui: fail missing wasm function names (stripped wasm?)')
+if b'egui' in names[0]:
+    sys.exit('check-no-egui: fail egui name in non-dev wasm')
+
 fonts = [path for path in Path('assets/fonts').rglob('*') if path.suffix in ('.ttf', '.otf')]
 if not fonts:
     sys.exit('check-no-egui: fail no font assets to check')
@@ -75,4 +103,4 @@ for artifact in sys.argv[1:]:
         if font.read_bytes() in data:
             sys.exit(f'check-no-egui: fail embedded font {font} in {artifact}')
 PY
-printf 'check-no-egui: ok graphs=host,wasm32-unknown-unknown symbols=%s fonts=absent(native,wasm)\n' "$executable"
+printf 'check-no-egui: ok graphs=host,wasm32-unknown-unknown symbols=%s,%s fonts=absent(native,wasm)\n' "$executable" "$wasm"
