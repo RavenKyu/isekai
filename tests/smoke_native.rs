@@ -120,6 +120,8 @@ impl PlayFixture {
             "example.png",
             "example.sprites.json",
             "example-turned.sprites.json",
+            "example-v2.sprites.json",
+            "tile-animation-v2.sprites.json",
         ] {
             std::fs::copy(fixtures.join(name), owned.sheet.join(name)).unwrap();
         }
@@ -154,6 +156,34 @@ fn smoke_play() {
     );
     assert!(!timeout, "{output:?}");
     assert_success_line(&output, 3, true);
+    for (name, warning) in [
+        ("example-v2.sprites.json", false),
+        ("tile-animation-v2.sprites.json", true),
+    ] {
+        let path = fixture.sheet.join(name);
+        let (output, timeout) = run(
+            &[
+                "--play",
+                path.to_str().unwrap(),
+                "cycle",
+                "--smoke-frames",
+                "3",
+            ],
+            false,
+            Duration::from_secs(10),
+        );
+        assert!(!timeout, "{output:?}");
+        assert_success_line(&output, 3, true);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if warning {
+            assert!(
+                stderr.contains("(1, 0)") && stderr.contains("(2, 0)"),
+                "{stderr}"
+            );
+        } else {
+            assert!(!stderr.contains("dropped tile animation"), "{stderr}");
+        }
+    }
     let missing = fixture.sheet.join("missing.sprites.json");
     for args in [
         vec!["--play", missing.to_str().unwrap(), "--smoke-frames", "3"],

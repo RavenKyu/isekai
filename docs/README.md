@@ -60,7 +60,7 @@ dev도 검은 창으로 시작한다. 백틱 키(`Grave`, 보통 Esc 아래)를 
 키 반복 입력, Ctrl·Alt·GUI 조합 키, 텍스트 입력 중 누른 백틱은 도구를 토글하지 않는다.
 라벨은 ASCII 영어이며 한글 폰트가 없어 한글은 `?`로 보인다.
 
-네이티브 dev의 `Assets > Sprite Library`에서 PNG 가져오기, 격자·타일·sprite·clip 편집,
+네이티브 dev의 `Assets > Asset Library`에서 PNG 가져오기, 격자·타일·sprite·animation 편집,
 미리보기, 영역 후보와 타일셋 추출을 한다. [스프라이트 안내](sprites.md)에 저장 형식과
 사용 순서가 있다. `Guess`는 수동 적용하는 제안이며 큰 맵에서는 약 55초 멈춘 사례가 있다.
 
@@ -101,7 +101,7 @@ dev 빌드 뒤에는 `scripts/smoke-web.sh --dev`를 사용한다. 기대 모드
 다르면 검사에 실패하므로 각 스모크 실행 직전에 같은 모드로 빌드한다.
 
 같은 서버에서 `http://127.0.0.1:8080/?play=example`을 열면 코드 생성 예제를 재생한다.
-`&clip=cycle`로 clip을 지정할 수 있다. 웹에는 편집·추출·저장이 없다.
+`&animation=cycle`로 animation을 지정할 수 있다. 웹에는 편집·추출·저장이 없다.
 비dev 빌드 뒤 `scripts/smoke-web.sh --play`로 재생까지 검사한다.
 
 SDK 공유 위치, 다른 포트, release 빌드와 오류 진단은
@@ -111,7 +111,7 @@ SDK 공유 위치, 다른 포트, release 빌드와 오류 진단은
 
 ## 더 읽기와 CI 상태
 
-- [스프라이트 라이브러리](sprites.md): JSON 사이드카, 편집·추출, 네이티브·웹 재생.
+- [스프라이트 시트 안내](sprites.md): JSON 사이드카, 편집·추출, 네이티브·웹 재생.
 - [네이티브 개발과 검사](development.md): `App`, 드라이버, 종료, 테스트와 스모크 출력.
 - [웹 실행과 문제 해결](web.md): SDK 설치, 빌드 산출물, 서버와 브라우저 증거.
 - [의존성과 패치 관리](dependencies.md): 버전 정본, 승인된 패치, 판 올림 절차.

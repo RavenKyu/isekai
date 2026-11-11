@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "image": "example.png",
   "grid": {
     "tile": 16,
@@ -9,11 +9,17 @@
     ],
     "spacing": 0
   },
+  "next_id": 3,
   "tiles": [],
   "sprites": [
     {
+      "id": 1,
       "name": "turned",
       "kind": "set",
+      "canvas": [
+        2,
+        2
+      ],
       "parts": [
         {
           "col": 0,
@@ -47,18 +53,20 @@
       "pivot": [
         16.0,
         16.0
-      ]
+      ],
+      "props": {}
     }
   ],
-  "clips": [
+  "animations": [
     {
+      "id": 2,
       "name": "turned",
       "mode": "loop",
       "tags": [],
       "props": {},
       "frames": [
         {
-          "sprite": "turned",
+          "sprite_id": 1,
           "ms": 150
         }
       ]

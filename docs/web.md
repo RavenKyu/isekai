@@ -35,8 +35,8 @@ scripts/build-web.sh
 
 웹은 재생만 지원한다. `src/sprite/embedded.rs`의 예제 표가 코드로 생성한 RGBA 이미지와
 메타데이터를 제공하며 파일 preload나 사람 이미지 임베드는 없다. 서버 실행 후
-`http://127.0.0.1:8080/?play=example` 또는 `?play=example&clip=cycle`로 재생한다.
-clip을 생략하면 이름 순 첫 clip을 쓴다. URL의 `play`는 파일 경로가 아니라 임베드 이름이다.
+`http://127.0.0.1:8080/?play=example` 또는 `?play=example&animation=cycle`로 재생한다.
+animation을 생략하면 이름 순 첫 animation을 쓴다. 옛 링크의 `clip=`은 `animation=`의 별칭이다. URL의 `play`는 파일 경로가 아니라 임베드 이름이다.
 자세한 형식은 [스프라이트 안내](sprites.md#웹-재생)를 따른다.
 
 기본은 debug·비dev이며 `target/web/`에 `index.html`, `rusty-nails.js`, `rusty-nails.wasm`을
@@ -154,7 +154,7 @@ stderr에 출력되는 `evidence:` 경로는 `target/smoke-web.<임의값>/`다.
 | emcc 위치나 버전 불일치 | pin 파일과 `scripts/with-emsdk.sh emcc --version` 결과를 확인한다. 외부 SDK를 직접 source하는 대신 wrapper를 사용한다. |
 | C++ 또는 WASM 링크 실패 | `.cargo/config.toml`과 toolchain pin을 확인한다. `DEFAULT_TO_CXX`와 예외 방식·LLVM 조합을 임의로 바꾸지 않는다. |
 | WASM 404·빈 canvas | build-web을 다시 실행하고 `target/web`의 세 파일, HTTP 요청, `Module.locateFile` 이름을 확인한다. `file://`는 사용하지 않는다. |
-| `no embedded sprite sheet named ...`·`no clip named ...` | `play=example`, `clip=cycle`을 확인한다. 네이티브 파일 경로는 웹 임베드 이름이 아니다. |
+| `no embedded sprite sheet named ...`·`no animation named ...` | `play=example`, `animation=cycle`을 확인한다. 네이티브 파일 경로는 웹 임베드 이름이 아니다. |
 | `lit=0: sprite playback drew nothing` | `--play` URL 전달, 재생 draw와 코드 예제 색을 확인한다. Blank 기대값으로 바꾸지 않는다. |
 | 주소 사용 중 | 앞의 서버를 종료하거나 `PORT=0`으로 새 빈 포트를 배정한다. |
 | `missing browser`·`CHROME not executable` | headless를 지원하는 Chrome/Chromium을 준비하고 실제 경로를 지정한다. |

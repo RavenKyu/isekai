@@ -40,6 +40,20 @@ impl From<serde_json::Error> for StoreError {
 pub struct Loaded {
     pub sheet: SpriteSheet,
     pub image_path: PathBuf,
+    pub dropped_tile_animations: Vec<(u32, u32)>,
+}
+
+pub fn dropped_tile_animation_warning(cells: &[(u32, u32)]) -> Option<String> {
+    (!cells.is_empty()).then(|| {
+        format!(
+            "dropped tile animation at {}: sprites.json version 3 has no tile animation",
+            cells
+                .iter()
+                .map(|(c, r)| format!("({c}, {r})"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    })
 }
 
 pub fn sidecar_for(sheet: &Path) -> PathBuf {
@@ -57,16 +71,20 @@ pub fn image_path_is_safe(rel: &str) -> bool {
             .components()
             .all(|c| matches!(c, Component::Normal(_)))
 }
-pub fn parse(text: &str) -> Result<SpriteSheet, StoreError> {
-    let sheet: SpriteSheet = serde_json::from_str(text)?;
+/// Decodes and validates a sidecar, keeping the cells whose legacy tile animation was dropped.
+fn decode_checked(text: &str) -> Result<(SpriteSheet, Vec<(u32, u32)>), StoreError> {
+    let (sheet, dropped) = super::format::decode(text)?;
     if !image_path_is_safe(&sheet.image) {
         return Err(StoreError::UnsafeImagePath(sheet.image));
     }
     sheet.validate().map_err(StoreError::Invalid)?;
-    Ok(sheet)
+    Ok((sheet, dropped))
+}
+pub fn parse(text: &str) -> Result<SpriteSheet, StoreError> {
+    decode_checked(text).map(|(sheet, _)| sheet)
 }
 pub fn load(sidecar: &Path) -> Result<Loaded, StoreError> {
-    let sheet = parse(&fs::read_to_string(sidecar)?)?;
+    let (sheet, dropped_tile_animations) = decode_checked(&fs::read_to_string(sidecar)?)?;
     let parent = sidecar
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
@@ -81,7 +99,11 @@ pub fn load(sidecar: &Path) -> Result<Loaded, StoreError> {
         }
         Err(error) => return Err(error),
     };
-    Ok(Loaded { sheet, image_path })
+    Ok(Loaded {
+        sheet,
+        image_path,
+        dropped_tile_animations,
+    })
 }
 /// Reject existing image symlinks that escape the given directory. Directory
 /// symlinks are allowed when both paths resolve within the same directory.

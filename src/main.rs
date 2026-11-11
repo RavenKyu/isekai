@@ -14,7 +14,7 @@ use app::{App, AppResult, Flow};
 #[derive(Debug, PartialEq, Eq)]
 struct PlayRequest {
     source: String,
-    clip: Option<String>,
+    animation: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -32,12 +32,12 @@ fn split_play_args(args: Vec<String>) -> Result<Cli, String> {
             .next()
             .filter(|arg| !arg.is_empty() && !arg.starts_with("--"))
             .ok_or("--play requires a source")?;
-        let clip = if args.peek().is_some_and(|arg| !arg.starts_with("--")) {
+        let animation = if args.peek().is_some_and(|arg| !arg.starts_with("--")) {
             args.next()
         } else {
             None
         };
-        Some(PlayRequest { source, clip })
+        Some(PlayRequest { source, animation })
     } else {
         None
     };
@@ -173,7 +173,7 @@ mod cli_tests {
         Ok(cli)
     }
     #[test]
-    fn playback_precedes_smoke_and_has_optional_clip() {
+    fn playback_precedes_smoke_and_has_optional_animation() {
         for args in [
             vec!["--play"],
             vec!["--play", "--smoke-frames", "3"],
@@ -193,7 +193,7 @@ mod cli_tests {
             let play = cli.play.unwrap();
             assert_eq!(play.source, "a.json");
             assert_eq!(
-                play.clip.as_deref(),
+                play.animation.as_deref(),
                 args.contains(&"cycle").then_some("cycle")
             );
         }

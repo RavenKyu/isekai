@@ -9,7 +9,7 @@ pub mod tilemap;
 pub mod timeline;
 pub mod transform;
 pub use example::example;
-pub use format::{Clip, Sprite, SpriteSheet};
+pub use format::{Animation, Sprite, SpriteSheet};
 pub use timeline::{Mode, Timeline};
 pub use transform::Transform;
 

@@ -28,7 +28,8 @@
     const args = [];
     if (query.has('play')) {
       args.push('--play', query.get('play'));
-      if (query.has('clip')) args.push(query.get('clip'));
+      if (query.has('animation')) args.push(query.get('animation'));
+      else if (query.has('clip')) args.push(query.get('clip'));
     }
     if (smoke !== null) args.push('--smoke-frames', smoke);
     var Module = {

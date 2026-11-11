@@ -23,7 +23,7 @@ dev도 처음에는 검은 창이다. 물리 백틱 키(scancode `Grave`, 보통
 `Frame stats`에는 FPS와 프레임 시간(ms)이 나오며 값이 유효하지 않으면 `--`로 표시한다.
 `View` 메뉴의 `Frame stats`, `Dear ImGui Demo`, `Dear ImGui Metrics`는 창 상태와
 연결된 체크 항목이다. 처음에는 stats만 열려 있고 Demo와 Metrics는 닫혀 있다.
-네이티브 dev의 `Assets > Sprite Library`는 PNG 시트 편집·추출 창이다.
+네이티브 dev의 `Assets > Asset Library`는 PNG 시트 편집·추출 창이다.
 [스프라이트 사용법](sprites.md#편집기-사용)에서 가져오기·저장 순서와 Guess의 진행 표시·취소를 설명한다.
 닫기 버튼이나 메뉴로 각 창을 여닫을 수 있으며, 도구 전체를 숨겼다 열어도 각 창의 열림 상태는 유지된다.
 
@@ -65,10 +65,10 @@ GL 컨텍스트가 없으면 실패로 처리하며 검사 생략이나 성공�
 | `src/app.rs` | SDL·GL 소유, 이벤트 처리, 화면 지우기, 스모크 키 주입/도착 관측과 framebuffer 측정, 종료. |
 | `src/dev.rs` | dev 전용 renderer·platform·ImGui 소유, 모든 이벤트 전달, 백틱 토글 판정과 프레임 렌더링. |
 | `src/ui.rs` | dev 전용 메뉴바와 창 상태, FPS·프레임 시간 표시, 안전한 Demo/Metrics 창. |
-| `src/sprite/{grid,format,store,timeline,example}.rs` | 격자·v1 형식·경로/원자적 저장·재생 시간표·코드 생성 예제와 fixture. |
+| `src/sprite/{grid,format,store,timeline,example}.rs` | 격자·v3 형식(v1·v2 읽기)·경로/원자적 저장·재생 시간표·코드 생성 예제와 fixture. |
 | `src/sprite/{texture,draw,playback,embedded}.rs` | GL 텍스처·셀 단위 쿼드·네이티브/웹 재생·코드 예제 표. |
 | `src/raster.rs`, `src/raster/analysis.rs` | CPU PNG·RGBA·crop과 격자 추정·정규화·dedupe·rebuild·8방향 영역 분석. |
-| `src/ui/sprite_library/` | 네이티브 dev의 가져오기·작업 큐·격자·타일·sprite·clip·미리보기·Regions·Extract. |
+| `src/ui/asset_library/` | 네이티브 dev의 가져오기·작업 큐·격자·타일·sprite·animation·미리보기·Regions·Extract. |
 | `src/smoke.rs` | 플랫폼·feature와 무관한 인자 해석, 숨김/열림과 제한 시간 판정, 결과 한 줄 생성. |
 | `tests/smoke_native.rs` | 실제 앱 subprocess로 두 모드의 렌더링, 인자 오류, 디스플레이 실패, 일반 실행 지속을 검사. |
 | `scripts/smoke-native.sh` | 독립 Xvfb와 software GL, 최대 60초 제한으로 통합 검사와 종료 이벤트 테스트를 실행. |
@@ -108,7 +108,7 @@ FPS 문자열을 CPU에서 검사한다. 화면이 필요한 종료 이벤트와
 ignore되어 있으므로 두 스모크 명령을 이어서 실행한다.
 
 스모크 스크립트는 fixture 기반 재생 성공·실패도 함께 검사한다. 예제 PNG/JSON을 target 아래에
-복사하고 없는 사이드카·없는 clip·`../` 이미지 경로가 `rn-smoke: fail`과 비영 코드로 끝나는지 본다.
+복사하고 없는 사이드카·없는 animation·`../` 이미지 경로가 `rn-smoke: fail`과 비영 코드로 끝나는지 본다.
 SDL 종료와 창 닫기, GL 큐 검사는 SDL 초기화 스레드가 충돌하지 않도록 별도 프로세스를 쓴다.
 X11·software GL과 새 Xvfb를 강제해 기존 데스크톱 세션에 붙지 않는다.
 58초 TERM 제한과 2초 강제 정리 여유를 두어 전체 상한은 60초다.
@@ -177,7 +177,7 @@ rn-smoke: ok frames=<N> vtx=<M> lit=<K>
 - dev 모드의 `vtx=0`·`lit=0`: UI나 렌더 호출이 빠졌는지 확인한다. 비dev의 `lit>0`은
   검은 배경 외 그리기가 있다는 뜻이다. 모드를 확인하고 임계값을 낮추지 않는다.
 - `lit=0: sprite playback drew nothing`: 재생 draw와 PNG의 불투명·검정 아닌 픽셀을 확인한다.
-- `no clip named ...`·`sprite sheet has no clips`: clip 이름을 확인하거나 편집기로 프레임이 있는 clip을 작성한다.
+- `no animation named ...`·`sprite sheet has no animations`: animation 이름을 확인하거나 편집기로 프레임이 있는 animation을 작성한다.
 - `unsafe image path: ...`·`image ... must share sidecar directory ...`: PNG와 사이드카를 같은 디렉터리에 두고 image를 파일 이름 하나로 저장한다.
 - `unsupported sprites.json version ...`·JSON/범위 검증 오류: [형식 규칙](sprites.md#사이드카-형식)을 확인한다. 잘못된 메타를 자동 삭제해 열지 않는다.
 - `sheet ... exceeds GL_MAX_TEXTURE_SIZE ...`: 이미지 크기가 GL 한계를 넘는다. 시트를 작게 나누거나 지원 가능한 환경에서 연다.

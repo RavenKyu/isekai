@@ -3,7 +3,7 @@ use crate::{
     sprite::{Grid, SpriteSheet},
 };
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeSet,
     path::{Path, PathBuf},
 };
 
@@ -81,33 +81,6 @@ pub fn parse_tags(text: &str) -> Vec<String> {
 pub fn format_tags(tags: &[String]) -> String {
     tags.join(", ")
 }
-pub fn parse_props(text: &str) -> Result<BTreeMap<String, String>, String> {
-    let mut props = BTreeMap::new();
-    for (i, line) in text.lines().enumerate() {
-        if line.trim().is_empty() {
-            continue;
-        }
-        let (key, value) = line
-            .split_once('=')
-            .ok_or_else(|| format!("property line {} needs key=value", i + 1))?;
-        let key = key.trim();
-        if key.is_empty() || props.contains_key(key) {
-            return Err(format!(
-                "property line {} has an empty or duplicate key",
-                i + 1
-            ));
-        }
-        props.insert(key.into(), value.into());
-    }
-    Ok(props)
-}
-pub fn format_props(props: &BTreeMap<String, String>) -> String {
-    props
-        .iter()
-        .map(|(k, v)| format!("{k}={v}"))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
 pub fn list_assets(root: &Path) -> Result<Vec<PathBuf>, String> {
     fn visit(root: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
         if root.symlink_metadata()?.file_type().is_symlink() {
@@ -127,7 +100,7 @@ pub fn list_assets(root: &Path) -> Result<Vec<PathBuf>, String> {
         }
         Ok(())
     }
-    // A checkout without local assets (assets/splites is ignored) lists nothing.
+    // A checkout without local assets (assets/sprites is ignored) lists nothing.
     if matches!(root.symlink_metadata(), Err(e) if e.kind() == std::io::ErrorKind::NotFound) {
         return Ok(Vec::new());
     }
@@ -136,9 +109,33 @@ pub fn list_assets(root: &Path) -> Result<Vec<PathBuf>, String> {
     files.sort();
     Ok(files)
 }
+pub const OLD_OUTPUT_FOLDER_HINT: &str =
+    "Old output folder assets/splites/ found; move it to assets/sprites/";
+pub fn old_output_folder_hint(checkout: &Path) -> Option<String> {
+    checkout
+        .join("assets/splites")
+        .symlink_metadata()
+        .ok()
+        .map(|_| OLD_OUTPUT_FOLDER_HINT.into())
+}
+
 pub fn is_png(path: &Path) -> bool {
     path.extension()
         .is_some_and(|s| s.eq_ignore_ascii_case("png"))
+}
+
+pub type ReadSheet = (RgbaImage, SpriteSheet, bool, Vec<(u32, u32)>);
+pub fn read_sheet(path: &Path, key: Option<[u8; 3]>) -> Result<ReadSheet, String> {
+    let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+    let sidecar = crate::sprite::store::sidecar_for(path);
+    let (meta, dropped) = if sidecar.try_exists().map_err(|e| e.to_string())? {
+        let loaded = crate::sprite::store::load(&sidecar).map_err(|e| e.to_string())?;
+        (Some(loaded.sheet), loaded.dropped_tile_animations)
+    } else {
+        (None, Vec::new())
+    };
+    let (image, meta, dirty) = open_sheet(path, &bytes, key, meta)?;
+    Ok((image, meta, dirty || !dropped.is_empty(), dropped))
 }
 
 pub fn open_sheet(
@@ -167,7 +164,9 @@ pub fn open_sheet(
             meta.image
         ));
     }
-    meta.validate_bounds(image.width, image.height)
+    // A sidecar from disk already passed store::load's complete validation. Reload passes the
+    // in-memory metadata, which may still hold a blank sprite or an empty animation.
+    meta.validate_edit_bounds(image.width, image.height)
         .map_err(|errors| errors.join("; "))?;
     Ok((image, meta, dirty))
 }
@@ -175,6 +174,51 @@ pub fn open_sheet(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn legacy_tile_animations_open_dirty_then_save_clean() {
+        let temp = crate::test_support::TempDir::new("legacy-warning");
+        let image = temp.0.join("example.png");
+        std::fs::write(
+            &image,
+            include_bytes!("../../../tests/fixtures/example.png"),
+        )
+        .unwrap();
+        let sidecar = crate::sprite::store::sidecar_for(&image);
+        std::fs::write(
+            &sidecar,
+            include_str!("../../../tests/fixtures/tile-animation-v2.sprites.json"),
+        )
+        .unwrap();
+        let (_, sheet, dirty, dropped) = read_sheet(&image, None).unwrap();
+        assert!(dirty);
+        assert_eq!(dropped, vec![(1, 0), (2, 0)]);
+        let warning = crate::sprite::store::dropped_tile_animation_warning(&dropped).unwrap();
+        assert!(warning.contains("(1, 0)") && warning.contains("(2, 0)"));
+        crate::sprite::store::save(&sidecar, &sheet).unwrap();
+        let saved = std::fs::read_to_string(&sidecar).unwrap();
+        assert!(saved.contains("\"version\": 3"));
+        assert!(!saved.contains("\"animation\":"));
+        let (_, _, dirty, dropped) = read_sheet(&image, None).unwrap();
+        assert!(!dirty && dropped.is_empty());
+        std::fs::write(
+            &sidecar,
+            include_str!("../../../tests/fixtures/example-v2.sprites.json"),
+        )
+        .unwrap();
+        assert!(!read_sheet(&image, None).unwrap().2);
+    }
+    #[test]
+    fn old_folder_hint_detects_existing_path() {
+        let temp = crate::test_support::TempDir::new("old-output-hint");
+        assert_eq!(old_output_folder_hint(&temp.0), None);
+        std::fs::create_dir_all(temp.0.join("assets/splites")).unwrap();
+        assert!(
+            old_output_folder_hint(&temp.0)
+                .unwrap()
+                .contains("assets/sprites/")
+        );
+    }
+
     #[test]
     fn picking_selection_guess_and_text_roundtrips() {
         let grid = Grid {
@@ -210,10 +254,6 @@ mod tests {
             parse_tags(&format_tags(&parse_tags("a, b ,c"))),
             vec!["a", "b", "c"]
         );
-        let props = parse_props("k=v\nx=1").unwrap();
-        assert_eq!(format_props(&props), "k=v\nx=1");
-        assert!(parse_props("broken").is_err());
-        assert!(parse_props("x=1\nx=2").is_err());
     }
     #[test]
     fn import_requires_png_matching_valid_sidecar() {

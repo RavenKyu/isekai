@@ -18,6 +18,25 @@ fn timestamp() -> String {
     }
 }
 
+pub(super) fn format_local(secs: Option<u64>) -> String {
+    let Some(ticks) = secs
+        .and_then(|s| s.checked_mul(1_000_000_000))
+        .and_then(|n| i64::try_from(n).ok())
+    else {
+        return "-".into();
+    };
+    let mut date = sdl3::sys::time::SDL_DateTime::default();
+    // SAFETY: date points to writable storage and the SDL time conversion is thread safe.
+    if unsafe { sdl3::sys::time::SDL_TimeToDateTime(ticks, &mut date, true) } {
+        format!(
+            "{:04}-{:02}-{:02} {:02}:{:02}",
+            date.year, date.month, date.day, date.hour, date.minute
+        )
+    } else {
+        "-".into()
+    }
+}
+
 #[derive(Clone, Default, PartialEq, Debug)]
 pub struct SheetLog {
     lines: Vec<String>,
@@ -362,20 +381,20 @@ pub(super) mod tests {
     #[test]
     fn clear_ends_a_run_and_each_log_keeps_its_own_run() {
         let mut log = SheetLog::default();
-        append_repeat(&mut log, "Clip updated");
-        append_repeat(&mut log, "Clip updated");
+        append_repeat(&mut log, "Animation updated");
+        append_repeat(&mut log, "Animation updated");
         log.clear();
-        append_repeat(&mut log, "Clip updated");
+        append_repeat(&mut log, "Animation updated");
         assert_eq!(log.len(), 1);
-        assert!(log[0].ends_with(" Clip updated"), "{:?}", log[0]);
+        assert!(log[0].ends_with(" Animation updated"), "{:?}", log[0]);
         let mut other = SheetLog::default();
         append(&mut other, "Saved other".into());
-        append_repeat(&mut other, "Clip updated");
-        append_repeat(&mut log, "Clip updated");
-        assert!(log[0].ends_with(" Clip updated (x2)"), "{:?}", log[0]);
+        append_repeat(&mut other, "Animation updated");
+        append_repeat(&mut log, "Animation updated");
+        assert!(log[0].ends_with(" Animation updated (x2)"), "{:?}", log[0]);
         assert_eq!(other.len(), 2);
         assert!(other[0].ends_with(" Saved other"));
-        assert!(other[1].ends_with(" Clip updated"));
+        assert!(other[1].ends_with(" Animation updated"));
     }
 
     #[test]
