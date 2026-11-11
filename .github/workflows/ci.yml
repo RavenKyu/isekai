@@ -190,6 +190,10 @@ jobs:
           key: ${{ runner.os }}-${{ runner.arch }}-wasm-bindgen-${{ hashFiles('Cargo.lock') }}
       - name: Select repository toolchain
         run: rustup show active-toolchain
+      - name: Introduce CLI version skew for acceptance mutation
+        run: |
+          bindgen=$(scripts/setup-wasm-bindgen.sh)
+          printf '#!/bin/sh\nprintf "wasm-bindgen 0.0.1\\n"\n' > "$bindgen"
       - name: Build web app (dev)
         run: scripts/build-web-isekai.sh --dev
       - name: Run web smoke (dev)
