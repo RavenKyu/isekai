@@ -25,7 +25,12 @@ pub fn failure(reason: &str) {
     let _ = log().set_attribute("data-error", "true");
 }
 pub fn ready() {
-    let _ = log().set_attribute("data-ready", "true");
+    thread_local! { static READY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
+    READY.with(|ready| {
+        if !ready.replace(true) {
+            let _ = log().set_attribute("data-ready", "true");
+        }
+    });
 }
 fn params() -> web_sys::UrlSearchParams {
     web_sys::UrlSearchParams::new_with_str(&web_sys::window().unwrap().location().search().unwrap())

@@ -52,3 +52,10 @@ fn native_focus_snapshot() {
         "focus-blank"
     });
 }
+
+#[cfg(feature = "dev")]
+#[test]
+#[ignore = "requires real focus-out synthetic releases; run scripts/smoke-native-isekai.sh --dev"]
+fn synthetic_releases_reach_egui() {
+    run("egui-focus-release");
+}

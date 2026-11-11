@@ -371,7 +371,18 @@ impl ApplicationHandler<UserEvent> for App {
                     self.probe.key(&key, before != r.dev.tools.visible);
                 }
             }
-            r.dev.on_window_event(&r.window, &event);
+            let repaint = r.dev.on_window_event(&r.window, &event);
+            #[cfg(not(target_arch = "wasm32"))]
+            if self.smoke.is_some()
+                && repaint
+                && matches!(&event, WindowEvent::KeyboardInput {
+                event, is_synthetic:true, ..
+            } if !event.state.is_pressed())
+            {
+                eprintln!("isekai-smoke-stage: egui-synthetic-release");
+            }
+            #[cfg(target_arch = "wasm32")]
+            let _ = repaint;
         }
         match event {
             WindowEvent::Focused(focused) => {

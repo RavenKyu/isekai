@@ -63,3 +63,11 @@ if [[ ${1:-} == --no-webgpu ]]; then no_webgpu=1; fi
 python3 "$script_dir/smoke-web-browser.py" "$browser" "${url}${query}" "$scratch" isekai-log isekai-smoke: isekai-canvas "$no_webgpu" \
     || fail "Chrome failed; evidence: $scratch"
 python3 "$script_dir/smoke-web-check.py" isekai "$scratch" "$requested_mode"
+
+# A normal web app keeps rendering: readiness must not mutate the DOM each frame.
+if [[ "$requested_mode" == blank ]]; then
+    mkdir -p -- "$scratch/ready-once"
+    python3 "$script_dir/smoke-web-browser.py" "$browser" "${url}?backend=webgl2" \
+        "$scratch/ready-once" isekai-log isekai-smoke: isekai-canvas 0 1 \
+        || fail "readiness was not set exactly once; evidence: $scratch/ready-once"
+fi

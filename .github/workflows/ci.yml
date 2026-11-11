@@ -135,6 +135,8 @@ jobs:
         run: rustup show active-toolchain
       - name: Check shell scripts
         run: shellcheck scripts/*.sh tests/shell/*.sh
+      - name: Check render dependency boundary
+        run: tests/shell/render_dependencies_test.sh
       - name: Test wasm-bindgen installer
         run: tests/shell/wasm_bindgen_test.sh
       - name: Check formatting

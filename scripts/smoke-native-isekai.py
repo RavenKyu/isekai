@@ -106,6 +106,21 @@ def input_focus_snapshot():
         session.close()
 
 
+if mode == 'egui-focus-release':
+    session = Session(['--smoke-frames', '100000'])
+    try:
+        session.focus()
+        subprocess.run(['xdotool', 'keydown', 'grave'], check=True)
+        session.wait_stage('isekai-smoke-stage: key-received')
+        subprocess.run(['xdotool', 'windowfocus', '1'], check=True)
+        session.wait_stage('isekai-smoke-stage: egui-synthetic-release')
+        print('synthetic release reached egui: ok')
+    finally:
+        subprocess.run(['xdotool', 'keyup', 'grave'], check=True)
+        session.close()
+    sys.exit(0)
+
+
 if mode.startswith('focus-'):
     input_focus_snapshot()
     sys.exit(0)

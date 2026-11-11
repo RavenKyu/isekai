@@ -34,8 +34,8 @@ impl DevShell {
             self.tools.visible = !self.tools.visible;
         }
     }
-    pub fn on_window_event(&mut self, window: &Window, event: &WindowEvent) {
-        let _ = self.state.on_window_event(window, event);
+    pub fn on_window_event(&mut self, window: &Window, event: &WindowEvent) -> bool {
+        self.state.on_window_event(window, event).repaint
     }
     pub fn paint(
         &mut self,

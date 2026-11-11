@@ -10,7 +10,7 @@ import sys
 import time
 
 
-def main(browser, url, directory, log_id="rn-log", prefix="rn-smoke:", canvas_id="canvas", no_webgpu="0"):
+def main(browser, url, directory, log_id="rn-log", prefix="rn-smoke:", canvas_id="canvas", no_webgpu="0", ready_once="0"):
     directory = pathlib.Path(directory)
     # Chrome reads FD 3 and writes FD 4. The tiny exec wrapper maps our ordinary
     # subprocess pipes to those descriptors without a TCP debugging listener.
@@ -74,6 +74,13 @@ def main(browser, url, directory, log_id="rn-log", prefix="rn-smoke:", canvas_id
             session = call('Target.attachToTarget', {'targetId': target, 'flatten': True})['sessionId']
             for method in ('Page.enable', 'Runtime.enable', 'Network.enable'):
                 call(method, session=session)
+            if ready_once == '1':
+                call('Page.addScriptToEvaluateOnNewDocument', {'source': """
+                    window.__isekaiReadyWrites = 0;
+                    new MutationObserver(records => {
+                        window.__isekaiReadyWrites += records.filter(r => r.target.id === 'isekai-log').length;
+                    }).observe(document, {subtree:true, attributes:true, attributeFilter:['data-ready']});
+                """}, session)
             call('Page.navigate', {'url': url}, session)
             # postRun follows App::new and RAF registration. Two RAF callbacks
             # ensure that at least one actual hidden app frame precedes the key.
@@ -89,7 +96,7 @@ def main(browser, url, directory, log_id="rn-log", prefix="rn-smoke:", canvas_id
                 if ready or errors or prefix in text:
                     break
                 time.sleep(0.05)
-            if ready and not errors:
+            if ready and not errors and ready_once != '1':
                 call('Runtime.evaluate', {
                     'expression': 'new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))',
                     'awaitPromise': True,
@@ -103,7 +110,7 @@ def main(browser, url, directory, log_id="rn-log", prefix="rn-smoke:", canvas_id
             # CLI --dump-dom can run before RAF callbacks, even when its later
             # screenshot shows completed frames. Wait for the actual app report.
             line = ''
-            while time.monotonic() < poll_deadline:
+            while ready_once != '1' and time.monotonic() < poll_deadline:
                 result = call('Runtime.evaluate', {
                     'expression': "document.getElementById('rn-log')?.textContent || ''".replace("rn-log", log_id),
                     'returnByValue': True,
@@ -112,6 +119,16 @@ def main(browser, url, directory, log_id="rn-log", prefix="rn-smoke:", canvas_id
                 if errors or prefix in line:
                     break
                 time.sleep(0.05)
+            if ready_once == '1' and ready and not errors:
+                result = call('Runtime.evaluate', {
+                    'expression': 'new Promise(resolve => {let frames=10; function tick(){if(--frames)requestAnimationFrame(tick);else resolve(window.__isekaiReadyWrites);}requestAnimationFrame(tick);})',
+                    'awaitPromise': True, 'returnByValue': True,
+                }, session)
+                writes = result.get('result', {}).get('value')
+                (directory / 'ready.json').write_text(json.dumps({'attribute_writes': writes}))
+                if writes != 1:
+                    errors.append('expected one ready attribute write, got ' + str(writes))
+                line = 'ready-once'
             dom = call('Runtime.evaluate', {'expression': 'document.documentElement.outerHTML',
                        'returnByValue': True}, session)['result']['value']
             (directory / 'dom.html').write_text(dom)

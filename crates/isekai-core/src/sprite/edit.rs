@@ -114,6 +114,29 @@ mod tests {
     use super::*;
     use crate::sprite::format::Shape;
     #[test]
+    fn rename_and_remove_preserve_reference_and_name_guards() {
+        let (_, mut sheet) = crate::sprite::example();
+        let before = sheet.clone();
+        assert!(sheet.rename_sprite(1, "b", 1, (64, 16)).is_err());
+        assert_eq!(sheet, before, "duplicate names must not change the sheet");
+        let error = sheet.remove_sprite(1).unwrap_err();
+        assert!(error.contains("cycle"), "{error}");
+        assert_eq!(sheet, before, "referenced sprites must not be removed");
+        sheet.rename_sprite(1, "renamed", 1, (64, 16)).unwrap();
+        assert_eq!(sheet.animations[0].frames[0].sprite_id, 1);
+        assert!(sheet.remove_sprite(1).unwrap_err().contains("\"renamed\""));
+        assert!(sheet.remove_sprite(999).is_err());
+        sheet.rename_sprite(1, "a", 1, (64, 16)).unwrap();
+        sheet.sprites[0].modified = None;
+        assert_eq!(
+            crate::sprite::store::to_json(&sheet),
+            crate::sprite::example::EXAMPLE_JSON
+        );
+        sheet.animations.clear();
+        sheet.remove_sprite(1).unwrap();
+        assert_eq!(sheet.sprites.len(), 3);
+    }
+    #[test]
     fn exhausted_id_space_rejects_creation_without_changing_the_sheet() {
         let (_, mut sheet) = crate::sprite::example();
         sheet.next_id = i64::MAX as u64 - 1;
