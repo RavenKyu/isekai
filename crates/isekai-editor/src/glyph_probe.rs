@@ -19,14 +19,24 @@ impl GlyphProbe {
             Order::Foreground,
             egui::Id::unique("glyph probe"),
         ));
+        // Snap the grid in physical pixels before converting to points. At a
+        // fractional display scale, equal point offsets could shift identical
+        // tofu masks by a pixel and make them look different to the checker.
+        let pixels_per_point = ctx.pixels_per_point();
+        let cell = (CELL * pixels_per_point).round();
+        let origin = pos2(
+            (ORIGIN.x * pixels_per_point).round(),
+            (ORIGIN.y * pixels_per_point).round(),
+        );
         for (row, family) in [FontFamily::Proportional, FontFamily::Monospace]
             .into_iter()
             .enumerate()
         {
             for (column, c) in SAMPLES.into_iter().enumerate() {
-                let min = ORIGIN + vec2(column as f32 * CELL, row as f32 * CELL);
+                let min =
+                    (origin + vec2(column as f32 * cell, row as f32 * cell)) / pixels_per_point;
                 painter.rect_filled(
-                    Rect::from_min_size(min, vec2(CELL, CELL)),
+                    Rect::from_min_size(min, vec2(cell, cell) / pixels_per_point),
                     0.,
                     Color32::BLACK,
                 );
@@ -39,9 +49,7 @@ impl GlyphProbe {
                 );
             }
         }
-        Self {
-            pixels_per_point: ctx.pixels_per_point(),
-        }
+        Self { pixels_per_point }
     }
 
     pub fn check(&self, pixels: &[u8], width: u32, height: u32) -> Result<(), String> {
