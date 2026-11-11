@@ -58,7 +58,7 @@ pub fn window(event_loop: &ActiveEventLoop) -> Result<Arc<Window>, String> {
 pub async fn gpu(window: Arc<Window>) -> Result<(Gpu, wgpu::Surface<'static>), String> {
     let backend = params().get("backend").unwrap_or("auto".into());
     let backends: &[wgpu::Backends] = match backend.as_str() {
-        "auto" => &[wgpu::Backends::BROWSER_WEBGPU, wgpu::Backends::GL],
+        "auto" => &[wgpu::Backends::BROWSER_WEBGPU],
         "webgpu" => &[wgpu::Backends::BROWSER_WEBGPU],
         "webgl2" => &[wgpu::Backends::GL],
         _ => return Err(format!("unknown backend: {backend}")),
