@@ -33,7 +33,7 @@ pub enum Step {
 impl Report {
     pub fn line(&self, backend: &str) -> String {
         format!(
-            "isekai-smoke: ok frames={} vtx={} lit={} backend={backend}",
+            "broken-smoke: ok frames={} vtx={} lit={} backend={backend}",
             self.frames, self.vtx, self.lit
         )
     }
@@ -221,7 +221,7 @@ mod tests {
         };
         assert_eq!(
             report.line("vulkan"),
-            "isekai-smoke: ok frames=3 vtx=92 lit=120 backend=vulkan"
+            "broken-smoke: ok frames=3 vtx=92 lit=120 backend=vulkan"
         );
         assert_eq!(
             failure("bad\n context\tstate"),
@@ -290,7 +290,7 @@ mod tests {
                 };
                 assert_eq!(
                     report.line("vulkan"),
-                    "isekai-smoke: ok frames=1 vtx=0 lit=0 backend=vulkan"
+                    "broken-smoke: ok frames=1 vtx=0 lit=0 backend=vulkan"
                 );
             } else {
                 assert!(result.is_err());
