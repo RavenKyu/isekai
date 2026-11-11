@@ -7,7 +7,10 @@ use super::{
 use crate::raster::RgbaImage;
 use std::path::{Path, PathBuf};
 
-pub const EXAMPLE_JSON: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/fixtures/example.sprites.json"));
+pub const EXAMPLE_JSON: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../tests/fixtures/example.sprites.json"
+));
 pub fn example() -> (RgbaImage, SpriteSheet) {
     let mut image = RgbaImage::new(64, 16);
     let mut sheet = SpriteSheet::new_for("example.png", Grid::DEFAULT);
@@ -55,8 +58,10 @@ pub fn example() -> (RgbaImage, SpriteSheet) {
     });
     (image, sheet)
 }
-pub const EXAMPLE_TURNED_JSON: &str =
-    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/fixtures/example-turned.sprites.json"));
+pub const EXAMPLE_TURNED_JSON: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../tests/fixtures/example-turned.sprites.json"
+));
 pub fn example_turned() -> (RgbaImage, SpriteSheet) {
     let (image, mut sheet) = example();
     sheet.next_id = 3;
@@ -121,7 +126,10 @@ mod tests {
         assert_eq!(store::to_json(&sheet), EXAMPLE_JSON);
         assert_eq!(
             image.to_png().unwrap(),
-            include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/fixtures/example.png"))
+            include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../tests/fixtures/example.png"
+            ))
         );
         assert_eq!(store::parse(EXAMPLE_JSON).unwrap(), sheet);
         sheet.validate_bounds(64, 16).unwrap();

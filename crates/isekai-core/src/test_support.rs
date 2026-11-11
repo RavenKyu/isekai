@@ -35,4 +35,3 @@ fn temp_dirs_are_unique_and_removed() {
     drop(first);
     assert!(!path.exists());
 }
-

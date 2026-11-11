@@ -980,9 +980,11 @@ mod version_tests {
     use super::super::{example, store};
     #[test]
     fn legacy_reads_always_write_v3_and_transform_fields_are_strict() {
-        let mut value: serde_json::Value =
-            serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/fixtures/example-v2.sprites.json")))
-                .unwrap();
+        let mut value: serde_json::Value = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/example-v2.sprites.json"
+        )))
+        .unwrap();
         value["version"] = 1.into();
         let legacy = store::parse(&value.to_string()).unwrap();
         assert_eq!(legacy.version, 1);
@@ -1094,7 +1096,11 @@ mod v3_contract_tests {
         serde_json::from_str(example::EXAMPLE_JSON).unwrap()
     }
     fn v2() -> serde_json::Value {
-        serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/fixtures/example-v2.sprites.json"))).unwrap()
+        serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/example-v2.sprites.json"
+        )))
+        .unwrap()
     }
     #[test]
     fn legacy_ids_are_deterministic_and_v2_is_golden() {
@@ -1261,7 +1267,10 @@ mod v3_contract_tests {
     }
     #[test]
     fn legacy_tile_animations_are_dropped_and_reported() {
-        let text = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/fixtures/tile-animation-v2.sprites.json"));
+        let text = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/tile-animation-v2.sprites.json"
+        ));
         let (sheet, cells) = decode(text).unwrap();
         sheet.validate_bounds(64, 16).unwrap();
         assert_eq!(cells, vec![(1, 0), (2, 0)]);
