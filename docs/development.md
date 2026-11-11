@@ -43,8 +43,13 @@ scripts/smoke-native-isekai.sh --dev
 | 비dev 재생 | 0 | 양수 |
 | dev | 양수 | 양수 |
 
-첫 숨김 프레임 뒤 stderr의 `isekai-smoke: ready`를 본 하네스가 창에 포커스를 주고
-xdotool XTEST로 실제 백틱 눌림·반복·뗌을 보낸다. 비dev도 프로브가 도착해야 센다.
+하네스는 `window-mapped` 신호 뒤 창 안으로 포인터를 옮기고 포커스를 준다.
+winit의 Focused(true) 처리와 첫 프레임 표시 뒤 stderr의 `isekai-smoke: ready`가 나온다.
+그 신호 뒤 xdotool XTEST로 실제 백틱 눌림·뗌 한 번을 보낸다. 별도 장기 입력 검사는
+자동 반복을 켠 Xvfb에서 약 800ms 동안 키를 유지하며 repeat=true 도착·토글 1회·해제를
+검사한다. `isekai-smoke-input:`은 stderr에 presses/repeats/releases/toggles를 기록한다.
+포커스 때 winit이 만드는 합성 키 스냅샷은 새 눌림으로 세지 않으며 egui에는 전달한다.
+창 생성·포커스·첫 프레임·키·토글 단계 진단은 스모크 모드에서만 stderr로 남는다. 비dev도 프로브가 도착해야 센다.
 키 미도착 또는 dev 미열림은 5초 제한이며 디스플레이·어댑터가 없으면 실패한다.
 네이티브 스모크는 별도 Xvfb, `WGPU_BACKEND=vulkan`,
 `VK_LOADER_DRIVERS_SELECT='*lvp*'`로 lavapipe를 고정하고 전체 60초 제한을 둔다.
