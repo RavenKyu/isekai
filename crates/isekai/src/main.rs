@@ -11,8 +11,15 @@ use clap::Parser;
 fn main() -> std::process::ExitCode {
     let args: Vec<_> = std::env::args().collect();
     let smoking = args.iter().any(|s| s == "--smoke-frames");
+    let parsed = cli::Cli::try_parse_from(&args);
+    if let Err(error) = &parsed
+        && error.exit_code() == 0
+    {
+        let _ = error.print();
+        return std::process::ExitCode::SUCCESS;
+    }
     let result = (|| {
-        let cli = cli::Cli::try_parse_from(&args).map_err(|e| e.to_string())?;
+        let cli = parsed.map_err(|e| e.to_string())?;
         let smoke = cli.smoke()?;
         let event_loop = winit::event_loop::EventLoop::<app::UserEvent>::with_user_event()
             .build()

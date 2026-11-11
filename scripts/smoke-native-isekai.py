@@ -132,6 +132,9 @@ if short_only:
     print('dev three-frame smoke: ok')
     sys.exit(0)
 ok(['play', 'tests/fixtures/example.sprites.json', 'cycle', '--smoke-frames', '3'], True)
+for help_arg in ('--help', '--version'):
+    code, stdout, stderr = run([help_arg], False)
+    assert code == 0 and stdout.strip() and not stderr, (code, stdout, stderr)
 for args in [
     ['play', 'missing.json', '--smoke-frames', '1'],
     ['play', 'tests/fixtures/example.sprites.json', 'missing', '--smoke-frames', '1'],
