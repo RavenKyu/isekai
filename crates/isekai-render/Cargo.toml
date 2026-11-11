@@ -1,0 +1,5 @@
+[package]
+name = "isekai-render"
+version = "0.5.0"
+edition.workspace = true
+rust-version.workspace = true

@@ -65,9 +65,9 @@ GL 컨텍스트가 없으면 실패로 처리하며 검사 생략이나 성공�
 | `src/app.rs` | SDL·GL 소유, 이벤트 처리, 화면 지우기, 스모크 키 주입/도착 관측과 framebuffer 측정, 종료. |
 | `src/dev.rs` | dev 전용 renderer·platform·ImGui 소유, 모든 이벤트 전달, 백틱 토글 판정과 프레임 렌더링. |
 | `src/ui.rs` | dev 전용 메뉴바와 창 상태, FPS·프레임 시간 표시, 안전한 Demo/Metrics 창. |
-| `src/sprite/{grid,format,store,timeline,example}.rs` | 격자·v3 형식(v1·v2 읽기)·경로/원자적 저장·재생 시간표·코드 생성 예제와 fixture. |
+| `crates/isekai-core/src/sprite/{grid,format,store,timeline,example}.rs` | 격자·v3 형식(v1·v2 읽기)·경로/원자적 저장·재생 시간표·코드 생성 예제와 fixture. |
 | `src/sprite/{texture,draw,playback,embedded}.rs` | GL 텍스처·셀 단위 쿼드·네이티브/웹 재생·코드 예제 표. |
-| `src/raster.rs`, `src/raster/analysis.rs` | CPU PNG·RGBA·crop과 격자 추정·정규화·dedupe·rebuild·8방향 영역 분석. |
+| `crates/isekai-core/src/raster.rs`, `crates/isekai-core/src/raster/analysis.rs` | CPU PNG·RGBA·crop과 격자 추정·정규화·dedupe·rebuild·8방향 영역 분석. |
 | `src/ui/asset_library/` | 네이티브 dev의 가져오기·작업 큐·격자·타일·sprite·animation·미리보기·Regions·Extract. |
 | `src/smoke.rs` | 플랫폼·feature와 무관한 인자 해석, 숨김/열림과 제한 시간 판정, 결과 한 줄 생성. |
 | `tests/smoke_native.rs` | 실제 앱 subprocess로 두 모드의 렌더링, 인자 오류, 디스플레이 실패, 일반 실행 지속을 검사. |

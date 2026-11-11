@@ -20,7 +20,7 @@ for target in host wasm32-unknown-emscripten; do
     if [[ "$target" != host ]]; then
         target_args+=(--target "$target")
     fi
-    graph=$(cargo tree --locked -e normal,build --prefix none "${target_args[@]}") \
+    graph=$(cargo tree -p rusty-nails --locked -e normal,build --prefix none "${target_args[@]}") \
         || fail "cannot inspect non-dev graph ($target)"
     # Match package names at line start; the root line carries the checkout path.
     if grep -q '^dear-imgui' <<<"$graph"; then
@@ -29,7 +29,7 @@ for target in host wasm32-unknown-emscripten; do
     if grep -q '^rfd ' <<<"$graph"; then
         fail "rfd dependency in non-dev graph ($target)"
     fi
-    graph=$(cargo tree --locked -e normal,build --prefix none "${target_args[@]}" --features dev) \
+    graph=$(cargo tree -p rusty-nails --locked -e normal,build --prefix none "${target_args[@]}" --features dev) \
         || fail "cannot inspect dev graph ($target)"
     if ! grep -q '^dear-imgui-rs v' <<<"$graph"; then
         fail "positive control missing dear-imgui-rs ($target)"
@@ -43,7 +43,7 @@ for target in host wasm32-unknown-emscripten; do
     fi
 done
 # Cargo's artifact message honors target configuration and CARGO_TARGET_DIR.
-artifacts=$(cargo build --locked --bin rusty-nails --message-format=json "${args[@]}") \
+artifacts=$(cargo build -p rusty-nails --locked --bin rusty-nails --message-format=json "${args[@]}") \
     || fail 'non-dev build failed'
 executable=$(python3 -c '
 import json,sys

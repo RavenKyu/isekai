@@ -45,13 +45,13 @@ jobs:
       - name: Check formatting
         run: cargo fmt --check
       - name: Check Rust lints (non-dev)
-        run: cargo clippy --locked --all-targets -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - name: Check Rust lints (dev)
-        run: cargo clippy --locked --all-targets --features dev -- -D warnings
+        run: cargo clippy --locked -p rusty-nails --all-targets --features dev -- -D warnings
       - name: Run unit tests (non-dev)
-        run: cargo test --locked
+        run: cargo test --locked --workspace
       - name: Run unit tests (dev)
-        run: cargo test --locked --features dev
+        run: cargo test --locked -p rusty-nails --features dev
       - name: Check non-dev builds exclude imgui
         run: scripts/check-no-imgui.sh
       - name: Run native smoke (non-dev)

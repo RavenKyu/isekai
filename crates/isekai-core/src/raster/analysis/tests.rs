@@ -403,7 +403,8 @@ fn local_assets_report() {
         return;
     }
     // The ignored assets live in the primary checkout; a worktree is <root>/.worktrees/<name>.
-    let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent().unwrap().parent().unwrap();
     let root = match manifest.parent() {
         Some(parent) if parent.ends_with(".worktrees") => parent.parent().unwrap(),
         _ => manifest,

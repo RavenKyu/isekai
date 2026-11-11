@@ -221,6 +221,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "isekai"
+version = "0.5.0"
+
+[[package]]
+name = "isekai-core"
+version = "0.5.0"
+dependencies = [
+ "png",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "isekai-editor"
+version = "0.5.0"
+
+[[package]]
+name = "isekai-render"
+version = "0.5.0"
+
+[[package]]
 name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -528,6 +549,7 @@ dependencies = [
  "dear-imgui-rs",
  "dear-imgui-sdl3",
  "glow",
+ "isekai-core",
  "png",
  "rfd",
  "sdl3",
